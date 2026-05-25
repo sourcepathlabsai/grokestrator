@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+target/
+
+# Build outputs
+dist/
+build/
+out/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Misc
+*.bak
