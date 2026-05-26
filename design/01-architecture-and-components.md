@@ -1,5 +1,21 @@
 # Grokestrator — Architecture and Components (Phase 1)
 
+> **⚠️ HISTORICAL / SUPERSEDED**
+>
+> This document describes the original Tauri 2 + Rust backend + Svelte frontend architecture that was evaluated early in the project.
+>
+> After the painful Tauri/Rust debugging experience and a clear-eyed assessment of the real requirements (true iOS client with voice, powerful home Mac as always-on server with direct process management, seamless Tailscale multi-device use, hybrid Mac app), the project pivoted to **native Swift + SwiftUI**.
+>
+> - Mac app = hybrid (client UI + server owning Grok instances, persistence, and client coordination).
+> - iOS app = client only.
+> - GrokestratorCore (Swift Package) now contains the shared models, `GrokestratorProtocol` control plane, persistence, and session types.
+>
+> See `PROJECT_STATE.md` (current) and `06-project-structure.md` for the actual architecture.
+>
+> The body below is retained for historical context only.
+
+---
+
 ## Overview
 
 This document describes the high-level architecture and major components for the initial Mac-first version of Grokestrator.

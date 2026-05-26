@@ -1,5 +1,26 @@
 # Grokestrator — Technology and Build Strategy
 
+> **⚠️ HISTORICAL / SUPERSEDED**
+>
+> This document contains the original technology evaluation that locked in **Tauri 2 + Rust backend + Svelte**.
+>
+> That direction was abandoned after:
+> - Extended painful debugging (manifest-path fights, PATH pollution from ~/.grok/bin, missing Rust, tauri.conf.json schema battles, "just dev" watcher failures).
+> - Honest assessment that a local stdio + Tauri model made the actual desired use case (iPhone client with voice while driving + powerful stationary dev Mac as the real server + seamless Tailscale experience across devices) impractical or impossible.
+>
+> **Current direction (locked after the pivot)**: Pure native Swift + SwiftUI.
+> - Single Xcode workspace.
+> - `GrokestratorCore` Swift Package (already implemented — see commit `cdb9a24` on `feat/initial-core-package-structure`).
+> - `GrokestratorMac`: hybrid client + server app (direct `Process` management of `grok` instances, auto-restart, no tmux in v1).
+> - `GrokestratoriOS`: client-only.
+> - Tailscale for all client ↔ server connectivity.
+>
+> See `PROJECT_STATE.md` for the live snapshot and rationale.
+>
+> The evaluation table and "Recommended Direction" sections below are retained purely for archaeology.
+
+---
+
 ## Overview
 
 This document captures the technology and tooling strategy for Grokestrator. It reflects the current understanding of project goals, constraints, and priorities as of May 2026.
