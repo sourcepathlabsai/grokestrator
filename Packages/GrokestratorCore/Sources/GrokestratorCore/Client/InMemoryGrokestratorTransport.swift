@@ -17,7 +17,7 @@ import Foundation
 /// ```
 public actor InMemoryGrokestratorTransport: GrokestratorClientTransport {
 
-    private var eventHandler: (@Sendable (GrokestratorEvent, UUID) -> Void)?
+    private var eventHandler: (@Sendable (GrokestratorEvent, UUID) async -> Void)?
 
     /// Optional handler that is invoked when a request is sent.
     /// The handler can return events that will be immediately delivered back
@@ -37,12 +37,12 @@ public actor InMemoryGrokestratorTransport: GrokestratorClientTransport {
         if let handler = requestHandler {
             let events = await handler(request, serverID)
             for event in events {
-                simulateIncomingEvent(event, from: serverID)
+                await simulateIncomingEvent(event, from: serverID)
             }
         }
     }
 
-    public func setEventHandler(_ handler: @escaping @Sendable (GrokestratorEvent, UUID) -> Void) {
+    public func setEventHandler(_ handler: @escaping @Sendable (GrokestratorEvent, UUID) async -> Void) {
         self.eventHandler = handler
     }
 
@@ -56,8 +56,9 @@ public actor InMemoryGrokestratorTransport: GrokestratorClientTransport {
 
     /// Manually simulates an event arriving from a server.
     /// Useful when you want full control instead of using the request handler.
-    public func simulateIncomingEvent(_ event: GrokestratorEvent, from serverID: UUID) {
-        eventHandler?(event, serverID)
+    /// Awaits full processing of the event so callers get deterministic ordering.
+    public func simulateIncomingEvent(_ event: GrokestratorEvent, from serverID: UUID) async {
+        await eventHandler?(event, serverID)
     }
 
     /// Clears all recorded state (useful between tests).
@@ -66,4 +67,3 @@ public actor InMemoryGrokestratorTransport: GrokestratorClientTransport {
         requestHandler = nil
     }
 }
-```

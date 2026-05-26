@@ -25,14 +25,6 @@ public actor GrokBuildManager {
         return updated
     }
 
-    /// High-level entry point for sending a prompt to an instance.
-    /// This is the main method most Mac app code should use.
-    /// Returns a stream of clean ConversationUpdate values — the caller never sees ACPEvent or protocol details.
-    public func sendPrompt(to instanceID: UUID, prompt: String) async throws -> AsyncStream<ConversationUpdate> {
-        let convo = try await conversation(for: instanceID)
-        return try await convo.sendPrompt(prompt)
-    }
-
     public func stopInstance(id: UUID) async {
         await server.stopInstance(id: id)
         if var inst = instanceStates[id] {
@@ -121,11 +113,6 @@ public actor GrokBuildManager {
 
         activeConversations[instanceID] = convo
         return convo
-    }
-
-    /// Quick access to conversation history for any running instance (without holding the conversation object).
-    public func history(for instanceID: UUID) async -> [AgentTurn]? {
-        await activeConversations[instanceID]?.getHistory()
     }
 
     public func flattenedHistory(for instanceID: UUID) async -> [AgentMessage]? {
