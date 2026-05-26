@@ -97,6 +97,8 @@ public actor GrokBuildInstanceLauncher {
         stderrHandlers.removeValue(forKey: id)
     }
 
+    private var exitHandlers: [UUID: (UUID, Int32) -> Void] = [:]
+
     private func handleProcessExit(_ id: UUID, exitCode: Int32) async {
         runningProcesses.removeValue(forKey: id)
         stdoutHandlers[id]?.finish()
@@ -104,8 +106,21 @@ public actor GrokBuildInstanceLauncher {
         stdoutHandlers.removeValue(forKey: id)
         stderrHandlers.removeValue(forKey: id)
 
-        // TODO: Notify higher layers (ServerState, etc.) that the instance died
+        if let handler = exitHandlers[id] {
+            handler(id, exitCode)
+        }
+
         print("Grok Build instance \(id) exited with code \(exitCode)")
+    }
+
+    /// Register to be notified when a specific instance's process dies.
+    public func onInstanceDied(id: UUID, handler: @escaping (UUID, Int32) -> Void) {
+        exitHandlers[id] = handler
+    }
+
+    /// Legacy registration (kept for compatibility).
+    public func registerExitHandler(for id: UUID, handler: @escaping (UUID, Int32) -> Void) {
+        exitHandlers[id] = handler
     }
 }
 

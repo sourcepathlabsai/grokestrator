@@ -11,7 +11,7 @@ Update this file when any of the following change:
 
 ---
 
-## Current Position (2026-05-26)
+## Current Position (2026-06-04)
 
 **Grokestrator** is a native macOS + iOS application (Swift + SwiftUI) that acts as a high-quality control plane for orchestrating multiple Grok Build agents across devices.
 
@@ -22,7 +22,7 @@ Update this file when any of the following change:
 
 **iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
 
-**Current focus**: Core foundation complete. Moving to Mac hybrid app target + actual server process management.
+**Current focus**: Grok Build communication layer (black box) on the Mac. Core foundation complete. Mac hybrid app + real `grok` process management in progress.
 
 The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
@@ -36,19 +36,30 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - File-based persistence (JSON) for MVP, implemented and tested in Core.
 - Explicit control-plane protocol (`GrokestratorProtocol`) between clients and the server component.
 
-### What Exists Now (Post Core Foundation Commit)
-- `Packages/GrokestratorCore/` — Fully implemented and building:
-  - **Models**: ServerAddress (Tailscale + port), Conversation, Message, Agent, ConnectionState, ServerInfo, ManagedInstance, ServerConfiguration, ClientConfiguration.
-  - **Networking**: GrokestratorTransport protocol, Connection, full GrokestratorProtocol (request/response/event shapes for the control plane).
-  - **Client**: MultiServerSession, ClientConfiguration (multi-server/tab support).
-  - **Server**: ServerState, ServerConfiguration (instance management data model).
-  - **Persistence**: PersistenceProtocol + FilePersistence actor (JSON, actor-isolated, ready for app support containers).
-  - **Common**: GrokestratorError.
-  - Tests: 6 passing tests (models + persistence roundtrips).
-- Branch: `feat/initial-core-package-structure`
-- Commit: `cdb9a24` — clean, focused Core foundation (786 insertions).
-- Design docs in `design/` (being brought current in this pass).
-- All work follows the "create branch before any code + logical PR chunks" rule.
+### What Exists Now
+
+**Core (GrokestratorCore package)**
+- Fully implemented and building (see previous state for details).
+- Branch: `feat/initial-core-package-structure` (merged).
+
+**Grok Build Integration Layer** (current work on `feat/mac-grok-build-plumbing`)
+- Full black-box communication layer for real `grok` build instances via the Agent Client Protocol (ACP) over stdio.
+- `GrokBuildManager`: Primary facade. Owns instances, provides high-level conversation handles.
+- `GrokBuildConversation`: The main black-box object callers use. Exposes:
+  - `sendPrompt(...)` → `AsyncStream<ConversationUpdate>`
+  - `sendPromptAndCollect(...)` → `PromptResult`
+  - Structured progress/activity notes (the "little notes" from real agents)
+  - `pendingToolCalls()` / `pendingPermissions()` + ergonomic response methods
+  - Automatic history accumulation + file-based persistence
+  - Lifecycle: `onDied`, `isAlive`, clean error states
+- Supporting types: `ConversationUpdate`, `ToolCallInfo`, `PermissionRequestInfo`, `AgentConversationHistory`, `AgentTurn`/`AgentMessage`.
+- `GrokBuildSessionClient` + `ACPMessageReader` handle raw ACP framing, request correlation, and event routing.
+- Temporary raw ACP payload logging enabled for protocol discovery (marked clearly for removal).
+- Process launching, monitoring, and death handling via `GrokBuildInstanceLauncher` + `GrokBuildServer`.
+- All ACP details are encapsulated — the rest of the Mac app should only talk to `GrokBuildManager` and `GrokBuildConversation`.
+
+- Current branch: `feat/mac-grok-build-plumbing`
+- All work follows the strict "focused branch + logical PR" rule.
 
 ### Current State of Design Docs
 - `06-project-structure.md`: Reflects the native structure (updated).
@@ -59,10 +70,14 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 ---
 
 ## Immediate Priorities
-1. GrokestratorMac target (hybrid client + server app) — direct process management, UI shell, tabs for multiple servers.
-2. Wire the Core protocol + persistence into the Mac server.
-3. Basic iOS client shell (later).
-4. Continue living doc updates as decisions are made.
+1. **Grok Build black box** (largely complete on current branch):
+   - Production-ready `GrokBuildManager` + `GrokBuildConversation`
+   - Full ACP handling + progress notes + history + lifecycle
+2. GrokestratorMac target (hybrid client + server app) — UI shell, tabs, wiring the black box into real UI/ServerState.
+3. Wire Core control-plane protocol + persistence into the Mac server for multi-device sync.
+4. Basic iOS client shell (later).
+5. Remove temporary raw ACP logging once protocol shapes are stable.
+6. Continue living doc updates as decisions are made.
 
 ---
 
@@ -82,4 +97,4 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 
 ---
 
-*Last updated: 2026-05-26 — Core foundation implemented and committed. Native Swift architecture locked in after pivot.*
+*Last updated: 2026-06-04 — Grok Build communication layer completed as production black box (GrokBuildManager + GrokBuildConversation + progress notes + history). Work on branch `feat/mac-grok-build-plumbing`.*

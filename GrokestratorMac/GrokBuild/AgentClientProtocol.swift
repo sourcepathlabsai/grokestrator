@@ -47,6 +47,14 @@ public enum ACPEvent: Codable, Sendable {
     case sessionUpdate(SessionUpdateEvent)
     case error(ACPErrorEvent)
     case done(sessionId: String)
+
+    // Progress / activity notes from the real Grok Build agent (the "little notes" you see live)
+    case progress(ProgressEvent)
+    case activity(ActivityEvent)
+
+    /// Catch-all for unknown event shapes we haven't modeled yet.
+    /// Useful during protocol discovery — the raw payload is preserved so we can inspect it.
+    case unknown(rawPayload: Data, typeHint: String?)
 }
 
 public struct SessionCreatedEvent: Codable, Sendable {
@@ -98,6 +106,27 @@ public struct ACPErrorEvent: Codable, Sendable {
     public let sessionId: String?
     public let code: String
     public let message: String
+}
+
+// MARK: - Progress / Activity Events (the live "little notes" from Grok Build)
+
+/// A granular progress or status update emitted by the agent during thinking/tool use/etc.
+/// These are the short, incremental notes you see in a real Grok Build session
+/// ("Searching the web...", "Analyzing files...", "Calling MCP tool X...", etc.).
+public struct ProgressEvent: Codable, Sendable {
+    public let sessionId: String?
+    public let content: String
+    public let phase: String?           // e.g. "thinking", "tool_execution", "search", "analysis"
+    public let progress: Double?        // 0.0 ... 1.0 if the agent provides it
+    public let metadata: [String: String]?
+}
+
+/// Slightly more general activity note. Some agents emit these instead of (or in addition to) ProgressEvent.
+public struct ActivityEvent: Codable, Sendable {
+    public let sessionId: String?
+    public let note: String
+    public let kind: String?            // e.g. "progress", "status_update", "thinking_step", "subtask"
+    public let metadata: [String: String]?
 }
 
 // MARK: - Wire Format
