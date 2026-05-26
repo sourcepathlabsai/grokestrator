@@ -6,6 +6,11 @@ target/
 dist/
 build/
 out/
+.build/
+.swiftpm/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
 
 # IDE / Editor
 .idea/
