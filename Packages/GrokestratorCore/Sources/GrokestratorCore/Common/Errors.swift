@@ -9,6 +9,8 @@ public enum GrokestratorError: Error, LocalizedError, Sendable, Equatable, Codab
     case persistenceError(String)
     case protocolError(String)
     case unauthorized
+    case transportError(String)
+    case sessionInvalidated
 
     public var errorDescription: String? {
         switch self {
@@ -28,6 +30,10 @@ public enum GrokestratorError: Error, LocalizedError, Sendable, Equatable, Codab
             return "Protocol error: \(reason)"
         case .unauthorized:
             return "Unauthorized"
+        case .transportError(let message):
+            return "Transport error: \(message)"
+        case .sessionInvalidated:
+            return "Session has been invalidated"
         }
     }
 }
