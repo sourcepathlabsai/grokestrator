@@ -11,93 +11,75 @@ Update this file when any of the following change:
 
 ---
 
-## Current Position (2026-05-25)
+## Current Position (2026-05-26)
 
-**Grokestrator** is a native desktop application designed to be a comfortable, high-quality control plane for Grok Build agents.
+**Grokestrator** is a native macOS + iOS application (Swift + SwiftUI) that acts as a high-quality control plane for orchestrating multiple Grok Build agents across devices.
 
-**Current focus**: Phase 1 — Fully local experience on a single machine.
+**Mac app**: Hybrid — runs both the client UI *and* the server. The powerful stationary dev Mac owns:
+- Direct lifecycle management of `grok` instances (launch, monitor, auto-restart on boot/crash — no tmux in v1)
+- Conversation history and persistence
+- Coordination for local UI + remote clients (iOS / other Macs over Tailscale)
 
-We are deliberately starting with a local-only MVP so we can rapidly iterate on the actual user experience (sidebar, conversations, agent management, comfort) before adding the complexity of remote machines.
+**iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
 
-The long-term North Star remains: one comfortable UI to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
+**Current focus**: Core foundation complete. Moving to Mac hybrid app target + actual server process management.
+
+The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
 ### Key Decisions Made
-- Local-first approach (single machine, one or more local `grok` agents)
-- Remote/multi-machine support (via Tailscale + ACP) is Phase 2
-- Strong emphasis on local conversation history ownership
-- Use ACP (`grok agent serve` and stdio) as the integration point with Grok Build
-- Follow Alexander-style process: design docs in `design/`, GitHub issues as source of truth, `PROJECT_STATE.md` for current reality
+- **Native Swift + SwiftUI** (Mac hybrid + iOS client) after evaluation of Tauri/Rust path. Chosen for true iOS client support, seamless multi-device (Tailscale), and avoiding local stdio + sandbox limitations.
+- Mac server owns everything (instance lifecycle, persistence, client sessions).
+- Direct `Process` management of `grok` binaries on the Mac (auto-restart, no tmux in MVP).
+- Multi-server support via tabs (Mac) / panes (iOS).
+- Strict branch → focused logical PR → merge discipline (no giant messy commits).
+- GrokestratorCore (Swift Package) as the single source of truth for models, protocol, persistence, and shared logic.
+- File-based persistence (JSON) for MVP, implemented and tested in Core.
+- Explicit control-plane protocol (`GrokestratorProtocol`) between clients and the server component.
 
-### Current State
-- Project directory created at `~/dev/grokestrator/`
-- Design documents completed:
-  - `00-vision-and-north-star.md`
-  - `01-architecture-and-components.md`
-  - `02-ui-navigation-and-interaction.md`
-  - `03-technology-and-build-strategy.md` (Svelte + Tauri + Rust backend locked for Mac-first)
-  - `04-conversation-model.md`
-  - `05-data-persistence-model.md`
-- Tech stack locked: Tauri 2 (Rust backend + Svelte frontend), macOS-first
-- Persistence approach decided: Start with simple file-based storage (JSON + directory structure). SQLite deferred unless full-text search or complex queries become real requirements.
-- Design process active and well advanced
+### What Exists Now (Post Core Foundation Commit)
+- `Packages/GrokestratorCore/` — Fully implemented and building:
+  - **Models**: ServerAddress (Tailscale + port), Conversation, Message, Agent, ConnectionState, ServerInfo, ManagedInstance, ServerConfiguration, ClientConfiguration.
+  - **Networking**: GrokestratorTransport protocol, Connection, full GrokestratorProtocol (request/response/event shapes for the control plane).
+  - **Client**: MultiServerSession, ClientConfiguration (multi-server/tab support).
+  - **Server**: ServerState, ServerConfiguration (instance management data model).
+  - **Persistence**: PersistenceProtocol + FilePersistence actor (JSON, actor-isolated, ready for app support containers).
+  - **Common**: GrokestratorError.
+  - Tests: 6 passing tests (models + persistence roundtrips).
+- Branch: `feat/initial-core-package-structure`
+- Commit: `cdb9a24` — clean, focused Core foundation (786 insertions).
+- Design docs in `design/` (being brought current in this pass).
+- All work follows the "create branch before any code + logical PR chunks" rule.
 
----
-
-## What Is Working / Exists
-
-- Strong North Star defined
-- Local-first phased approach agreed
-- Four core design documents written and aligned:
-  - Vision & North Star
-  - UI/Navigation & Interaction Model
-  - Technology & Build Strategy (Svelte + Tauri + Rust locked)
-  - Conversation Model
-- Design documentation process established (following Alexander patterns)
-- `gh` CLI is authenticated as `bobprofleet`
+### Current State of Design Docs
+- `06-project-structure.md`: Reflects the native structure (updated).
+- `00-vision-and-north-star.md`: North Star and phasing still valid; technology notes updated for native pivot.
+- `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Marked historical (pre-pivot Tauri/Rust/Svelte direction that was evaluated and superseded).
+- `PROJECT_STATE.md`: This file — now the live source of truth.
 
 ---
 
-## Immediate Priorities (Pre-Go)
-
-1. Create GitHub repo (`bobprofleet/grokestrator`) if desired (low effort)
-2. Final light review / polish of the design docs (optional but recommended before "go")
-
-Most major design work is now complete. The remaining work is lightweight.
-
----
-
-## Open Questions (Pre-Go)
-
-- Final project name (still a placeholder)
-- Exact scope boundary between MVP and MVD (particularly around multi-instance conversations) — to be clarified during early implementation if needed
+## Immediate Priorities
+1. GrokestratorMac target (hybrid client + server app) — direct process management, UI shell, tabs for multiple servers.
+2. Wire the Core protocol + persistence into the Mac server.
+3. Basic iOS client shell (later).
+4. Continue living doc updates as decisions are made.
 
 ---
 
 ## Non-Goals (Current Phase)
-
-- Remote agent connections
-- Multi-machine orchestration
-- Public demos or sharing
-- Polished visual design (focus on experience and structure first)
+- Remote agent connections beyond Tailscale client access to the home Mac server (full multi-machine orchestration is later).
+- Windows/Linux as primary platforms.
+- Public release or open source.
+- Polished visual design (structure and experience first).
 
 ---
 
 ## Tracking
-
-- Design documents: `~/dev/grokestrator/design/`
+- Design documents: `design/`
 - Work tracking: GitHub Issues (to be established)
 - This file (`PROJECT_STATE.md`) is the single source of current truth
+- Strict process: Every chunk of work happens on a focused branch and lands via logical PR.
 
 ---
 
-## Next Steps (Pre-Go Work)
-
-- (Optional but recommended) Light final review of all design docs
-- Create GitHub repo (`bobprofleet/grokestrator`) for tracking and eventual visibility play
-- Declare "go" and begin implementation
-
-Target: Move quickly into coding with the goal of delivering a usable MVD, then MVP shortly after.
-
----
-
-*Last updated: 2026-05-25*
+*Last updated: 2026-05-26 — Core foundation implemented and committed. Native Swift architecture locked in after pivot.*

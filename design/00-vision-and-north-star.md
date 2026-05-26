@@ -110,6 +110,6 @@ Phase 1 MVP does **not** need to include:
 
 ---
 
-*Updated: 2026-05-25 — Switched to explicit local-first phased approach per user direction.*
+*Updated: 2026-05-26 — After detailed evaluation of Tauri/Rust vs. native paths (including real iOS client + voice + hybrid Mac server requirements), the implementation direction is pure native Swift + SwiftUI (Mac hybrid client+server + iOS client-only). North Star and phasing remain valid. Core foundation committed on `feat/initial-core-package-structure`.*
 
 *Original version written following the user's preferred process (clear North Star first, then iterate).*
