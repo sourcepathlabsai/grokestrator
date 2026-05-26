@@ -54,4 +54,14 @@ public struct MultiServerSession: Identifiable, Sendable, Equatable {
     public var isConnected: Bool {
         connection.isConnected
     }
+
+    /// Equality ignores the injected `requestSender` closure (which is not Equatable);
+    /// two sessions are equal when their observable value state matches.
+    public static func == (lhs: MultiServerSession, rhs: MultiServerSession) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.serverAddress == rhs.serverAddress &&
+        lhs.displayName == rhs.displayName &&
+        lhs.connection == rhs.connection &&
+        lhs.lastError == rhs.lastError
+    }
 }

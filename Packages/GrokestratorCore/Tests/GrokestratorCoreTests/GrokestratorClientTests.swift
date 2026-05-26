@@ -12,7 +12,7 @@ struct GrokestratorClientTests {
         let client = GrokestratorClient()
 
         let address = ServerAddress(name: "Test Server", tailscaleAddress: "100.64.0.1", port: 1234)
-        let serverSession = client.addServer(address, transport: transport)
+        let serverSession = await client.addServer(address, transport: transport)
         await client.connect(to: serverSession.id)
 
         return (client, serverSession, transport)
@@ -24,10 +24,11 @@ struct GrokestratorClientTests {
     func basicPromptFlow() async throws {
         let (client, serverSession, transport) = await makeConnectedClient()
         let instanceID = UUID()
-        let buildSession = client.grokBuildSession(for: instanceID, on: serverSession)
+        let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
         // Start prompt
-        _ = try await buildSession.startPrompt("Review the architecture")
+        let started = try await buildSession.startPrompt("Review the architecture")
+        let promptID = started.promptID
 
         // Simulate realistic server responses
         let progress1 = ConversationUpdate.progressNote("Analyzing modules...", phase: "scan", metadata: nil)
@@ -35,12 +36,10 @@ struct GrokestratorClientTests {
         let finalMessage = ConversationUpdate.message("Refactor recommendation: Extract networking layer.", metadata: nil)
         let completion = ConversationUpdate.turnComplete(finalAnswer: "Done.")
 
-        let promptID = UUID() // We don't have the real one easily here, but for simulation it's fine
-
-        transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: progress1)), from: serverSession.id)
-        transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: progress2)), from: serverSession.id)
-        transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: finalMessage)), from: serverSession.id)
-        transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: completion)), from: serverSession.id)
+        await transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: progress1)), from: serverSession.id)
+        await transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: progress2)), from: serverSession.id)
+        await transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: finalMessage)), from: serverSession.id)
+        await transport.simulateIncomingEvent(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: promptID, update: completion)), from: serverSession.id)
 
         // Verify the client recorded the initial startPrompt request
         let sent = await transport.sentRequests[serverSession.id] ?? []
@@ -58,16 +57,17 @@ struct GrokestratorClientTests {
     func toolCallRoundtrip() async throws {
         let (client, serverSession, transport) = await makeConnectedClient()
         let instanceID = UUID()
-        let buildSession = client.grokBuildSession(for: instanceID, on: serverSession)
+        let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
-        _ = try await buildSession.startPrompt("Run static analysis")
+        let started = try await buildSession.startPrompt("Run static analysis")
+        let promptID = started.promptID
 
         // Server requests a tool
         let toolCall = ToolCallInfo(id: "tool-42", toolName: "run_swiftlint", arguments: ["path": "Sources"])
-        transport.simulateIncomingEvent(
+        await transport.simulateIncomingEvent(
             .grokBuild(.conversationUpdate(
                 instanceID: instanceID,
-                promptID: UUID(),
+                promptID: promptID,
                 update: .toolCallRequested(toolCall)
             )),
             from: serverSession.id
@@ -75,7 +75,7 @@ struct GrokestratorClientTests {
 
         // Client sends result back
         try await buildSession.sendToolResult(
-            promptID: UUID(),
+            promptID: promptID,
             toolCallId: "tool-42",
             result: "{\"violations\": 3}",
             isError: false
@@ -100,12 +100,12 @@ struct GrokestratorClientTests {
     func promptCancellation() async throws {
         let (client, serverSession, transport) = await makeConnectedClient()
         let instanceID = UUID()
-        let buildSession = client.grokBuildSession(for: instanceID, on: serverSession)
+        let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
-        _ = try await buildSession.startPrompt("Long running analysis")
+        let started = try await buildSession.startPrompt("Long running analysis")
 
         // Cancel it
-        try await buildSession.cancelPrompt(promptID: UUID())
+        try await buildSession.cancelPrompt(promptID: started.promptID)
 
         let sent = await transport.sentRequests[serverSession.id] ?? []
         #expect(sent.count == 2)
@@ -122,11 +122,11 @@ struct GrokestratorClientTests {
     func instanceDeath() async throws {
         let (client, serverSession, transport) = await makeConnectedClient()
         let instanceID = UUID()
-        let buildSession = client.grokBuildSession(for: instanceID, on: serverSession)
+        let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
         _ = try await buildSession.startPrompt("Background job")
 
-        transport.simulateIncomingEvent(
+        await transport.simulateIncomingEvent(
             .grokBuild(.instanceDied(instanceID: instanceID, exitCode: 137)),
             from: serverSession.id
         )
@@ -140,7 +140,7 @@ struct GrokestratorClientTests {
     func multipleConcurrentPrompts() async throws {
         let (client, serverSession, transport) = await makeConnectedClient()
         let instanceID = UUID()
-        let buildSession = client.grokBuildSession(for: instanceID, on: serverSession)
+        let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
         _ = try await buildSession.startPrompt("Prompt A")
         _ = try await buildSession.startPrompt("Prompt B")
@@ -160,28 +160,28 @@ struct GrokestratorClientTests {
         let client = GrokestratorClient()
 
         let address = ServerAddress(name: "Isolated", tailscaleAddress: "100.64.0.2", port: 1234)
-        let serverSession = client.addServer(address, transport: transport)
+        let serverSession = await client.addServer(address, transport: transport)
 
-        var receivedEvents: [GrokestratorClient.ClientEvent] = []
-        let serverEvents = client.events(for: serverSession.id)
+        let serverEvents = await client.events(for: serverSession.id)
 
-        // Start listening in a task
-        let listenTask = Task {
+        // Collect the first two events inside the task and return them, avoiding a
+        // captured-mutable-var data race. The stream buffers events, so it is safe
+        // for connect/disconnect to fire before iteration begins.
+        let listenTask = Task { () -> [GrokestratorClient.ClientEvent] in
+            var events: [GrokestratorClient.ClientEvent] = []
             for await event in serverEvents {
-                receivedEvents.append(event)
-                if receivedEvents.count >= 2 { break }
+                events.append(event)
+                if events.count >= 2 { break }
             }
+            return events
         }
 
         await client.connect(to: serverSession.id)
         await client.disconnect(from: serverSession.id, reason: "Test disconnect")
 
-        // Give the stream a moment
-        try await Task.sleep(for: .milliseconds(50))
+        let receivedEvents = await listenTask.value
 
         #expect(receivedEvents.contains { if case .serverConnected = $0 { return true }; return false })
         #expect(receivedEvents.contains { if case .serverDisconnected = $0 { return true }; return false })
-
-        listenTask.cancel()
     }
 }

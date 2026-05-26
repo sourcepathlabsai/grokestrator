@@ -97,7 +97,7 @@ public enum GrokBuildResponse: Codable, Sendable {
     case promptCancelled(instanceID: UUID, promptID: UUID)
     case toolResultSent
     case permissionResponseSent
-    case promptState( /* TODO: richer state */ )
+    case promptState(instanceID: UUID, promptID: UUID, pendingToolCalls: [ToolCallInfo], pendingPermissions: [PermissionRequestInfo])
     case error(String)
 }
 

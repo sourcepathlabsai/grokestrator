@@ -10,8 +10,11 @@ public protocol GrokestratorClientTransport: Sendable {
 
     /// Attaches a handler that will be called when events arrive from any server.
     ///
-    /// The handler is expected to call back into `GrokestratorClient.handleIncoming`.
-    func setEventHandler(_ handler: @escaping @Sendable (GrokestratorEvent, UUID) -> Void)
+    /// The handler is `async` so that a transport can await full processing of an
+    /// event before delivering the next one — giving deterministic ordering and
+    /// making tests reliable. The handler is expected to call back into
+    /// `GrokestratorClient.handleIncoming`.
+    func setEventHandler(_ handler: @escaping @Sendable (GrokestratorEvent, UUID) async -> Void) async
 }
 
 /// Top-level client for communicating with one or more Grokestrator servers.
@@ -65,21 +68,17 @@ public actor GrokestratorClient {
         transport: GrokestratorClientTransport? = nil
     ) -> MultiServerSession {
         var session = MultiServerSession(serverAddress: address, displayName: displayName)
+        let sessionID = session.id
 
         if let transport = transport {
-            transports[session.id] = transport
-            transport.setEventHandler { [weak self] event, serverID in
-                Task {
-                    await self?.handleIncoming(event: event, from: serverID)
-                }
-            }
+            transports[sessionID] = transport
         }
 
         session.setRequestSender { [weak self] request in
-            await self?.sendRequest(request, serverID: session.id)
+            await self?.sendRequest(request, serverID: sessionID)
         }
 
-        serverSessions[session.id] = session
+        serverSessions[sessionID] = session
         return session
     }
 
@@ -105,10 +104,8 @@ public actor GrokestratorClient {
 
         // Wire the event handler if a transport is registered for this server
         if let transport = transports[serverID] {
-            transport.setEventHandler { [weak self] event, sid in
-                Task {
-                    await self?.handleIncoming(event: event, from: sid)
-                }
+            await transport.setEventHandler { [weak self] event, sid in
+                await self?.handleIncoming(event: event, from: sid)
             }
         }
 
@@ -190,7 +187,9 @@ public actor GrokestratorClient {
         }
 
         let register: @Sendable (UUID, UUID) -> Void = { [weak self] promptID, instID in
-            self?.registerActivePrompt(promptID: promptID, instanceID: instID)
+            Task {
+                await self?.registerActivePrompt(promptID: promptID, instanceID: instID)
+            }
         }
 
         let newSession = GrokBuildClientSession(
@@ -205,20 +204,16 @@ public actor GrokestratorClient {
     // MARK: - Event Routing (Improved)
 
     /// Central entry point for all incoming events from the transport layer.
-    public func handleIncoming(event: GrokestratorEvent, from serverID: UUID) {
+    public func handleIncoming(event: GrokestratorEvent, from serverID: UUID) async {
         // Route GrokBuildEvents intelligently
         if case .grokBuild(let buildEvent) = event {
-            routeGrokBuildEvent(buildEvent)
+            await routeGrokBuildEvent(buildEvent)
         }
 
-        // Update server session state
-        if var serverSession = serverSessions[serverID] {
-            // Future: react to serverStateChanged, errors, etc.
-            serverSessions[serverID] = serverSession
-        }
+        // Future: react to serverStateChanged, errors, etc. for serverSessions[serverID]
     }
 
-    private func routeGrokBuildEvent(_ event: GrokBuildEvent) {
+    private func routeGrokBuildEvent(_ event: GrokBuildEvent) async {
         let targetInstanceID: UUID? = {
             switch event {
             case .conversationUpdate(let instID, _, _): return instID
@@ -232,17 +227,13 @@ public actor GrokestratorClient {
 
         if let instID = targetInstanceID,
            let buildSession = grokBuildSessions[instID] {
-            Task {
-                await buildSession.handle(event: event)
-            }
+            await buildSession.handle(event: event)
             return
         }
 
         // Fallback: broadcast to all sessions (useful during early development)
         for (_, session) in grokBuildSessions {
-            Task {
-                await session.handle(event: event)
-            }
+            await session.handle(event: event)
         }
     }
 

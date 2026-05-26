@@ -44,9 +44,21 @@ public actor GrokBuildClientSession {
 
     // MARK: - Public API
 
+    /// Result of starting a prompt: the stable `promptID` for this turn plus the
+    /// stream of `ConversationUpdate` values it will produce.
+    ///
+    /// The caller needs the `promptID` to later send tool results, respond to
+    /// permissions, or cancel this specific prompt.
+    public struct StartedPrompt: Sendable {
+        public let promptID: UUID
+        public let updates: AsyncStream<ConversationUpdate>
+    }
+
     /// Starts a new prompt on the remote instance.
-    /// Returns a stream of `ConversationUpdate` values (messages, progress notes, tool calls, etc.).
-    public func startPrompt(_ text: String) async throws -> AsyncStream<ConversationUpdate> {
+    /// Returns the prompt's stable `promptID` and a stream of `ConversationUpdate`
+    /// values (messages, progress notes, tool calls, etc.).
+    @discardableResult
+    public func startPrompt(_ text: String) async throws -> StartedPrompt {
         guard isValid else {
             throw GrokestratorError.sessionInvalidated
         }
@@ -68,7 +80,7 @@ public actor GrokBuildClientSession {
         // Register so the parent client can route prompt-scoped events accurately
         registerPrompt?(promptID, instanceID)
 
-        return stream
+        return StartedPrompt(promptID: promptID, updates: stream)
     }
 
     /// Sends the result of a tool call back to the remote agent.
@@ -161,7 +173,8 @@ public actor GrokBuildClientSession {
 
         case .instanceDied(let instID, _):
             guard instID == instanceID else { return }
-            invalidateAllPrompts(reason: "Remote Grok Build instance died")
+            // A dead remote instance can no longer service this session at all.
+            invalidate(reason: "Remote Grok Build instance died")
 
         default:
             break
