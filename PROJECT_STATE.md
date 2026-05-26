@@ -22,7 +22,7 @@ Update this file when any of the following change:
 
 **iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
 
-**Current focus**: Grok Build communication layer (black box) on the Mac. Core foundation complete. Mac hybrid app + real `grok` process management in progress.
+**Current focus**: Client control-plane protocol and shared client comms layer in GrokestratorCore (to allow iOS and Mac clients to drive the remote Grok Build black box over Tailscale). Grok Build black box on the Mac is complete.
 
 The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
@@ -42,42 +42,43 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - Fully implemented and building (see previous state for details).
 - Branch: `feat/initial-core-package-structure` (merged).
 
-**Grok Build Integration Layer** (current work on `feat/mac-grok-build-plumbing`)
+**Grok Build Integration Layer** (completed on `feat/mac-grok-build-plumbing`, merged in PR #4)
 - Full black-box communication layer for real `grok` build instances via the Agent Client Protocol (ACP) over stdio.
-- `GrokBuildManager`: Primary facade. Owns instances, provides high-level conversation handles.
-- `GrokBuildConversation`: The main black-box object callers use. Exposes:
-  - `sendPrompt(...)` → `AsyncStream<ConversationUpdate>`
-  - `sendPromptAndCollect(...)` → `PromptResult`
-  - Structured progress/activity notes (the "little notes" from real agents)
-  - `pendingToolCalls()` / `pendingPermissions()` + ergonomic response methods
-  - Automatic history accumulation + file-based persistence
-  - Lifecycle: `onDied`, `isAlive`, clean error states
-- Supporting types: `ConversationUpdate`, `ToolCallInfo`, `PermissionRequestInfo`, `AgentConversationHistory`, `AgentTurn`/`AgentMessage`.
-- `GrokBuildSessionClient` + `ACPMessageReader` handle raw ACP framing, request correlation, and event routing.
-- Temporary raw ACP payload logging enabled for protocol discovery (marked clearly for removal).
-- Process launching, monitoring, and death handling via `GrokBuildInstanceLauncher` + `GrokBuildServer`.
-- All ACP details are encapsulated — the rest of the Mac app should only talk to `GrokBuildManager` and `GrokBuildConversation`.
+- `GrokBuildManager` and `GrokBuildConversation` as the stable high-level API (no raw ACP leakage).
+- Rich `ConversationUpdate` support including progress/activity notes.
+- Tool and permission roundtrips, structured history (`AgentTurn`/`AgentMessage`), lifecycle management.
+- All ACP details encapsulated.
 
-- Current branch: `feat/mac-grok-build-plumbing`
+**Client Control Plane & Shared Client Comms Layer** (current work on `feat/core-client-control-plane`)
+- Evolving the control-plane protocol (`GrokestratorProtocol`) so clients can drive remote Grok Build instances with high fidelity.
+- `GrokestratorClient`: Top-level actor for managing server connections and higher-level sessions.
+- `GrokBuildClientSession`: Higher-level client abstraction (remote equivalent of `GrokBuildConversation`).
+- `InMemoryGrokestratorTransport` for testing the client flow end-to-end.
+- Rich model types (`ConversationUpdate`, `AgentTurn`, `ToolCallInfo`, etc.) promoted into Core.
+- Design document: `design/07-client-control-plane-protocol.md` (v0.1 reviewed + decisions locked).
+- Focus on prompt streaming, tool roundtrips, event routing, and connection lifecycle.
+
+- Current branch: `feat/core-client-control-plane`
 - All work follows the strict "focused branch + logical PR" rule.
 
 ### Current State of Design Docs
 - `06-project-structure.md`: Reflects the native structure (updated).
-- `00-vision-and-north-star.md`: North Star and phasing still valid; technology notes updated for native pivot.
-- `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Marked historical (pre-pivot Tauri/Rust/Svelte direction that was evaluated and superseded).
+- `07-client-control-plane-protocol.md`: New design doc for the client-side control plane evolution (v0.1 reviewed, key decisions locked).
+- `00-vision-and-north-star.md`: North Star and phasing still valid.
+- `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Marked historical.
 - `PROJECT_STATE.md`: This file — now the live source of truth.
 
 ---
 
 ## Immediate Priorities
-1. **Grok Build black box** (largely complete on current branch):
-   - Production-ready `GrokBuildManager` + `GrokBuildConversation`
-   - Full ACP handling + progress notes + history + lifecycle
-2. GrokestratorMac target (hybrid client + server app) — UI shell, tabs, wiring the black box into real UI/ServerState.
-3. Wire Core control-plane protocol + persistence into the Mac server for multi-device sync.
-4. Basic iOS client shell (later).
-5. Remove temporary raw ACP logging once protocol shapes are stable.
-6. Continue living doc updates as decisions are made.
+1. **Client Control Plane** (active on `feat/core-client-control-plane`):
+   - Finish core client comms layer (`GrokestratorClient`, `GrokBuildClientSession`, protocol extensions).
+   - Solidify prompt streaming, tool roundtrips, and event routing over the control plane.
+   - Enable iOS + Mac clients to drive remote Grok Build instances.
+2. GrokestratorMac target (hybrid client + server app) — UI shell, tabs, wiring the black box + client comms layer.
+3. Server-side handling of new `GrokBuildRequest` messages in the Mac app.
+4. Basic iOS client shell that exercises the new remote Grok Build sessions.
+5. Continue living doc updates (`design/07-client-control-plane-protocol.md` and this file).
 
 ---
 
@@ -97,4 +98,9 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 
 ---
 
-*Last updated: 2026-06-04 — Grok Build communication layer completed as production black box (GrokBuildManager + GrokBuildConversation + progress notes + history). Work on branch `feat/mac-grok-build-plumbing`.*
+*Last updated: 2026-06-04 — Client control plane work active on `feat/core-client-control-plane`:
+- `GrokestratorClient`, `GrokBuildClientSession`, `InMemoryGrokestratorTransport`, and protocol extensions in progress.
+- Rich conversation models promoted into Core.
+- In-memory transport + end-to-end tests for prompt flow.
+- Design doc `07-client-control-plane-protocol.md` maintained.
+- `PROJECT_STATE.md` updated.
