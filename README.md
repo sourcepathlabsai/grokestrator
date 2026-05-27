@@ -14,11 +14,15 @@ If you regularly work with multiple Grok Build sessions (different configuration
 
 ## Current Status (Early Development)
 
-- **Platform**: macOS first (excellent native experience)
-- **Focus**: Local instances (multiple Grok Build processes on the same machine)
-- **Status**: Design phase complete. Implementation starting soon.
+- **Platform**: macOS + iOS, built as **native Swift + SwiftUI**.
+- **Mac app**: Hybrid — runs both the client UI *and* the server. The stationary dev Mac owns `grok` instance lifecycle (launch/monitor/auto-restart), conversation history, and persistence.
+- **iOS app**: Client-only — drives the Mac server (including voice/hands-free) over Tailscale.
+- **Shared core**: `GrokestratorCore` (a Swift package) is the single source of truth for models, the control-plane protocol, and persistence.
+- **Status**: Core foundation and the Grok Build integration layer (the "black box") are implemented. Active work is the client control-plane protocol so iOS/Mac clients can drive remote Grok Build instances.
 
-Remote support (via Tailscale + `grok agent serve`) and multi-machine orchestration are planned for later phases.
+See [`PROJECT_STATE.md`](PROJECT_STATE.md) for the live, authoritative snapshot.
+
+> **Note on history**: An earlier iteration explored a Tauri/Rust/Svelte stack. After evaluating real iOS-client, voice, and hybrid-Mac-server requirements, the project moved to pure native Swift + SwiftUI.
 
 ## Goals
 
@@ -32,17 +36,20 @@ Remote support (via Tailscale + `grok agent serve`) and multi-machine orchestrat
 All major design decisions are documented in the `design/` folder:
 
 - [Vision & North Star](design/00-vision-and-north-star.md)
+- [Architecture & Components](design/01-architecture-and-components.md) *(historical)*
 - [UI Navigation & Interaction Model](design/02-ui-navigation-and-interaction.md)
-- [Technology & Build Strategy](design/03-technology-and-build-strategy.md)
+- [Technology & Build Strategy](design/03-technology-and-build-strategy.md) *(historical)*
 - [Conversation Model](design/04-conversation-model.md)
-- [Architecture & Components](design/01-architecture-and-components.md)
 - [Data & Persistence Model](design/05-data-persistence-model.md)
+- [Project Structure](design/06-project-structure.md)
+- [Client Control Plane Protocol](design/07-client-control-plane-protocol.md)
 
 ## Tech Stack (Current)
 
-- **Frontend**: Svelte
-- **Backend**: Rust (via Tauri)
-- **Integration**: Agent Client Protocol (ACP) to communicate with Grok Build instances
+- **Apps**: Swift + SwiftUI (native macOS hybrid client+server, native iOS client)
+- **Shared core**: `GrokestratorCore` Swift package (models, control-plane protocol, persistence)
+- **Instance integration**: Agent Client Protocol (ACP) over stdio to each Grok Build instance
+- **Remote transport**: Tailscale between iOS/Mac clients and the Mac server
 
 ## Getting Involved
 
