@@ -85,7 +85,7 @@ public actor MockConversationDriver: ConversationDriver {
                 await emit(.activityNote("Permission: \(approved ? "approved" : "rejected") (\(choice))", kind: "permission", metadata: nil), after: 50)
 
                 let answer = approved
-                    ? "(\(label)) Done — removed build/."
+                    ? "(\(label)) Done — removed build/. Here's a chime: /System/Library/Sounds/Glass.aiff"
                     : "(\(label)) OK, I won't run that. What would you like instead?"
                 for word in answer.split(separator: " ") {
                     await emit(.messageDelta(String(word) + " "), after: 70)
