@@ -26,6 +26,14 @@ public actor GrokBuildSessionClient {
     private var thoughtBuffer = ""
     private var messageBuffer = ""
 
+    /// Timestamp of the last sign of life for the active turn. The prompt watchdog
+    /// (see `armIdleWatchdog`) measures silence against this; any session/update,
+    /// agent request, or permission answer refreshes it.
+    private var lastActivity = Date()
+    /// A turn is failed only after this much *total* silence — and never while a
+    /// permission request is pending (the user may answer days later).
+    private static let promptIdleLimit: TimeInterval = 30 * 60
+
     private var readerTask: Task<Void, Never>?
 
     public init(handle: GrokBuildInstanceHandle) {
@@ -63,9 +71,13 @@ public actor GrokBuildSessionClient {
         activeStream = continuation
         thoughtBuffer = ""
         messageBuffer = ""
+        noteActivity()
 
         Task {
             do {
+                // No hard timeout: an agent turn can run for many minutes and may
+                // pause for *days* on a permission prompt. An idle watchdog guards
+                // against a truly dead connection instead (see `armIdleWatchdog`).
                 let result = try await self.request(
                     method: "session/prompt",
                     params: .object([
@@ -73,7 +85,7 @@ public actor GrokBuildSessionClient {
                         "prompt": .array([.object(["type": .string("text"), "text": .string(prompt)])]),
                     ]),
                     as: PromptStopResult.self,
-                    timeout: 600
+                    timeout: nil
                 )
                 await self.completePrompt(stopReason: result.stopReason)
             } catch {
@@ -91,6 +103,9 @@ public actor GrokBuildSessionClient {
     /// Resolves a pending permission request with the chosen ACP `optionId`.
     public func respondToPermission(permissionId: String, chosenOption: String, sessionId _: String) async throws {
         guard let id = pendingPermissions.removeValue(forKey: permissionId) else { return }
+        // Answering revives the turn: refresh the idle clock so the watchdog gives
+        // grok a full window to resume before considering the connection stalled.
+        noteActivity()
         respond(id: id, result: .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(chosenOption)])]))
     }
 
@@ -157,6 +172,7 @@ public actor GrokBuildSessionClient {
               let p = try? JSONDecoder().decode(RPCParams<SessionUpdateParams>.self, from: line).params
         else { return } // ignore vendor _x.ai/* and other notifications for now
 
+        noteActivity()   // the turn is alive — refresh the idle watchdog
         let sid = p.sessionId
         switch p.update.sessionUpdate {
         case "agent_thought_chunk":
@@ -192,6 +208,7 @@ public actor GrokBuildSessionClient {
     }
 
     private func handleAgentRequest(method: String, id: RPCID, line: Data) async {
+        noteActivity()   // an agent→client request is a sign of life
         switch method {
         case "session/request_permission":
             guard let p = try? JSONDecoder().decode(RPCParams<PermissionParams>.self, from: line).params, !p.options.isEmpty else {
@@ -282,15 +299,23 @@ public actor GrokBuildSessionClient {
 
     // MARK: - JSON-RPC request/response plumbing
 
-    private func request<T: Decodable>(method: String, params: JSONValue, as _: T.Type, timeout: Double) async throws -> T {
+    /// Issues a JSON-RPC request. `timeout` is a fixed wall-clock deadline for
+    /// fast handshake calls (`initialize`, `session/new`). Pass `nil` for calls
+    /// that legitimately run long or pause on user input (`session/prompt`); those
+    /// are instead guarded by the activity-aware idle watchdog.
+    private func request<T: Decodable>(method: String, params: JSONValue, as _: T.Type, timeout: Double?) async throws -> T {
         let id = RPCID.int(nextId); nextId += 1
 
         let line: Data = try await withCheckedThrowingContinuation { cont in
             pending[id] = cont
             write(.object(["jsonrpc": .string("2.0"), "id": id.jsonValue, "method": .string(method), "params": params]))
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                await self.timeoutPending(id, method: method)
+            if let timeout {
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    await self.timeoutPending(id, method: method)
+                }
+            } else {
+                armIdleWatchdog(id: id, method: method)
             }
         }
 
@@ -304,6 +329,36 @@ public actor GrokBuildSessionClient {
         if let cont = pending.removeValue(forKey: id) {
             cont.resume(throwing: GrokBuildError.protocolError("\(method) timed out"))
         }
+    }
+
+    private func noteActivity() { lastActivity = Date() }
+
+    /// Watches an in-flight long-running request (the prompt). It fails the request
+    /// only after `promptIdleLimit` of *total* silence, and **never** while a
+    /// permission request is pending — so a turn left waiting on the user (minutes
+    /// or days) is preserved, while a genuinely dead connection still gets cleaned up.
+    private func armIdleWatchdog(id: RPCID, method: String) {
+        Task {
+            while await self.idleCheck(id: id, method: method) == false {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)   // re-check each minute
+            }
+        }
+    }
+
+    /// One watchdog tick. Returns `true` when the watchdog should stop (request
+    /// resolved or failed), `false` to keep watching.
+    private func idleCheck(id: RPCID, method: String) -> Bool {
+        guard pending[id] != nil else { return true }   // already resolved → done
+        if !pendingPermissions.isEmpty {
+            noteActivity()                                // paused on the user; don't age out
+            return false
+        }
+        guard Date().timeIntervalSince(lastActivity) > Self.promptIdleLimit else { return false }
+        if let cont = pending.removeValue(forKey: id) {
+            let mins = Int(Self.promptIdleLimit / 60)
+            cont.resume(throwing: GrokBuildError.protocolError("\(method) stalled (no activity for \(mins)m)"))
+        }
+        return true
     }
 
     private func respond(id: RPCID, result: JSONValue) {
