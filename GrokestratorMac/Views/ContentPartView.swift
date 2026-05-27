@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
+import QuickLookThumbnailing
 
 /// Renders an assistant message that contains a mix of text and inline media.
 struct AssistantContentView: View {
@@ -246,28 +247,100 @@ struct VideoPlayerView: View {
     }
 }
 
-/// A card for a non-media file: icon + name + open + download.
+/// A card for a file: a QuickLook thumbnail (e.g. a PDF's first page) you can
+/// click to open in the default app, an "Open with" menu of available apps
+/// (Preview / Acrobat / …), and a download button.
 struct FilePartView: View {
     let source: MediaSource
     let mimeType: String
     let name: String
 
+    @State private var fileURL: URL?
+    @State private var thumbnail: NSImage?
+    @State private var openApps: [URL] = []
+
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).font(.title).foregroundStyle(.secondary).frame(width: 28)
+            Button { open(with: nil) } label: { thumbnailView }
+                .buttonStyle(.plain)
+                .help("Open")
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.callout).lineLimit(1)
                 Text(mimeType).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { MediaOpener.open(source, mimeType: mimeType) } label: { Image(systemName: "arrow.up.forward.app") }
-                .buttonStyle(.borderless).help("Open")
+
+            if openApps.count > 1 {
+                Menu {
+                    ForEach(openApps, id: \.self) { app in
+                        Button(appName(app)) { open(with: app) }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Open with…")
+            } else {
+                Button { open(with: nil) } label: { Image(systemName: "arrow.up.forward.app") }
+                    .buttonStyle(.borderless).help("Open")
+            }
+
             Button { MediaDownloader.save(source, mimeType: mimeType) } label: { Image(systemName: "arrow.down.circle") }
                 .buttonStyle(.borderless).help("Download")
         }
         .padding(10)
         .frame(maxWidth: 380)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .task { await prepare() }
+    }
+
+    @ViewBuilder
+    private var thumbnailView: some View {
+        Group {
+            if let thumbnail {
+                Image(nsImage: thumbnail).resizable().scaledToFit()
+            } else {
+                Image(systemName: icon).font(.title).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(width: 44, height: 56)
+        .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.quaternary))
+    }
+
+    private func prepare() async {
+        guard fileURL == nil,
+              let url = source.resolvedURL(preferredExtension: mediaFileExtension(for: mimeType))
+        else { return }
+        fileURL = url
+        var seen = Set<String>()
+        openApps = NSWorkspace.shared.urlsForApplications(toOpen: url).filter { seen.insert($0.path).inserted }
+
+        let request = QLThumbnailGenerator.Request(
+            fileAt: url, size: CGSize(width: 88, height: 112), scale: 2, representationTypes: .thumbnail
+        )
+        if let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+            thumbnail = rep.nsImage
+        }
+    }
+
+    private func open(with app: URL?) {
+        guard let url = fileURL ?? source.resolvedURL(preferredExtension: mediaFileExtension(for: mimeType)) else {
+            NSSound.beep(); return
+        }
+        if let app {
+            Task { _ = try? await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) }
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func appName(_ app: URL) -> String {
+        let name = FileManager.default.displayName(atPath: app.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
     private var icon: String {
