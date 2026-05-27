@@ -8,7 +8,7 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $model.selectedInstanceID) {
-            Section("Connections") {
+            Section {
                 ForEach(model.instances) { instance in
                     InstanceRow(instance: instance)
                         .tag(instance.id)
@@ -18,10 +18,17 @@ struct SidebarView: View {
                             }
                         }
                 }
+            } header: {
+                Text("Connections")
+                    .font(Theme.display(11, .semibold))
+                    .foregroundStyle(Theme.textFaint)
+                    .textCase(.uppercase)
             }
         }
         .navigationTitle("Grokestrator")
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bgDeep)
         .toolbar {
             ToolbarItem {
                 Button {
@@ -47,9 +54,11 @@ private struct InstanceRow: View {
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
             Text(instance.name)
+                .font(Theme.body(13, .medium))
+                .foregroundStyle(Theme.textBody)
                 .lineLimit(1)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     private var statusColor: Color {
