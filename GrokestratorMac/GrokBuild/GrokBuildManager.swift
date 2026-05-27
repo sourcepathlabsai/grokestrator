@@ -39,15 +39,15 @@ public actor GrokBuildManager {
     }
 
     /// Advanced escape hatch. Most Mac app code should never call this.
-    internal func _client(for id: UUID) -> GrokBuildSessionClient? {
-        server.getClient(for: id)
+    internal func _client(for id: UUID) async -> GrokBuildSessionClient? {
+        await server.getClient(for: id)
     }
 
     /// Lower-level escape hatch that still leaks ACP details.
     /// Most Mac app code should use `conversation(for:)` + the high-level sendPrompt on the conversation instead.
     /// Only for advanced debugging or when you genuinely need the raw ACP stream.
     public func runPrompt(on instanceID: UUID, prompt: String) async throws -> (sessionId: String, events: AsyncStream<ACPEvent>) {
-        guard let client = server.getClient(for: instanceID) else {
+        guard let client = await server.getClient(for: instanceID) else {
             throw GrokBuildError.instanceManagementError("No active client for instance \(instanceID)")
         }
         let sessionId = try await client.createSession()
@@ -57,7 +57,7 @@ public actor GrokBuildManager {
 
     /// Restores conversations for all currently running instances (called on app launch / server restart).
     public func restoreActiveConversations() async throws {
-        let running = server.listRunningInstances()
+        let running = await server.listRunningInstances()
         for inst in running {
             _ = try? await conversation(for: inst.id)
         }
@@ -75,11 +75,11 @@ public actor GrokBuildManager {
             return existing
         }
 
-        if server.getClient(for: instanceID) == nil, let cfg = config {
+        if await server.getClient(for: instanceID) == nil, let cfg = config {
             _ = try await server.startInstance(cfg)
         }
 
-        guard let client = server.getClient(for: instanceID) else {
+        guard let client = await server.getClient(for: instanceID) else {
             throw GrokBuildError.instanceManagementError("Failed to obtain client for instance \(instanceID)")
         }
 
@@ -98,21 +98,23 @@ public actor GrokBuildManager {
         try await convo.loadHistoryIfAvailable()
 
         // Wire process death into the conversation (black box)
-        server.onInstanceDied(id: instanceID) { [weak self] id, exitCode in
-            Task { [weak self] in
-                guard let self = self else { return }
-                if var inst = self.instanceStates[id] {
-                    inst.status = .crashed
-                    self.instanceStates[id] = inst
-                }
-                if let convo = self.activeConversations[id] {
-                    await convo.onProcessDied(exitCode: exitCode)
-                }
-            }
+        await server.onInstanceDied(id: instanceID) { [weak self] id, exitCode in
+            Task { await self?.handleInstanceDeath(id: id, exitCode: exitCode) }
         }
 
         activeConversations[instanceID] = convo
         return convo
+    }
+
+    /// Actor-isolated handler invoked when an instance's process dies.
+    private func handleInstanceDeath(id: UUID, exitCode: Int32) async {
+        if var inst = instanceStates[id] {
+            inst.status = .crashed
+            instanceStates[id] = inst
+        }
+        if let convo = activeConversations[id] {
+            await convo.onProcessDied(exitCode: exitCode)
+        }
     }
 
     public func flattenedHistory(for instanceID: UUID) async -> [AgentMessage]? {
@@ -120,12 +122,12 @@ public actor GrokBuildManager {
     }
 
     /// Returns the current runtime state of a managed instance (including status).
-    public func instanceState(for id: UUID) -> ManagedInstance? {
-        server.currentInstanceState(for: id)
+    public func instanceState(for id: UUID) async -> ManagedInstance? {
+        await server.currentInstanceState(for: id)
     }
 
     /// All currently active conversations. Most Mac app code should not need to enumerate this.
-    public func activeConversations() -> [UUID: GrokBuildConversation] {
+    public func allActiveConversations() -> [UUID: GrokBuildConversation] {
         activeConversations
     }
 

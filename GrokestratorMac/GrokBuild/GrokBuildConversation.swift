@@ -110,58 +110,69 @@ public actor GrokBuildConversation {
 
         let (wrapped, continuation) = AsyncStream<ConversationUpdate>.makeStream(bufferingPolicy: .unbounded)
 
-        // Capture self weakly for the task
+        // Capture self weakly for the task. All actor state is touched through
+        // isolated helpers (`process(_:)` / `finalizeTurn()`) so the loop stays
+        // off the actor while still mutating state safely.
         Task { [weak self] in
             guard let self = self else {
                 continuation.finish()
                 return
             }
 
-            var collectedForThisTurn: [ConversationUpdate] = []
-
             for await raw in rawStream {
-                // Always feed the internal structured history (ACP stays inside the black box)
-                await self.history.appendEvent(raw)
-
-                // Map to high-level update (this is what callers see)
-                let update = self.mapToConversationUpdate(raw)
+                let update = await self.process(raw)
                 continuation.yield(update)
-                collectedForThisTurn.append(update)
-
-                // Track pending items so pendingToolCalls() and currentState() are truthful
-                self.trackPending(from: raw)
-
-                // Aggressive auto-persist on meaningful events
-                if case .message = raw {
-                    try? await self.history.save()
-                } else if case .toolCall = raw {
-                    try? await self.history.save()
-                } else if case .permissionRequest = raw {
-                    try? await self.history.save()
-                }
-
-                // Capture a simple final answer heuristic for convenience APIs
-                if case .message(let m) = raw, (m.metadata?["final"] != nil || m.role == "assistant") {
-                    // last non-thought assistant message is a reasonable "final" for many agents
-                    self.lastFinalAnswer = m.content
-                }
             }
 
-            // Turn is complete from the agent's perspective
-            await self.history.finishCurrentTurn()
-            try? await self.history.save()
-
-            // Yield a clean terminal marker
-            let final = self.lastFinalAnswer
+            // Turn is complete from the agent's perspective.
+            let final = await self.finalizeTurn()
             continuation.yield(.turnComplete(finalAnswer: final))
             continuation.finish()
-
-            // Clear any tool/permission expectations for this turn (they should have been answered or abandoned)
-            self.pendingToolCalls.removeAll()
-            self.pendingPermissions.removeAll()
         }
 
         return wrapped
+    }
+
+    /// Processes one raw ACP event on the actor: records history, maps it to a
+    /// high-level update, tracks pending items, and auto-persists meaningful events.
+    private func process(_ raw: ACPEvent) async -> ConversationUpdate {
+        // Always feed the internal structured history (ACP stays inside the black box)
+        await history.appendEvent(raw)
+
+        let update = mapToConversationUpdate(raw)
+
+        // Track pending items so pendingToolCalls() and currentState() are truthful
+        trackPending(from: raw)
+
+        // Aggressive auto-persist on meaningful events
+        switch raw {
+        case .message, .toolCall, .permissionRequest:
+            try? await history.save()
+        default:
+            break
+        }
+
+        // Capture a simple final answer heuristic for convenience APIs:
+        // the last assistant message is a reasonable "final" for many agents.
+        if case .message(let m) = raw, (m.metadata?["final"] != nil || m.role == "assistant") {
+            lastFinalAnswer = m.content
+        }
+
+        return update
+    }
+
+    /// Finalizes the current turn on the actor and returns the captured final answer.
+    private func finalizeTurn() async -> String? {
+        await history.finishCurrentTurn()
+        try? await history.save()
+
+        let final = lastFinalAnswer
+
+        // Clear any tool/permission expectations for this turn.
+        pendingToolCalls.removeAll()
+        pendingPermissions.removeAll()
+
+        return final
     }
 
     /// Send a prompt and collect the full set of updates plus a synthesized result.
@@ -293,7 +304,7 @@ public actor GrokBuildConversation {
     /// Force-finish the current turn (useful when the agent is done).
     public func finishCurrentTurn() async {
         await history.finishCurrentTurn()
-        client.finishCurrentPrompt(for: sessionID)
+        await client.finishCurrentPrompt(for: sessionID)
     }
 
     // MARK: - Bidirectional (tool results, permissions) - ergonomic black box surface

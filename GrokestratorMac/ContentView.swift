@@ -37,7 +37,7 @@ struct ContentView: View {
                     Text("Server: \(exampleServer.name)")
                     Text("Tailscale: \(exampleServer.tailscaleAddress):\(exampleServer.port)")
                 }
-                .font(.monospaced)
+                .font(.system(.body, design: .monospaced))
                 .padding()
                 .background(.quaternary)
                 .cornerRadius(8)
