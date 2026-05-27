@@ -151,6 +151,13 @@ public actor GrokBuildManager {
         await activeConversations[instanceID]?.getHistory()
     }
 
+    /// Capabilities (model, MCP servers, slash commands) for an instance — for the
+    /// Instance Inspector and the composer's slash-command popup.
+    public func capabilities(for instanceID: UUID) async throws -> AgentCapabilities {
+        let convo = try await conversation(for: instanceID)
+        return try await convo.capabilities()
+    }
+
     /// Get a clean state snapshot (history + pending tool/permission counts + alive status).
     /// This is the primary observation point for the rest of the Mac app.
     public func state(for instanceID: UUID) async -> ConversationState? {

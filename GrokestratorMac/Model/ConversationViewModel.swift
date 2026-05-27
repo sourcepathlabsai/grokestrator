@@ -44,6 +44,12 @@ final class ConversationViewModel {
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
     /// even while a bubble grows in place (entry count doesn't change then).
     private(set) var streamTick = 0
+    /// Instance capabilities (model, MCP servers, slash commands) for the Instance
+    /// Inspector and the composer slash-command popup. Loaded lazily on first view.
+    private(set) var capabilities: AgentCapabilities?
+
+    /// Slash commands advertised by the instance (for the composer popup).
+    var slashCommands: [SlashCommand] { capabilities?.commands ?? [] }
 
     private let driver: ConversationDriver
     private var streamingTask: Task<Void, Never>?
@@ -55,6 +61,17 @@ final class ConversationViewModel {
 
     init(driver: ConversationDriver) {
         self.driver = driver
+    }
+
+    /// Loads instance capabilities once (idempotent). Safe to call on view appear;
+    /// for a live instance this also triggers the ACP initialize/session handshake.
+    func loadCapabilities(force: Bool = false) {
+        guard force || capabilities == nil else { return }
+        let driver = self.driver
+        Task { [weak self] in
+            let caps = await driver.capabilities()
+            if let caps { self?.capabilities = caps }
+        }
     }
 
     /// Sends a prompt and streams the response into `entries`.

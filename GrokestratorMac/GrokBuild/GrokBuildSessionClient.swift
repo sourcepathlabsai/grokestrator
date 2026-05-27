@@ -21,6 +21,11 @@ public actor GrokBuildSessionClient {
     private var initialized = false
     private var sessionId: String?
 
+    /// What this instance can do (model, MCP servers, slash commands), captured
+    /// from the `initialize` result and refreshed by `available_commands_update`.
+    /// Drives the Instance Inspector and the composer's slash-command popup.
+    private var capabilities = AgentCapabilities.empty
+
     // Active prompt streaming + chunk coalescing.
     private var activeStream: AsyncStream<ACPEvent>.Continuation?
     private var thoughtBuffer = ""
@@ -50,6 +55,14 @@ public actor GrokBuildSessionClient {
     @discardableResult
     public func createSession(metadata: [String: String]? = nil) async throws -> String {
         try await ensureSession()
+    }
+
+    /// The instance's capabilities (model, MCP servers, slash commands). Ensures
+    /// the session exists first so `initialize` (and its `available_commands_update`
+    /// follow-up) have run — making this safe to call before the first prompt.
+    public func currentCapabilities() async throws -> AgentCapabilities {
+        _ = try await ensureSession()
+        return capabilities
     }
 
     /// Sends a prompt and returns a stream of high-level `ACPEvent`s for the turn.
@@ -125,6 +138,7 @@ public actor GrokBuildSessionClient {
                 timeout: 30
             )
             cwd = initResult.meta?.currentWorkingDirectory ?? cwd
+            capabilities = initResult.toCapabilities()
             initialized = true
         }
 
@@ -183,7 +197,13 @@ public actor GrokBuildSessionClient {
                 emit(.activity(ActivityEvent(sessionId: sid, note: "\(p.update.title ?? "tool") — \(status)", kind: "tool_update", metadata: nil)))
             }
 
-        case "available_commands_update", "plan", "current_mode_update":
+        case "available_commands_update":
+            // The authoritative, possibly-updating command list (plugins can change it).
+            if let cmds = p.update.availableCommands {
+                capabilities.commands = cmds.map { SlashCommand(name: $0.name, description: $0.description, hint: $0.input?.hint) }
+            }
+
+        case "plan", "current_mode_update":
             break
 
         default:
@@ -348,9 +368,60 @@ private extension GrokBuildSessionClient {
     }
 }
 
-/// Minimal decode of the `initialize` result — we only need the cwd hint.
+/// Decode of the `initialize` result `_meta` — cwd plus the capability data the
+/// inspector / slash popup surface (model, MCP servers, slash commands).
+/// Verified against `grok 0.2.3` (see PROJECT_STATE / probe notes).
 private struct InitializeResult: Decodable {
-    struct Meta: Decodable { let currentWorkingDirectory: String? }
     let meta: Meta?
     enum CodingKeys: String, CodingKey { case meta = "_meta" }
+
+    struct Meta: Decodable {
+        let agentVersion: String?
+        let currentWorkingDirectory: String?
+        let modelState: ModelState?
+        let mcpServers: [MCPServer]?
+        let availableCommands: [CommandWire]?
+    }
+
+    struct ModelState: Decodable {
+        let currentModelId: String?
+        let availableModels: [Model]?
+    }
+
+    struct Model: Decodable {
+        let modelId: String
+        let name: String?
+        let description: String?
+        let meta: ModelMeta?
+        enum CodingKeys: String, CodingKey { case modelId, name, description, meta = "_meta" }
+        struct ModelMeta: Decodable { let totalContextTokens: Int? }
+    }
+
+    /// We intentionally decode only identity + transport — never `args`/`env`,
+    /// which carry plaintext secrets in grok's config.
+    struct MCPServer: Decodable {
+        let name: String?
+        let type: String?
+        let command: String?
+    }
+
+    func toCapabilities() -> AgentCapabilities {
+        let models = (meta?.modelState?.availableModels ?? []).map {
+            AgentModel(id: $0.modelId, name: $0.name, description: $0.description, contextTokens: $0.meta?.totalContextTokens)
+        }
+        let servers = (meta?.mcpServers ?? []).enumerated().map { idx, s in
+            MCPServerInfo(id: s.name ?? "\(s.command ?? "server")-\(idx)", name: s.name, type: s.type, command: s.command)
+        }
+        let commands = (meta?.availableCommands ?? []).map {
+            SlashCommand(name: $0.name, description: $0.description, hint: $0.input?.hint)
+        }
+        return AgentCapabilities(
+            agentVersion: meta?.agentVersion,
+            workingDirectory: meta?.currentWorkingDirectory,
+            currentModelId: meta?.modelState?.currentModelId,
+            models: models,
+            mcpServers: servers,
+            commands: commands
+        )
+    }
 }

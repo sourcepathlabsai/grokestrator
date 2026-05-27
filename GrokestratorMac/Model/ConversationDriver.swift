@@ -13,6 +13,10 @@ public protocol ConversationDriver: Sendable {
 
     /// Answers a pending permission request with the chosen ACP `optionId`.
     func respondToPermission(permissionId: String, optionId: String) async
+
+    /// The instance's capabilities (model, MCP servers, slash commands) for the
+    /// Instance Inspector and slash-command popup. `nil` if unavailable.
+    func capabilities() async -> AgentCapabilities?
 }
 
 /// Drives a conversation against a real Grok Build instance via the black box.
@@ -35,6 +39,10 @@ public struct LiveConversationDriver: ConversationDriver {
 
     public func respondToPermission(permissionId: String, optionId: String) async {
         try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: optionId)
+    }
+
+    public func capabilities() async -> AgentCapabilities? {
+        try? await manager.capabilities(for: instanceID)
     }
 }
 
@@ -101,6 +109,30 @@ public actor MockConversationDriver: ConversationDriver {
     public func respondToPermission(permissionId _: String, optionId: String) async {
         permissionContinuation?.resume(returning: optionId)
         permissionContinuation = nil
+    }
+
+    /// A representative canned capability set (mirrors real grok 0.2.3) so the
+    /// inspector and slash-command popup are demoable without a live process.
+    public func capabilities() async -> AgentCapabilities? {
+        AgentCapabilities(
+            agentVersion: "0.2.3 (mock)",
+            workingDirectory: FileManager.default.currentDirectoryPath,
+            currentModelId: "grok-build",
+            models: [AgentModel(id: "grok-build", name: "Grok Build", description: "Best for advanced coding tasks", contextTokens: 512_000)],
+            mcpServers: [
+                MCPServerInfo(id: "context7", name: "context7", type: "stdio", command: "npx"),
+                MCPServerInfo(id: "obsidian", name: "obsidian", type: "stdio", command: "npx"),
+            ],
+            commands: [
+                SlashCommand(name: "compact", description: "Compress conversation history to save context window", hint: "optional context about what to preserve"),
+                SlashCommand(name: "context", description: "Show context window usage and session stats", hint: nil),
+                SlashCommand(name: "session-info", description: "Show session details (model, turns, context usage)", hint: nil),
+                SlashCommand(name: "always-approve", description: "Toggle always-approve mode (skip all permission prompts)", hint: "on|off"),
+                SlashCommand(name: "loop", description: "Run a prompt on a recurring interval", hint: "[interval] <prompt>"),
+                SlashCommand(name: "graphify", description: "Turn any input into a knowledge graph", hint: nil),
+                SlashCommand(name: "help", description: "Grok docs — config, MCP, auth, skills, commands", hint: nil),
+            ]
+        )
     }
 
     private func awaitPermission() async -> String {

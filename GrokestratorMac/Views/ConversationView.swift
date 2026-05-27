@@ -5,6 +5,10 @@ import GrokestratorCore
 struct ConversationView: View {
     @Bindable var instance: InstanceItem
     @State private var draft = ""
+    /// Highlighted row in the slash-command popup (keyboard navigation).
+    @State private var slashHighlight = 0
+    /// Set when the user dismisses the popup with Escape; reset when the token changes.
+    @State private var slashDismissed = false
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -23,10 +27,14 @@ struct ConversationView: View {
                 .animation(.snappy, value: conversation.pendingPermission)
             Divider()
             quickReplyBar
+            if showSlashPopup {
+                SlashCommandPopup(matches: slashMatches, highlight: slashHighlight) { applyCommand($0) }
+            }
             composer
         }
         .navigationTitle(instance.name)
         .navigationSubtitle(instance.status.rawValue)
+        .task { conversation.loadCapabilities() }
     }
 
     private var transcript: some View {
@@ -60,11 +68,13 @@ struct ConversationView: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(instance.name)…", text: $draft, axis: .vertical)
+            TextField("Message \(instance.name)…  (type / for commands)", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Theme.body(13))
                 .lineLimit(1...6)
                 .onSubmit(send)
+                .onChange(of: slashToken) { slashHighlight = 0; slashDismissed = false }
+                .onKeyPress(action: handleComposerKey)
                 .padding(8)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
@@ -84,6 +94,55 @@ struct ConversationView: View {
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
+    }
+
+    // MARK: - Slash command popup
+
+    /// The command token being typed: non-nil only while the draft is a leading
+    /// `/word` with no space yet (i.e. the user is still typing the command name).
+    private var slashToken: String? {
+        guard draft.hasPrefix("/") else { return nil }
+        let rest = draft.dropFirst()
+        return rest.contains(" ") ? nil : String(rest)
+    }
+
+    /// Commands matching the current token (prefix match; all commands for a bare `/`).
+    private var slashMatches: [SlashCommand] {
+        guard let token = slashToken else { return [] }
+        let cmds = conversation.slashCommands
+        guard !token.isEmpty else { return cmds }
+        let q = token.lowercased()
+        return cmds.filter { $0.name.lowercased().hasPrefix(q) }
+    }
+
+    private var showSlashPopup: Bool {
+        !slashDismissed && !conversation.isStreaming
+            && conversation.pendingPermission == nil && !slashMatches.isEmpty
+    }
+
+    /// Inserts the chosen command, leaving the cursor ready to type any argument.
+    private func applyCommand(_ cmd: SlashCommand) {
+        draft = "/\(cmd.name) "
+        slashHighlight = 0
+    }
+
+    /// Routes arrow/return/escape to the popup while it's open; otherwise lets the
+    /// field handle the key normally (returns `.ignored`).
+    private func handleComposerKey(_ press: KeyPress) -> KeyPress.Result {
+        guard showSlashPopup else { return .ignored }
+        switch press.key {
+        case .upArrow:
+            slashHighlight = max(0, slashHighlight - 1); return .handled
+        case .downArrow:
+            slashHighlight = min(slashMatches.count - 1, slashHighlight + 1); return .handled
+        case .return:
+            if slashMatches.indices.contains(slashHighlight) { applyCommand(slashMatches[slashHighlight]) }
+            return .handled
+        case .escape:
+            slashDismissed = true; return .handled
+        default:
+            return .ignored
+        }
     }
 
     @ViewBuilder
@@ -251,5 +310,47 @@ private struct PermissionOverlay: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
         .shadow(radius: 16, y: 6)
+    }
+}
+
+/// Autocomplete list shown above the composer when the draft leads with `/`.
+/// Filtered to the typed token; click or press Return to insert the highlighted one.
+private struct SlashCommandPopup: View {
+    let matches: [SlashCommand]
+    let highlight: Int
+    let onPick: (SlashCommand) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(matches.enumerated()), id: \.element.id) { index, cmd in
+                Button { onPick(cmd) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
+                        if let hint = cmd.hint {
+                            Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                        }
+                        Spacer(minLength: 12)
+                        if let d = cmd.description {
+                            Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                                .lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: 280, alignment: .trailing)
+                        }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(index == highlight ? Theme.accentSoft : Color.clear,
+                                in: RoundedRectangle(cornerRadius: Theme.radiusXs))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
     }
 }
