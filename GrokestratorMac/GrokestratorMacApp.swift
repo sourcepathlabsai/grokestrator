@@ -3,14 +3,12 @@ import GrokestratorCore
 
 @main
 struct GrokestratorMacApp: App {
-    // In a real Xcode project, you would add the local GrokestratorCore package
-    // via File > Add Packages > Add Local... pointing to ../Packages/GrokestratorCore
+    @State private var model = GrokestratorModel()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(model: model)
                 .frame(minWidth: 900, minHeight: 600)
         }
-        .windowStyle(.hiddenTitleBar)  // Clean, low-chrome Mac feel to start
     }
 }
