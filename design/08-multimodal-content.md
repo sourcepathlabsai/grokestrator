@@ -79,6 +79,15 @@ Categorization is **mimeType-driven** with an "unknown → file/download" fallba
 
 > **Likely Grok behavior (to verify):** as a coding agent, Grok may deliver generated media by **writing a file and returning a `resource_link`** to it (a local path), rather than inlining base64. So `localFile` references are expected to be common — which is exactly what makes the iOS path (below) matter.
 
+## Verified: grok-build behavior (2026-05-27)
+
+Probed `grok agent stdio` directly. Findings:
+
+- **grok-build emits only `text` content blocks** — no native ACP `image`/`audio`/`resource` blocks come back in responses. Its `read_file` tool ingests images as *multimodal input* (grok "sees" them), but output is always text.
+- **Media surfaces as markdown image references inside the assistant's text.** Asked to display an image, grok replied with `![red](data:image/png;base64,iVBORw0KGgoA…)`. It will likewise emit `![alt](/path/to/file.png)` (local paths) and `![alt](https://…)` (URLs) for files it references or writes.
+
+**Implication for implementation:** for grok-build, the `ContentPart` pipeline is fed primarily by a **markdown image extractor** over the assistant text (data URI → `inline`; absolute path / `file://` → `localFile`; `http(s)` → `remote`), *not* by ACP media blocks. The ACP media-block → `ContentPart` mapping above is retained for the general/future case (other agents, or Grok gaining native media output) with graceful unknown-handling, but it is not the path that fires today.
+
 ## UI / UX
 
 - **Image** — inline `Image` (capped max width), click to enlarge (Quick Look), download button.

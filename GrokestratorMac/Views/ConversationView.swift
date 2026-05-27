@@ -85,6 +85,10 @@ private struct TranscriptRow: View {
             row(icon: "sparkle", tint: .purple) {
                 Text(text).textSelection(.enabled)
             }
+        case .assistantContent(let parts):
+            row(icon: "sparkle", tint: .purple) {
+                AssistantContentView(parts: parts)
+            }
         case .thought(let text):
             note("💭 \(text)")
         case .update(let update):

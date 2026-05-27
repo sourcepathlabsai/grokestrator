@@ -11,6 +11,8 @@ struct TranscriptEntry: Identifiable, Sendable {
         case userPrompt(String)
         /// Assistant answer text (may grow live as deltas stream in).
         case assistantMessage(String)
+        /// Finalized assistant answer parsed into parts (text + inline images).
+        case assistantContent([ContentPart])
         /// Assistant thinking text (may grow live as deltas stream in).
         case thought(String)
         /// Any other update: tool calls, progress/activity notes, errors, turn divider, etc.
@@ -130,14 +132,24 @@ final class ConversationViewModel {
     /// A coalesced full message/thought arrived — finalize the streaming bubble
     /// (replacing with authoritative text) or add a finalized entry if none.
     private func finalize(_ full: String, kind: StreamKind) {
+        let finalKind = finalizedKind(full, kind: kind)
         if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
-            entries[idx].kind = kind == .message ? .assistantMessage(full) : .thought(full)
+            entries[idx].kind = finalKind
         } else {
             endStreaming()
-            entries.append(TranscriptEntry(kind: kind == .message ? .assistantMessage(full) : .thought(full)))
+            entries.append(TranscriptEntry(kind: finalKind))
         }
         endStreaming()
         streamTick += 1
+    }
+
+    /// A finalized assistant message is parsed for inline content (images);
+    /// if it contains any non-text part, it becomes `.assistantContent`.
+    private func finalizedKind(_ full: String, kind: StreamKind) -> TranscriptEntry.Kind {
+        guard kind == .message else { return .thought(full) }
+        let parts = ContentParser.parse(full)
+        let hasMedia = parts.contains { if case .text = $0 { return false } else { return true } }
+        return hasMedia ? .assistantContent(parts) : .assistantMessage(full)
     }
 
     private func appendEntry(_ kind: TranscriptEntry.Kind) {
