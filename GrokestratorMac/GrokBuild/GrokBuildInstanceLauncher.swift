@@ -45,23 +45,28 @@ public actor GrokBuildInstanceLauncher {
         stdoutHandlers[config.id] = stdoutContinuation
         stderrHandlers[config.id] = stderrContinuation
 
-        // Start reading stdout (FileHandle.bytes yields individual UInt8 values;
-        // wrap each as Data for the line-based ACP reader downstream).
-        Task {
-            let handle = stdoutPipe.fileHandleForReading
-            for try await byte in handle.bytes {
-                stdoutContinuation.yield(Data([byte]))
+        // Stream stdout/stderr in chunks via readability handlers. (Reading
+        // byte-by-byte through an AsyncStream stalls on multi-KB ACP messages.)
+        let stdoutFH = stdoutPipe.fileHandleForReading
+        stdoutFH.readabilityHandler = { fh in
+            let data = fh.availableData
+            if data.isEmpty {
+                stdoutContinuation.finish()
+                fh.readabilityHandler = nil
+            } else {
+                stdoutContinuation.yield(data)
             }
-            stdoutContinuation.finish()
         }
 
-        // Start reading stderr
-        Task {
-            let handle = stderrPipe.fileHandleForReading
-            for try await byte in handle.bytes {
-                stderrContinuation.yield(Data([byte]))
+        let stderrFH = stderrPipe.fileHandleForReading
+        stderrFH.readabilityHandler = { fh in
+            let data = fh.availableData
+            if data.isEmpty {
+                stderrContinuation.finish()
+                fh.readabilityHandler = nil
+            } else {
+                stderrContinuation.yield(data)
             }
-            stderrContinuation.finish()
         }
 
         do {

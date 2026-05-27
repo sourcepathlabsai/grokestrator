@@ -1,246 +1,329 @@
 import Foundation
-import GrokestratorCore
 
-/// High-level client for talking to a single running Grok Build instance
-/// using the Agent Client Protocol over stdio.
+/// High-level client for one running Grok Build instance, speaking real ACP
+/// (newline-delimited JSON-RPC 2.0) over stdio.
+///
+/// Responsibilities:
+/// - lazily `initialize` + `session/new` (one session per instance for now),
+/// - run `session/prompt` and translate streamed `session/update` notifications
+///   into the internal `ACPEvent` stream the rest of the black box consumes,
+/// - service agent→client requests: auto-approve `session/request_permission`
+///   and perform `fs/read_text_file` / `fs/write_text_file`.
 public actor GrokBuildSessionClient {
     private let handle: GrokBuildInstanceHandle
     private let reader: ACPMessageReader
-    private var activeSessions: Set<String> = []
-    private var requestIdCounter: UInt64 = 0
-    private var pendingRequests: [String: CheckedContinuation<ACPMessage, Error>] = [:]
+
+    private var nextId = 1
+    private var pending: [RPCID: CheckedContinuation<Data, Error>] = [:]
+
+    private var initialized = false
+    private var sessionId: String?
+
+    // Active prompt streaming + chunk coalescing.
+    private var activeStream: AsyncStream<ACPEvent>.Continuation?
+    private var thoughtBuffer = ""
+    private var messageBuffer = ""
 
     private var readerTask: Task<Void, Never>?
-    private var activePromptStreams: [String: AsyncStream<ACPEvent>.Continuation] = [:]
 
     public init(handle: GrokBuildInstanceHandle) {
         self.handle = handle
         self.reader = ACPMessageReader(dataStream: handle.stdout)
-        // Start the reader once the actor is fully initialized (can't call an
-        // actor-isolated method directly from a synchronous init under Swift 6).
-        Task { await self.startPersistentReader() }
+        // Start the reader once the actor is fully initialized.
+        Task { await self.startReader() }
     }
 
-    private func startPersistentReader() {
-        readerTask = Task {
-            for await message in await reader.messages() {
-                await self.routeMessage(message)
+    private func startReader() {
+        readerTask = Task { [reader] in
+            for await line in await reader.lines() {
+                await self.handleLine(line)
             }
+            await self.handleDisconnect()
         }
     }
 
-    private func routeMessage(_ message: ACPMessage) async {
-        // 1. Try to satisfy a pending request/response
-        if let id = message.id, let cont = pendingRequests.removeValue(forKey: id) {
-            cont.resume(returning: message)
-            return
-        }
+    // MARK: - Public API (compatible with the existing black box)
 
-        // 2. Decode event and try to route it intelligently
-        guard let event = decodeEvent(from: message) else { return }
-
-        // Extract sessionId from the event when possible
-        let targetSession: String? = {
-            switch event {
-            case .message(let e): return e.sessionId
-            case .thought(let e): return e.sessionId
-            case .toolCall(let e): return e.sessionId
-            case .toolResult(let e): return e.sessionId
-            case .permissionRequest(let e): return e.sessionId
-            case .sessionUpdate(let e): return e.sessionId
-            default: return nil
-            }
-        }()
-
-        if let session = targetSession, let cont = activePromptStreams[session] {
-            cont.yield(event)
-        } else {
-            // Fallback: send to any active stream (common case is a single active prompt).
-            if let anyStream = activePromptStreams.values.first {
-                anyStream.yield(event)
-            }
-        }
-    }
-
-    /// Creates a new session with the Grok Build instance.
+    /// Ensures the instance is initialized + has a session, returning the session id.
+    @discardableResult
     public func createSession(metadata: [String: String]? = nil) async throws -> String {
-        let request = ACPRequest.createSession(CreateSessionRequest(metadata: metadata))
-        let responseMessage = try await sendRequest(request)
-
-        // Try to extract a real session id from the response if the agent provides one
-        let sessionId: String
-        if let event = decodeEvent(from: responseMessage),
-           case .sessionCreated(let created) = event {
-            sessionId = created.sessionId
-        } else {
-            sessionId = "session-\(UUID().uuidString.prefix(8))"
-        }
-
-        activeSessions.insert(sessionId)
-        return sessionId
+        try await ensureSession()
     }
 
-    /// Sends a prompt to an active session and returns a live stream of events
-    /// coming from the actual Grok Build process.
-    /// The stream will continue until the agent signals completion for this turn
-    /// or the session is terminated.
-    public func sendPrompt(sessionId: String, prompt: String) async throws -> AsyncStream<ACPEvent> {
-        guard activeSessions.contains(sessionId) else {
-            throw GrokBuildError.protocolError("Session \(sessionId) does not exist")
-        }
-
-        let request = ACPRequest.prompt(PromptRequest(sessionId: sessionId, prompt: prompt))
-        _ = try await sendRequest(request)
+    /// Sends a prompt and returns a stream of high-level `ACPEvent`s for the turn.
+    /// The `sessionId` argument is accepted for source compatibility but ignored —
+    /// the client manages its own (single) ACP session.
+    public func sendPrompt(sessionId _: String, prompt: String) async throws -> AsyncStream<ACPEvent> {
+        let sid = try await ensureSession()
 
         let (stream, continuation) = AsyncStream<ACPEvent>.makeStream(bufferingPolicy: .unbounded)
-        activePromptStreams[sessionId] = continuation
+        activeStream?.finish()
+        activeStream = continuation
+        thoughtBuffer = ""
+        messageBuffer = ""
 
-        // Note: The stream is intentionally left open. The caller should consume until
-        // they see a natural break (e.g. a message with certain metadata or they decide to send another prompt).
-        // We clean it up on terminateSession or explicit finish.
+        Task {
+            do {
+                let result = try await self.request(
+                    method: "session/prompt",
+                    params: .object([
+                        "sessionId": .string(sid),
+                        "prompt": .array([.object(["type": .string("text"), "text": .string(prompt)])]),
+                    ]),
+                    as: PromptStopResult.self,
+                    timeout: 600
+                )
+                await self.completePrompt(stopReason: result.stopReason)
+            } catch {
+                await self.failPrompt(error)
+            }
+        }
 
         return stream
     }
 
-    /// Explicitly finishes the event stream for a prompt (useful when you know the turn is done).
-    public func finishCurrentPrompt(for sessionId: String) {
-        activePromptStreams[sessionId]?.finish()
-        activePromptStreams.removeValue(forKey: sessionId)
+    /// No-op under ACP: the agent executes tools itself (asking us for permission
+    /// and file access). Kept for source compatibility with the black box.
+    public func sendToolResult(sessionId _: String, toolCallId _: String, result _: String, isError _: Bool = false) async throws {}
+
+    /// No-op: permission requests are auto-approved inline as they arrive.
+    public func respondToPermission(permissionId _: String, chosenOption _: String, sessionId _: String) async throws {}
+
+    /// Finishes the active prompt stream early.
+    public func finishCurrentPrompt(for _: String) {
+        activeStream?.finish()
+        activeStream = nil
     }
 
-    public func terminateSession(sessionId: String) async {
-        activeSessions.remove(sessionId)
-        activePromptStreams[sessionId]?.finish()
-        activePromptStreams.removeValue(forKey: sessionId)
-
-        // Best-effort cancel
-        let cancel = ACPRequest.cancelSession(sessionId: sessionId)
-        _ = try? await sendRequest(cancel)
+    public func terminateSession(sessionId _: String) async {
+        activeStream?.finish()
+        activeStream = nil
     }
 
-    // MARK: - Bidirectional responses (required for real agent interactions)
+    // MARK: - Session setup
 
-    /// Send a response to a permission request from the agent.
-    public func respondToPermission(permissionId: String, chosenOption: String, sessionId: String) async throws {
-        // In real ACP this is usually sent as a specific response message.
-        // We encode it as a tool-result style or custom response for now.
-        let responsePayload = try JSONEncoder().encode([
-            "permissionId": permissionId,
-            "chosenOption": chosenOption
-        ])
-        let message = ACPMessage(type: "response", id: nil, payload: responsePayload)
-        let data = try JSONEncoder().encode(message)
-        let line = data + "\n".data(using: .utf8)!
-        try handle.stdin.write(contentsOf: line)
-    }
+    private func ensureSession() async throws -> String {
+        if let sessionId { return sessionId }
 
-    /// Send the result of a tool call back to the agent (critical for real multi-turn tool use).
-    public func sendToolResult(sessionId: String, toolCallId: String, result: String, isError: Bool = false) async throws {
-        let toolResult = ToolResultEvent(
-            sessionId: sessionId,
-            toolCallId: toolCallId,
-            result: result,
-            isError: isError
+        var cwd = FileManager.default.currentDirectoryPath
+        if !initialized {
+            let initResult = try await request(
+                method: "initialize",
+                params: .object([
+                    "protocolVersion": .int(1),
+                    "clientCapabilities": .object([
+                        "fs": .object(["readTextFile": .bool(true), "writeTextFile": .bool(true)]),
+                        "terminal": .bool(false),
+                    ]),
+                ]),
+                as: InitializeResult.self,
+                timeout: 30
+            )
+            cwd = initResult.meta?.currentWorkingDirectory ?? cwd
+            initialized = true
+        }
+
+        let result = try await request(
+            method: "session/new",
+            params: .object(["cwd": .string(cwd), "mcpServers": .array([])]),
+            as: NewSessionResult.self,
+            timeout: 30
         )
-        let payload = try JSONEncoder().encode(toolResult)
-        let message = ACPMessage(type: "event", id: nil, payload: payload) // or "response" depending on exact ACP
-        let data = try JSONEncoder().encode(message)
-        let line = data + "\n".data(using: .utf8)!
-        try handle.stdin.write(contentsOf: line)
+        sessionId = result.sessionId
+        return result.sessionId
     }
 
-    // MARK: - Private
+    // MARK: - Incoming line routing
 
-    private func sendRequest(_ request: ACPRequest) async throws -> ACPMessage {
-        let requestId = nextRequestId()
-        let payload = try JSONEncoder().encode(request)
-        let wireMessage = ACPMessage(type: "request", id: requestId, payload: payload)
+    private func handleLine(_ line: Data) async {
+        guard let env = try? JSONDecoder().decode(RPCEnvelope.self, from: line) else { return }
 
-        let data = try JSONEncoder().encode(wireMessage)
-        let line = data + "\n".data(using: .utf8)!
+        if let method = env.method, let id = env.id {
+            await handleAgentRequest(method: method, id: id, line: line)
+        } else if let method = env.method {
+            handleNotification(method: method, line: line)
+        } else if let id = env.id, let cont = pending.removeValue(forKey: id) {
+            cont.resume(returning: line)
+        }
+    }
 
-        try handle.stdin.write(contentsOf: line)
+    private func handleNotification(method: String, line: Data) {
+        guard method == "session/update",
+              let p = try? JSONDecoder().decode(RPCParams<SessionUpdateParams>.self, from: line).params
+        else { return } // ignore vendor _x.ai/* and other notifications for now
 
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingRequests[requestId] = continuation
-            // Real timeout so we don't hang forever if the agent is silent
+        let sid = p.sessionId
+        switch p.update.sessionUpdate {
+        case "agent_thought_chunk":
+            if !messageBuffer.isEmpty { flushMessage(sid) }
+            if let t = p.update.content?.text { thoughtBuffer += t }
+
+        case "agent_message_chunk":
+            if !thoughtBuffer.isEmpty { flushThought(sid) }
+            if let t = p.update.content?.text { messageBuffer += t }
+
+        case "tool_call":
+            flushThought(sid); flushMessage(sid)
+            let name = p.update.title ?? p.update.kind ?? "tool"
+            emit(.toolCall(ToolCallEvent(sessionId: sid, toolCallId: p.update.toolCallId ?? UUID().uuidString, toolName: name, arguments: nil)))
+
+        case "tool_call_update":
+            if let status = p.update.status {
+                emit(.activity(ActivityEvent(sessionId: sid, note: "\(p.update.title ?? "tool") — \(status)", kind: "tool_update", metadata: nil)))
+            }
+
+        case "available_commands_update", "plan", "current_mode_update":
+            break
+
+        default:
+            emit(.activity(ActivityEvent(sessionId: sid, note: p.update.sessionUpdate, kind: "update", metadata: nil)))
+        }
+    }
+
+    private func handleAgentRequest(method: String, id: RPCID, line: Data) async {
+        switch method {
+        case "session/request_permission":
+            let p = try? JSONDecoder().decode(RPCParams<PermissionParams>.self, from: line).params
+            let allow = p?.options.first { ($0.kind ?? "").hasPrefix("allow") } ?? p?.options.first
+            if let optionId = allow?.optionId {
+                respond(id: id, result: .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(optionId)])]))
+                emit(.activity(ActivityEvent(sessionId: p?.sessionId, note: "Auto-approved a permission request", kind: "permission", metadata: nil)))
+            } else {
+                respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
+            }
+
+        case "fs/read_text_file":
+            guard let p = try? JSONDecoder().decode(RPCParams<FsReadParams>.self, from: line).params else {
+                respondError(id, "invalid fs/read_text_file params"); return
+            }
+            respond(id: id, result: .object(["content": .string(readFile(p))]))
+            emit(.activity(ActivityEvent(sessionId: p.sessionId, note: "read \(p.path)", kind: "fs", metadata: nil)))
+
+        case "fs/write_text_file":
+            guard let p = try? JSONDecoder().decode(RPCParams<FsWriteParams>.self, from: line).params else {
+                respondError(id, "invalid fs/write_text_file params"); return
+            }
+            try? p.content.write(toFile: p.path, atomically: true, encoding: .utf8)
+            respond(id: id, result: .null)
+            emit(.activity(ActivityEvent(sessionId: p.sessionId, note: "wrote \(p.path)", kind: "fs", metadata: nil)))
+
+        default:
+            respondError(id, "method not handled: \(method)")
+        }
+    }
+
+    private func readFile(_ p: FsReadParams) -> String {
+        guard let full = try? String(contentsOfFile: p.path, encoding: .utf8) else { return "" }
+        if p.line == nil && p.limit == nil { return full }
+        var lines = full.components(separatedBy: "\n")
+        let start = max((p.line ?? 1) - 1, 0)
+        lines = start < lines.count ? Array(lines[start...]) : []
+        if let limit = p.limit, limit < lines.count { lines = Array(lines[0..<limit]) }
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Prompt completion / streaming helpers
+
+    private func completePrompt(stopReason _: String?) {
+        let sid = sessionId ?? ""
+        flushThought(sid)
+        flushMessage(sid)
+        activeStream?.yield(.done(sessionId: sid))
+        activeStream?.finish()
+        activeStream = nil
+    }
+
+    private func failPrompt(_ error: Error) {
+        activeStream?.yield(.error(ACPErrorEvent(sessionId: sessionId, code: "prompt_failed", message: error.localizedDescription)))
+        activeStream?.finish()
+        activeStream = nil
+    }
+
+    private func flushThought(_ sid: String) {
+        guard !thoughtBuffer.isEmpty else { return }
+        emit(.thought(ThoughtEvent(sessionId: sid, content: thoughtBuffer, metadata: nil)))
+        thoughtBuffer = ""
+    }
+
+    private func flushMessage(_ sid: String) {
+        guard !messageBuffer.isEmpty else { return }
+        emit(.message(MessageEvent(sessionId: sid, role: "assistant", content: messageBuffer, metadata: nil)))
+        messageBuffer = ""
+    }
+
+    private func emit(_ event: ACPEvent) {
+        activeStream?.yield(event)
+    }
+
+    private func handleDisconnect() {
+        for (_, cont) in pending { cont.resume(throwing: GrokBuildError.protocolError("ACP connection closed")) }
+        pending.removeAll()
+        activeStream?.finish()
+        activeStream = nil
+    }
+
+    // MARK: - JSON-RPC request/response plumbing
+
+    private func request<T: Decodable>(method: String, params: JSONValue, as _: T.Type, timeout: Double) async throws -> T {
+        let id = RPCID.int(nextId); nextId += 1
+
+        let line: Data = try await withCheckedThrowingContinuation { cont in
+            pending[id] = cont
+            write(.object(["jsonrpc": .string("2.0"), "id": id.jsonValue, "method": .string(method), "params": params]))
             Task {
-                try? await Task.sleep(nanoseconds: 25_000_000_000) // 25 seconds
-                if let cont = self.pendingRequests.removeValue(forKey: requestId) {
-                    cont.resume(throwing: GrokBuildError.protocolError("Request \(requestId) timed out"))
-                }
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await self.timeoutPending(id, method: method)
             }
+        }
+
+        if let env = try? JSONDecoder().decode(RPCEnvelope.self, from: line), let err = env.error {
+            throw GrokBuildError.protocolError("\(method) failed: \(err.message) (\(err.code))")
+        }
+        return try JSONDecoder().decode(RPCResult<T>.self, from: line).result
+    }
+
+    private func timeoutPending(_ id: RPCID, method: String) {
+        if let cont = pending.removeValue(forKey: id) {
+            cont.resume(throwing: GrokBuildError.protocolError("\(method) timed out"))
         }
     }
 
-    private func decodeEvent(from message: ACPMessage) -> ACPEvent? {
-        guard message.type == "event" || message.type == "response" else { return nil }
+    private func respond(id: RPCID, result: JSONValue) {
+        write(.object(["jsonrpc": .string("2.0"), "id": id.jsonValue, "result": result]))
+    }
 
-        // TEMPORARY RAW LOGGING — helps us capture real progress/activity note shapes from actual grok build instances.
-        // Look for lines starting with [RAW ACP] in the console / Xcode logs.
-        // Remove or gate this before any production build.
-        logRawACPMessage(message, context: "decode")
+    private func respondError(_ id: RPCID, _ message: String) {
+        write(.object([
+            "jsonrpc": .string("2.0"),
+            "id": id.jsonValue,
+            "error": .object(["code": .int(-32603), "message": .string(message)]),
+        ]))
+    }
 
-        do {
-            // Known specific events (order matters a little — more common first)
-            if let ev = try? JSONDecoder().decode(MessageEvent.self, from: message.payload) {
-                return .message(ev)
-            }
-            if let ev = try? JSONDecoder().decode(ThoughtEvent.self, from: message.payload) {
-                return .thought(ev)
-            }
-            if let ev = try? JSONDecoder().decode(ToolCallEvent.self, from: message.payload) {
-                return .toolCall(ev)
-            }
-            if let ev = try? JSONDecoder().decode(ToolResultEvent.self, from: message.payload) {
-                return .toolResult(ev)
-            }
-            if let ev = try? JSONDecoder().decode(PermissionRequestEvent.self, from: message.payload) {
-                return .permissionRequest(ev)
-            }
-            if let ev = try? JSONDecoder().decode(SessionUpdateEvent.self, from: message.payload) {
-                return .sessionUpdate(ev)
-            }
+    /// Encodes a JSON-RPC message and writes it as a single newline-terminated line.
+    /// Uses `.withoutEscapingSlashes` — Grok rejects slash-escaped method names.
+    private func write(_ value: JSONValue) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return }
+        var line = data
+        line.append(0x0A)
+        try? handle.stdin.write(contentsOf: line)
+    }
+}
 
-            // NEW: Progress and activity notes (the "little notes" live updates)
-            if let ev = try? JSONDecoder().decode(ProgressEvent.self, from: message.payload) {
-                return .progress(ev)
-            }
-            if let ev = try? JSONDecoder().decode(ActivityEvent.self, from: message.payload) {
-                return .activity(ev)
-            }
-        } catch {
-            print("[GrokBuildSessionClient] Event decode error: \(error)")
+private extension RPCID {
+    var jsonValue: JSONValue {
+        switch self {
+        case .int(let i): return .int(i)
+        case .string(let s): return .string(s)
         }
-
-        // Ultimate fallback: preserve the raw payload so we don't lose anything during protocol discovery
-        return .unknown(rawPayload: message.payload, typeHint: message.type)
     }
+}
 
-    // TEMPORARY DEBUG HELPER — raw ACP payload logging
-    private func logRawACPMessage(_ message: ACPMessage, context: String) {
-        guard message.type == "event" || message.type == "response" else { return }
-
-        let payloadString: String
-        if let pretty = try? JSONSerialization.jsonObject(with: message.payload),
-           let prettyData = try? JSONSerialization.data(withJSONObject: pretty, options: [.prettyPrinted, .sortedKeys]),
-           let str = String(data: prettyData, encoding: .utf8) {
-            payloadString = str
-        } else {
-            payloadString = String(data: message.payload, encoding: .utf8) ?? "<non-utf8 payload>"
-        }
-
-        print("""
-        [RAW ACP EVENT - TEMP LOG] context=\(context)
-        type=\(message.type) id=\(message.id ?? "nil")
-        payload:
-        \(payloadString)
-        --- end raw ACP ---
-        """)
-    }
-
-    private func nextRequestId() -> String {
-        requestIdCounter += 1
-        return "req-\(requestIdCounter)"
-    }
+/// Minimal decode of the `initialize` result — we only need the cwd hint.
+private struct InitializeResult: Decodable {
+    struct Meta: Decodable { let currentWorkingDirectory: String? }
+    let meta: Meta?
+    enum CodingKeys: String, CodingKey { case meta = "_meta" }
 }
