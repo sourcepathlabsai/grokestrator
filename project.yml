@@ -1,0 +1,67 @@
+# XcodeGen spec for Grokestrator.
+#
+# Generates Grokestrator.xcodeproj with two app targets (macOS hybrid +
+# iOS client), both depending on the local GrokestratorCore Swift package,
+# matching design/06-project-structure.md.
+#
+# The generated .xcodeproj is NOT checked in — regenerate it any time with:
+#   xcodegen generate
+name: Grokestrator
+
+options:
+  bundleIdPrefix: org.profleetsolutions.grokestrator
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"            # Swift 6 language mode, matching GrokestratorCore
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+
+packages:
+  GrokestratorCore:
+    path: Packages/GrokestratorCore
+
+targets:
+  # macOS app — hybrid: runs both the client UI and the server.
+  # Intentionally non-sandboxed (it launches and manages `grok` processes).
+  GrokestratorMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: GrokestratorMac
+    dependencies:
+      - package: GrokestratorCore
+        product: GrokestratorCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.profleetsolutions.grokestrator.mac
+        PRODUCT_NAME: Grokestrator
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+
+  # iOS app — client only.
+  GrokestratoriOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: GrokestratoriOS
+    dependencies:
+      - package: GrokestratorCore
+        product: GrokestratorCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.profleetsolutions.grokestrator.ios
+        PRODUCT_NAME: Grokestrator
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
