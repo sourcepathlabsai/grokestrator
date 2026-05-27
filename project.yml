@@ -42,6 +42,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.profleetsolutions.grokestrator.mac
         PRODUCT_NAME: Grokestrator
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         ENABLE_HARDENED_RUNTIME: YES
@@ -60,6 +61,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.profleetsolutions.grokestrator.ios
         PRODUCT_NAME: Grokestrator
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
