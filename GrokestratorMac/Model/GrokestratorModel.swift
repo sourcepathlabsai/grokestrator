@@ -33,23 +33,22 @@ final class GrokestratorModel {
     var instances: [InstanceItem]
     var selectedInstanceID: InstanceItem.ID?
 
+    /// The Grok Build black box. Owns real instance lifecycles; shared by all
+    /// `LiveConversationDriver`s.
+    let manager = GrokBuildManager()
+
     init(instances: [InstanceItem]) {
         self.instances = instances
         self.selectedInstanceID = instances.first?.id
     }
 
-    /// Default app state with a couple of mock connections.
+    /// Default app state with one mock connection so first run isn't empty.
     convenience init() {
         self.init(instances: [
             InstanceItem(
-                name: "Local Grok 1 (heavy MCPs)",
+                name: "Mock Grok (offline)",
                 status: .running,
-                driver: MockConversationDriver(label: "grok-1")
-            ),
-            InstanceItem(
-                name: "Local Grok 2 (clean research)",
-                status: .running,
-                driver: MockConversationDriver(label: "grok-2")
+                driver: MockConversationDriver(label: "mock")
             ),
         ])
     }
@@ -57,5 +56,51 @@ final class GrokestratorModel {
     var selectedInstance: InstanceItem? {
         guard let id = selectedInstanceID else { return nil }
         return instances.first { $0.id == id }
+    }
+
+    /// Adds a mock connection (no real process).
+    func addMockConnection(name: String) {
+        let item = InstanceItem(name: name, status: .running, driver: MockConversationDriver(label: name))
+        instances.append(item)
+        selectedInstanceID = item.id
+    }
+
+    /// Adds a real connection and launches the underlying `grok` process.
+    /// Status reflects launch progress; failures surface into the conversation.
+    func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?) {
+        let config = ManagedInstance(
+            name: name,
+            command: command,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            status: .stopped
+        )
+        let item = InstanceItem(
+            id: config.id,
+            name: name,
+            status: .starting,
+            driver: LiveConversationDriver(manager: manager, instanceID: config.id)
+        )
+        instances.append(item)
+        selectedInstanceID = item.id
+
+        Task {
+            do {
+                let updated = try await manager.startInstance(config)
+                item.status = updated.status
+            } catch {
+                item.status = .errored
+                item.conversation.appendSystem("Failed to launch: \(error.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    /// Stops a real instance's process (no-op for mock connections).
+    func stop(_ item: InstanceItem) {
+        item.status = .stopping
+        Task {
+            await manager.stopInstance(id: item.id)
+            item.status = .stopped
+        }
     }
 }

@@ -56,6 +56,12 @@ final class ConversationViewModel {
         }
     }
 
+    /// Appends a system-level note (e.g. launch status or errors) to the transcript.
+    func appendSystem(_ text: String, isError: Bool = false) {
+        let update: ConversationUpdate = isError ? .error(text) : .sessionStatus(text)
+        entries.append(TranscriptEntry(kind: .update(update)))
+    }
+
     /// Cancels any in-flight turn (e.g. when the view goes away).
     func cancel() {
         streamingTask?.cancel()

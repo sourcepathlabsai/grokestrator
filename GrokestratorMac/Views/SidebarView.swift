@@ -4,6 +4,7 @@ import GrokestratorCore
 /// Left sidebar: the list of connected Grok Build instances (design 02).
 struct SidebarView: View {
     @Bindable var model: GrokestratorModel
+    @State private var showingAdd = false
 
     var body: some View {
         List(selection: $model.selectedInstanceID) {
@@ -11,11 +12,28 @@ struct SidebarView: View {
                 ForEach(model.instances) { instance in
                     InstanceRow(instance: instance)
                         .tag(instance.id)
+                        .contextMenu {
+                            if instance.status == .running || instance.status == .starting {
+                                Button("Stop") { model.stop(instance) }
+                            }
+                        }
                 }
             }
         }
         .navigationTitle("Grokestrator")
         .listStyle(.sidebar)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    showingAdd = true
+                } label: {
+                    Label("Add Connection", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $showingAdd) {
+            AddConnectionView(model: model)
+        }
     }
 }
 
