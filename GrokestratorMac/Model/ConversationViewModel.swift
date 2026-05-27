@@ -84,6 +84,23 @@ final class ConversationViewModel {
         appendEntry(.update(isError ? .error(text) : .sessionStatus(text)))
     }
 
+    /// Confident quick-reply options for the last assistant question (empty if
+    /// none / streaming / a permission is pending). Tapping one sends it as the
+    /// next prompt; uncertain questions yield no chips and are typed.
+    var quickReplies: [String] {
+        guard !isStreaming, pendingPermission == nil, let last = entries.last else { return [] }
+        let text: String
+        switch last.kind {
+        case .assistantMessage(let s):
+            text = s
+        case .assistantContent(let parts):
+            text = parts.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined(separator: "\n")
+        default:
+            return []
+        }
+        return QuickReplyDetector.detect(text) ?? []
+    }
+
     /// Answers the pending permission request and dismisses the overlay,
     /// leaving a compact record in the thread.
     func answerPermission(_ option: PermissionOption) {

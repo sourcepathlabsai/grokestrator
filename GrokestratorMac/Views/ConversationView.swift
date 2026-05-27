@@ -22,6 +22,7 @@ struct ConversationView: View {
                 }
                 .animation(.snappy, value: conversation.pendingPermission)
             Divider()
+            quickReplyBar
             composer
         }
         .navigationTitle(instance.name)
@@ -71,6 +72,22 @@ struct ConversationView: View {
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.isStreaming)
         }
         .padding(12)
+    }
+
+    @ViewBuilder
+    private var quickReplyBar: some View {
+        if !conversation.quickReplies.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(conversation.quickReplies, id: \.self) { reply in
+                    Button(reply) { conversation.send(reply) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
     }
 
     private var streamingMarkerID: String { "streaming-marker" }
