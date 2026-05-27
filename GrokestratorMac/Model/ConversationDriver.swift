@@ -10,6 +10,9 @@ import GrokestratorCore
 public protocol ConversationDriver: Sendable {
     /// Sends a prompt and returns a stream of high-level conversation updates.
     func send(_ prompt: String) async throws -> AsyncStream<ConversationUpdate>
+
+    /// Answers a pending permission request with the chosen ACP `optionId`.
+    func respondToPermission(permissionId: String, optionId: String) async
 }
 
 /// Drives a conversation against a real Grok Build instance via the black box.
@@ -29,13 +32,19 @@ public struct LiveConversationDriver: ConversationDriver {
     public func send(_ prompt: String) async throws -> AsyncStream<ConversationUpdate> {
         try await manager.sendPrompt(to: instanceID, prompt: prompt)
     }
+
+    public func respondToPermission(permissionId: String, optionId: String) async {
+        try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: optionId)
+    }
 }
 
 /// Produces a scripted, delayed stream of updates that resembles a real turn
-/// (thoughts, progress/activity notes, a tool call, then a final message).
-/// Lets us build and feel the UI before wiring real processes.
-public struct MockConversationDriver: ConversationDriver {
-    public var label: String
+/// (thoughts, notes, a tool call, a **permission request it waits on**, then a
+/// final message). Lets us build and feel the UI — including the permission
+/// overlay — before wiring real processes.
+public actor MockConversationDriver: ConversationDriver {
+    public let label: String
+    private var permissionContinuation: CheckedContinuation<String, Never>?
 
     public init(label: String = "mock") {
         self.label = label
@@ -50,7 +59,6 @@ public struct MockConversationDriver: ConversationDriver {
                     continuation.yield(update)
                 }
 
-                // Stream a thought token-by-token, then finalize it.
                 let thought = "Parsing request: \"\(prompt)\""
                 for word in thought.split(separator: " ") {
                     await emit(.thoughtDelta(String(word) + " "), after: 60)
@@ -58,21 +66,46 @@ public struct MockConversationDriver: ConversationDriver {
                 await emit(.thought(thought, metadata: nil), after: 100)
 
                 await emit(.progressNote("Scanning workspace", phase: "scan", metadata: nil))
-                await emit(.activityNote("Read 3 files", kind: "io", metadata: nil))
-                await emit(.toolCallRequested(ToolCallInfo(id: "t1", toolName: "search", arguments: ["query": prompt], sessionId: nil)))
-                await emit(.progressNote("Synthesizing answer", phase: "draft", metadata: nil))
+                await emit(.toolCallRequested(ToolCallInfo(id: "t1", toolName: "run_shell", arguments: ["command": "rm -rf build/"], sessionId: nil)))
 
-                // Stream the answer token-by-token, then finalize it.
-                let answer = "(\(label)) Here's a response to: \(prompt)"
+                // Ask the user for permission and wait for their choice.
+                await emit(.permissionRequested(PermissionRequestInfo(
+                    id: "mock-perm-1",
+                    description: "Run shell command: rm -rf build/",
+                    options: [
+                        PermissionOption(id: "always-allow", label: "Yes, and don't ask again", kind: "allow_always"),
+                        PermissionOption(id: "allow-once", label: "Yes, proceed", kind: "allow_once"),
+                        PermissionOption(id: "reject-once", label: "No, tell Grok what to do differently", kind: "reject_once"),
+                    ],
+                    sessionId: nil
+                )), after: 200)
+
+                let choice = await self.awaitPermission()
+                let approved = choice.hasPrefix("allow") || choice.hasPrefix("always")
+                await emit(.activityNote("Permission: \(approved ? "approved" : "rejected") (\(choice))", kind: "permission", metadata: nil), after: 50)
+
+                let answer = approved
+                    ? "(\(label)) Done — removed build/."
+                    : "(\(label)) OK, I won't run that. What would you like instead?"
                 for word in answer.split(separator: " ") {
                     await emit(.messageDelta(String(word) + " "), after: 70)
                 }
                 await emit(.message(answer, metadata: nil), after: 120)
-
                 await emit(.turnComplete(finalAnswer: answer), after: 150)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func respondToPermission(permissionId _: String, optionId: String) async {
+        permissionContinuation?.resume(returning: optionId)
+        permissionContinuation = nil
+    }
+
+    private func awaitPermission() async -> String {
+        await withCheckedContinuation { continuation in
+            self.permissionContinuation = continuation
         }
     }
 }

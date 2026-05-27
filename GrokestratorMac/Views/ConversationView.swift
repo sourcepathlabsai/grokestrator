@@ -11,6 +11,16 @@ struct ConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
+                .overlay(alignment: .bottom) {
+                    if let perm = conversation.pendingPermission {
+                        PermissionOverlay(request: perm) { option in
+                            conversation.answerPermission(option)
+                        }
+                        .padding(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy, value: conversation.pendingPermission)
             Divider()
             composer
         }
@@ -160,5 +170,44 @@ private struct TranscriptRow: View {
     private func argsString(_ args: [String: String]?) -> String {
         guard let args, !args.isEmpty else { return "" }
         return args.map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")
+    }
+}
+
+/// A floating card shown over the thread when the agent requests permission.
+/// Lists the options as click targets (allow variants prominent); the choice is
+/// sent back to the agent. (Free-text answers for agent *questions* are a follow-up.)
+private struct PermissionOverlay: View {
+    let request: PermissionRequestInfo
+    let onChoose: (PermissionOption) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Grok is asking permission", systemImage: "lock.shield")
+                .font(.headline)
+                .foregroundStyle(.orange)
+
+            Text(request.description)
+                .font(.callout)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 8) {
+                ForEach(request.options) { option in
+                    Button {
+                        onChoose(option)
+                    } label: {
+                        Text(option.label).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(option.isAllow ? Color.accentColor : Color.secondary)
+                    .controlSize(.large)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 540)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
+        .shadow(radius: 16, y: 6)
     }
 }

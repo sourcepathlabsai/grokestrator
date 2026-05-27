@@ -7,7 +7,7 @@ import Foundation
 /// - lazily `initialize` + `session/new` (one session per instance for now),
 /// - run `session/prompt` and translate streamed `session/update` notifications
 ///   into the internal `ACPEvent` stream the rest of the black box consumes,
-/// - service agent→client requests: auto-approve `session/request_permission`
+/// - service agent→client requests: surface `session/request_permission` to the user
 ///   and perform `fs/read_text_file` / `fs/write_text_file`.
 public actor GrokBuildSessionClient {
     private let handle: GrokBuildInstanceHandle
@@ -15,6 +15,8 @@ public actor GrokBuildSessionClient {
 
     private var nextId = 1
     private var pending: [RPCID: CheckedContinuation<Data, Error>] = [:]
+    /// Agent→client permission requests awaiting the user's choice (permissionId → JSON-RPC id).
+    private var pendingPermissions: [String: RPCID] = [:]
 
     private var initialized = false
     private var sessionId: String?
@@ -86,8 +88,11 @@ public actor GrokBuildSessionClient {
     /// and file access). Kept for source compatibility with the black box.
     public func sendToolResult(sessionId _: String, toolCallId _: String, result _: String, isError _: Bool = false) async throws {}
 
-    /// No-op: permission requests are auto-approved inline as they arrive.
-    public func respondToPermission(permissionId _: String, chosenOption _: String, sessionId _: String) async throws {}
+    /// Resolves a pending permission request with the chosen ACP `optionId`.
+    public func respondToPermission(permissionId: String, chosenOption: String, sessionId _: String) async throws {
+        guard let id = pendingPermissions.removeValue(forKey: permissionId) else { return }
+        respond(id: id, result: .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(chosenOption)])]))
+    }
 
     /// Finishes the active prompt stream early.
     public func finishCurrentPrompt(for _: String) {
@@ -189,14 +194,21 @@ public actor GrokBuildSessionClient {
     private func handleAgentRequest(method: String, id: RPCID, line: Data) async {
         switch method {
         case "session/request_permission":
-            let p = try? JSONDecoder().decode(RPCParams<PermissionParams>.self, from: line).params
-            let allow = p?.options.first { ($0.kind ?? "").hasPrefix("allow") } ?? p?.options.first
-            if let optionId = allow?.optionId {
-                respond(id: id, result: .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(optionId)])]))
-                emit(.activity(ActivityEvent(sessionId: p?.sessionId, note: "Auto-approved a permission request", kind: "permission", metadata: nil)))
-            } else {
+            guard let p = try? JSONDecoder().decode(RPCParams<PermissionParams>.self, from: line).params, !p.options.isEmpty else {
                 respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
+                return
             }
+            // Suspend the request: keep its JSON-RPC id pending and surface it to the
+            // user. `respondToPermission` resolves it once the user chooses.
+            let permissionId = idString(id)
+            pendingPermissions[permissionId] = id
+            let options = p.options.map { PermissionOption(id: $0.optionId, label: $0.name ?? $0.optionId, kind: $0.kind) }
+            emit(.permissionRequest(PermissionRequestEvent(
+                sessionId: p.sessionId ?? sessionId ?? "",
+                permissionId: permissionId,
+                description: p.toolCall?.title ?? "Grok is requesting permission.",
+                options: options
+            )))
 
         case "fs/read_text_file":
             guard let p = try? JSONDecoder().decode(RPCParams<FsReadParams>.self, from: line).params else {
@@ -323,6 +335,15 @@ private extension RPCID {
         switch self {
         case .int(let i): return .int(i)
         case .string(let s): return .string(s)
+        }
+    }
+}
+
+private extension GrokBuildSessionClient {
+    nonisolated func idString(_ id: RPCID) -> String {
+        switch id {
+        case .int(let i): return "rpc-\(i)"
+        case .string(let s): return s
         }
     }
 }

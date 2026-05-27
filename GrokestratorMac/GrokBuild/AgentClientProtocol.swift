@@ -104,12 +104,17 @@ struct SessionUpdateParams: Decodable {
 /// `session/request_permission` request payload.
 struct PermissionParams: Decodable {
     let sessionId: String?
+    let toolCall: ToolCall?
     let options: [Option]
+
+    struct ToolCall: Decodable {
+        let title: String?
+    }
 
     struct Option: Decodable {
         let optionId: String
         let name: String?
-        let kind: String?                  // e.g. "allow_once", "allow_always", "reject_once"
+        let kind: String?                  // "allow_once" | "allow_always" | "reject_once" | "reject_always"
     }
 }
 
@@ -192,7 +197,23 @@ public struct PermissionRequestEvent: Codable, Sendable {
     public let sessionId: String
     public let permissionId: String
     public let description: String
-    public let options: [String]
+    public let options: [PermissionOption]
+}
+
+/// One selectable answer to a permission request. `id` is the ACP `optionId`
+/// sent back to the agent; `kind` is `allow_once`/`allow_always`/`reject_once`/`reject_always`.
+public struct PermissionOption: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let label: String
+    public let kind: String?
+
+    public init(id: String, label: String, kind: String?) {
+        self.id = id
+        self.label = label
+        self.kind = kind
+    }
+
+    public var isAllow: Bool { (kind ?? "").hasPrefix("allow") }
 }
 
 public struct SessionUpdateEvent: Codable, Sendable {

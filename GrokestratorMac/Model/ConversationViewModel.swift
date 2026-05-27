@@ -35,6 +35,9 @@ struct TranscriptEntry: Identifiable, Sendable {
 final class ConversationViewModel {
     private(set) var entries: [TranscriptEntry] = []
     private(set) var isStreaming = false
+    /// A permission request awaiting the user's decision (shown over the thread,
+    /// not inline). `nil` when there is nothing to answer.
+    private(set) var pendingPermission: PermissionRequestInfo?
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
     /// even while a bubble grows in place (entry count doesn't change then).
     private(set) var streamTick = 0
@@ -81,6 +84,16 @@ final class ConversationViewModel {
         appendEntry(.update(isError ? .error(text) : .sessionStatus(text)))
     }
 
+    /// Answers the pending permission request and dismisses the overlay,
+    /// leaving a compact record in the thread.
+    func answerPermission(_ option: PermissionOption) {
+        guard let perm = pendingPermission else { return }
+        pendingPermission = nil
+        appendEntry(.update(.activityNote("\(option.isAllow ? "Approved" : "Declined"): \(perm.description)", kind: "permission", metadata: nil)))
+        let driver = self.driver
+        Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
+    }
+
     /// Cancels any in-flight turn (e.g. when the view goes away).
     func cancel() {
         streamingTask?.cancel()
@@ -101,6 +114,10 @@ final class ConversationViewModel {
             finalize(full, kind: .message)
         case .thought(let full, _):
             finalize(full, kind: .thought)
+        case .permissionRequested(let info):
+            // Surface over the thread (overlay), not as an inline row.
+            endStreaming()
+            pendingPermission = info
         case .turnComplete:
             endStreaming()
             isStreaming = false

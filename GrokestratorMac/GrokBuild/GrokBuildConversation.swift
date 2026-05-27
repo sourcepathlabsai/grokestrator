@@ -45,7 +45,7 @@ public struct ToolCallInfo: Identifiable, Sendable, Equatable {
 public struct PermissionRequestInfo: Identifiable, Sendable, Equatable {
     public let id: String
     public let description: String
-    public let options: [String]
+    public let options: [PermissionOption]
     public let sessionId: String?
 }
 
