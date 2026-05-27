@@ -38,6 +38,9 @@ final class ConversationViewModel {
     /// A permission request awaiting the user's decision (shown over the thread,
     /// not inline). `nil` when there is nothing to answer.
     private(set) var pendingPermission: PermissionRequestInfo?
+    /// Confident quick-reply options for the last assistant question (set when a
+    /// message finalizes; cleared on the next prompt). Empty ⇒ user types.
+    private(set) var quickReplies: [String] = []
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
     /// even while a bubble grows in place (entry count doesn't change then).
     private(set) var streamTick = 0
@@ -60,6 +63,7 @@ final class ConversationViewModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         appendEntry(.userPrompt(trimmed))
+        quickReplies = []
         isStreaming = true
 
         let driver = self.driver
@@ -82,23 +86,6 @@ final class ConversationViewModel {
     func appendSystem(_ text: String, isError: Bool = false) {
         endStreaming()
         appendEntry(.update(isError ? .error(text) : .sessionStatus(text)))
-    }
-
-    /// Confident quick-reply options for the last assistant question (empty if
-    /// none / streaming / a permission is pending). Tapping one sends it as the
-    /// next prompt; uncertain questions yield no chips and are typed.
-    var quickReplies: [String] {
-        guard !isStreaming, pendingPermission == nil, let last = entries.last else { return [] }
-        let text: String
-        switch last.kind {
-        case .assistantMessage(let s):
-            text = s
-        case .assistantContent(let parts):
-            text = parts.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined(separator: "\n")
-        default:
-            return []
-        }
-        return QuickReplyDetector.detect(text) ?? []
     }
 
     /// Answers the pending permission request and dismisses the overlay,
@@ -177,13 +164,16 @@ final class ConversationViewModel {
         streamTick += 1
     }
 
-    /// A finalized assistant message is parsed for inline content (images);
-    /// if it contains any non-text part, it becomes `.assistantContent`.
+    /// A finalized assistant message is analyzed for quick-reply options (which
+    /// also strips any `[[CHOICES]]` block from the displayed text) and parsed for
+    /// inline content (images). Thoughts pass through unchanged.
     private func finalizedKind(_ full: String, kind: StreamKind) -> TranscriptEntry.Kind {
         guard kind == .message else { return .thought(full) }
-        let parts = ContentParser.parse(full)
+        let (display, options) = QuickReplyDetector.analyze(full)
+        quickReplies = options
+        let parts = ContentParser.parse(display)
         let hasMedia = parts.contains { if case .text = $0 { return false } else { return true } }
-        return hasMedia ? .assistantContent(parts) : .assistantMessage(full)
+        return hasMedia ? .assistantContent(parts) : .assistantMessage(display)
     }
 
     private func appendEntry(_ kind: TranscriptEntry.Kind) {

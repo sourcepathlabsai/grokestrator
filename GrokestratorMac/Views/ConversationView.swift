@@ -76,17 +76,29 @@ struct ConversationView: View {
 
     @ViewBuilder
     private var quickReplyBar: some View {
-        if !conversation.quickReplies.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(conversation.quickReplies, id: \.self) { reply in
-                    Button(reply) { conversation.send(reply) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
+        let replies = conversation.quickReplies
+        if !replies.isEmpty, !conversation.isStreaming, conversation.pendingPermission == nil {
+            Group {
+                if replies.count <= 3 && replies.allSatisfy({ $0.count <= 14 }) {
+                    HStack(spacing: 8) { chips(replies); Spacer() }   // short → a row
+                } else {
+                    VStack(spacing: 6) { chips(replies) }              // long/many → a stack
                 }
-                Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func chips(_ replies: [String]) -> some View {
+        ForEach(replies, id: \.self) { reply in
+            Button { conversation.send(reply) } label: {
+                Text(reply).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .fixedSize(horizontal: replies.count <= 3 && replies.allSatisfy { $0.count <= 14 }, vertical: false)
         }
     }
 
