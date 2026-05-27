@@ -11,7 +11,7 @@ Update this file when any of the following change:
 
 ---
 
-## Current Position (2026-06-04)
+## Current Position (2026-05-26)
 
 **Grokestrator** is a native macOS + iOS application (Swift + SwiftUI) that acts as a high-quality control plane for orchestrating multiple Grok Build agents across devices.
 
@@ -22,7 +22,7 @@ Update this file when any of the following change:
 
 **iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
 
-**Current focus**: Client control-plane protocol and shared client comms layer in GrokestratorCore (to allow iOS and Mac clients to drive the remote Grok Build black box over Tailscale). Grok Build black box on the Mac is complete.
+**Current focus**: The client control-plane protocol and shared client comms layer in GrokestratorCore have landed (PR #5) and now build cleanly (repaired in PR #6). Grok Build black box on the Mac is complete. Next up: standing up buildable Xcode projects for the Mac/iOS app targets and the Mac UI shell.
 
 The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
@@ -49,8 +49,8 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - Tool and permission roundtrips, structured history (`AgentTurn`/`AgentMessage`), lifecycle management.
 - All ACP details encapsulated.
 
-**Client Control Plane & Shared Client Comms Layer** (current work on `feat/core-client-control-plane`)
-- Evolving the control-plane protocol (`GrokestratorProtocol`) so clients can drive remote Grok Build instances with high fidelity.
+**Client Control Plane & Shared Client Comms Layer** (landed via PR #5; build repaired in PR #6, both merged)
+- Control-plane protocol (`GrokestratorProtocol`) lets clients drive remote Grok Build instances with high fidelity.
 - `GrokestratorClient`: Top-level actor for managing server connections and higher-level sessions.
 - `GrokBuildClientSession`: Higher-level client abstraction (remote equivalent of `GrokBuildConversation`).
 - `InMemoryGrokestratorTransport` for testing the client flow end-to-end.
@@ -58,8 +58,12 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - Design document: `design/07-client-control-plane-protocol.md` (v0.1 reviewed + decisions locked).
 - Focus on prompt streaming, tool roundtrips, event routing, and connection lifecycle.
 
-- Current branch: `feat/core-client-control-plane`
 - All work follows the strict "focused branch + logical PR" rule.
+
+**Build Health**
+- The client control-plane work (PR #5) landed on `main` in a **non-building** state: `GrokestratorCore` failed to compile and the test target had never compiled.
+- Repaired in PR #6 (`feat/fix-core-control-plane-build`, **merged**): all Core compile errors fixed, duplicate `GrokBuildManager` methods removed, and the genuine API gaps the tests exposed addressed — `startPrompt` now returns the stable `promptID`, `instanceDied` fully invalidates the session, and event delivery is deterministic. `swift build` is clean and all 12 Core tests pass.
+- ⚠️ The app targets are not yet buildable. The `GrokestratorMac` / `GrokestratoriOS` source folders are loose Swift files. An initial `Grokestrator.xcodeproj` skeleton was scaffolded in Xcode, but it is a fresh default app that does **not** match the intended structure (`design/06-project-structure.md`) and does not yet integrate the existing sources or the `GrokestratorCore` package. Only `GrokestratorCore` (SwiftPM) is currently buildable/testable.
 
 ### Current State of Design Docs
 - `06-project-structure.md`: Reflects the native structure (updated).
@@ -71,14 +75,14 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 ---
 
 ## Immediate Priorities
-1. **Client Control Plane** (active on `feat/core-client-control-plane`):
-   - Finish core client comms layer (`GrokestratorClient`, `GrokBuildClientSession`, protocol extensions).
-   - Solidify prompt streaming, tool roundtrips, and event routing over the control plane.
+1. **Client Control Plane** (core layer landed in PR #5, repaired in PR #6):
+   - Continue solidifying prompt streaming, tool roundtrips, and event routing over the control plane.
    - Enable iOS + Mac clients to drive remote Grok Build instances.
-2. GrokestratorMac target (hybrid client + server app) — UI shell, tabs, wiring the black box + client comms layer.
-3. Server-side handling of new `GrokBuildRequest` messages in the Mac app.
-4. Basic iOS client shell that exercises the new remote Grok Build sessions.
-5. Continue living doc updates (`design/07-client-control-plane-protocol.md` and this file).
+2. **Stand up the Xcode workspace + app targets** per `design/06-project-structure.md`: a `GrokestratorMac` (macOS) and `GrokestratoriOS` (iOS) target, both depending on the local `GrokestratorCore` package, including the existing source folders. (A default skeleton was scaffolded but doesn't match this structure and isn't wired up.)
+3. GrokestratorMac target (hybrid client + server app) — UI shell, tabs, wiring the black box + client comms layer.
+4. Server-side handling of new `GrokBuildRequest` messages in the Mac app.
+5. Basic iOS client shell that exercises the new remote Grok Build sessions.
+6. Continue living doc updates (`design/07-client-control-plane-protocol.md` and this file).
 
 ---
 
@@ -98,9 +102,10 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 
 ---
 
-*Last updated: 2026-06-04 — Client control plane work active on `feat/core-client-control-plane`:
-- `GrokestratorClient`, `GrokBuildClientSession`, `InMemoryGrokestratorTransport`, and protocol extensions in progress.
+*Last updated: 2026-05-26 — Client control plane landed (PR #5) and was then repaired (PR #6, merged):
+- `GrokestratorClient`, `GrokBuildClientSession`, `InMemoryGrokestratorTransport`, and protocol extensions in place.
 - Rich conversation models promoted into Core.
-- In-memory transport + end-to-end tests for prompt flow.
-- Design doc `07-client-control-plane-protocol.md` maintained.
-- `PROJECT_STATE.md` updated.
+- In-memory transport + end-to-end tests for prompt flow (12 tests passing).
+- `GrokestratorCore` now builds clean; PR #5 had merged in a non-building state, fixed in PR #6.
+- README synced to native Swift reality; design doc `07-client-control-plane-protocol.md` maintained.
+- Known gap: app targets not yet buildable — a default Xcode skeleton exists but isn't wired to the sources/Core; a proper workspace + Mac/iOS targets is the next step.*
