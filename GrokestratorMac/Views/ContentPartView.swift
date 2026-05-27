@@ -205,6 +205,26 @@ struct AudioPlayerView: View {
     }
 }
 
+/// AppKit `AVPlayerView` wrapper. We avoid SwiftUI's `VideoPlayer` (the
+/// `_AVKit_SwiftUI` overlay) because instantiating its type metadata crashes
+/// the Swift runtime (SIGABRT in getSuperclassMetadata) on macOS the moment a
+/// video renders. Plain AVKit `AVPlayerView` is stable.
+private struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        view.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player { nsView.player = player }
+    }
+}
+
 /// Inline video player (AVKit transport) + download.
 struct VideoPlayerView: View {
     let source: MediaSource
@@ -217,7 +237,7 @@ struct VideoPlayerView: View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
                 if let player {
-                    VideoPlayer(player: player)
+                    PlayerView(player: player)
                 } else {
                     Image(systemName: "film")
                         .font(.largeTitle).foregroundStyle(.secondary)
