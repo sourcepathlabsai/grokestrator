@@ -39,17 +39,51 @@ enum ContentParser {
 
     static func parse(_ text: String) -> [ContentPart] {
         var parts: [ContentPart] = []
+        var seenMedia = Set<String>()
+
+        // Adds a media part, skipping duplicates (the same file referenced twice —
+        // e.g. grok's "session path" + "easy copy").
+        func addMedia(_ part: ContentPart) {
+            guard let key = mediaKey(part) else { return }
+            if seenMedia.insert(key).inserted { parts.append(part) }
+        }
+
         for segment in splitMarkdownMedia(text) {
-            guard case .text(let t) = segment else { parts.append(segment); continue }
+            guard case .text(let t) = segment else { addMedia(segment); continue }
             // Keep the text; append any bare media paths found in it (artifacts to view/play).
             parts.append(.text(t))
             for path in bareMediaPaths(in: t) {
                 if let part = part(forPath: path, source: .localFile(URL(fileURLWithPath: path))) {
-                    parts.append(part)
+                    addMedia(part)
                 }
             }
         }
         return parts.isEmpty ? [.text(text)] : parts
+    }
+
+    /// True unless `source` is a local file that doesn't exist or is empty.
+    /// Drops phantom references (e.g. a `~/copy.mp4` mangled into `/copy.mp4`).
+    private static func renderable(_ source: MediaSource) -> Bool {
+        guard case .localFile(let url) = source else { return true }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
+        return (size ?? 0) > 0
+    }
+
+    /// Stable identity for de-duplicating media parts.
+    private static func mediaKey(_ part: ContentPart) -> String? {
+        let source: MediaSource
+        switch part {
+        case .text: return nil
+        case let .image(s, _): source = s
+        case let .audio(s, _, _): source = s
+        case let .video(s, _, _): source = s
+        case let .file(s, _, _): source = s
+        }
+        switch source {
+        case .localFile(let u): return "f:" + u.standardizedFileURL.path
+        case .remote(let u): return "r:" + u.absoluteString
+        case .inline(let d): return "i:\(d.count)"
+        }
     }
 
     /// Splices classifiable markdown media (`![](src)` images and `[label](src)`
@@ -102,7 +136,7 @@ enum ContentParser {
             else { return nil }
             return .image(.inline(data), mimeType: header.split(separator: ";").first.map(String.init) ?? "image/png")
         }
-        guard category(forPath: src)?.0 == .image, let source = mediaSource(from: src) else { return nil }
+        guard category(forPath: src)?.0 == .image, let source = mediaSource(from: src), renderable(source) else { return nil }
         return .image(source, mimeType: category(forPath: src)!.1)
     }
 
@@ -113,7 +147,7 @@ enum ContentParser {
     }
 
     private static func part(forPath path: String, source: MediaSource, name: String? = nil) -> ContentPart? {
-        guard let (category, mime) = category(forPath: path) else { return nil }
+        guard let (category, mime) = category(forPath: path), renderable(source) else { return nil }
         let display = name ?? (path as NSString).lastPathComponent
         switch category {
         case .image: return .image(source, mimeType: mime)
