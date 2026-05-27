@@ -98,7 +98,17 @@ struct SessionUpdateParams: Decodable {
         let title: String?                 // tool call title
         let kind: String?                  // tool call kind
         let status: String?                // tool call status
+        let availableCommands: [CommandWire]?   // for "available_commands_update"
     }
+}
+
+/// Wire shape of an advertised slash command — shared by the `initialize` result
+/// and the `available_commands_update` notification.
+struct CommandWire: Decodable {
+    let name: String
+    let description: String?
+    let input: Input?
+    struct Input: Decodable { let hint: String? }
 }
 
 /// `session/request_permission` request payload.

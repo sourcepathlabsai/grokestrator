@@ -110,6 +110,12 @@ public actor GrokBuildConversation {
         try await history.load()
     }
 
+    /// The instance's capabilities (model, MCP servers, slash commands) for the
+    /// Instance Inspector / slash-command popup. Triggers init+session if needed.
+    public func capabilities() async throws -> AgentCapabilities {
+        try await client.currentCapabilities()
+    }
+
     // MARK: - Public Black-Box API (no raw ACP leakage to callers)
 
     /// Send a prompt through the black box.
