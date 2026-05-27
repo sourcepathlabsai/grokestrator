@@ -43,6 +43,7 @@ All major design decisions are documented in the `design/` folder:
 - [Data & Persistence Model](design/05-data-persistence-model.md)
 - [Project Structure](design/06-project-structure.md)
 - [Client Control Plane Protocol](design/07-client-control-plane-protocol.md)
+- [Multimodal (Non-Text) Content](design/08-multimodal-content.md)
 
 ## Tech Stack (Current)
 
