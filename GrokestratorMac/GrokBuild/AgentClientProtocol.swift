@@ -2,40 +2,133 @@ import Foundation
 
 // MARK: - Agent Client Protocol (ACP) for Grok Build
 //
-// This is the protocol used to communicate with running Grok Build instances.
-// It is distinct from Grokestrator's internal control plane (GrokestratorProtocol).
+// Grok Build (`grok agent stdio`) speaks the standard Agent Client Protocol:
+// newline-delimited JSON-RPC 2.0 over stdin/stdout. This file defines:
+//   1. The JSON-RPC envelope + the typed param/result shapes we send and receive.
+//   2. `ACPEvent` — the *internal* high-level event the rest of the black box
+//      (GrokBuildConversation, AgentConversationHistory) consumes. The session
+//      client translates ACP `session/update` notifications into `ACPEvent`s.
 //
-// When launching a Grok instance with appropriate flags (e.g. `grok agent serve --stdio`),
-// it speaks this protocol over stdin/stdout.
+// This is distinct from Grokestrator's own control plane (GrokestratorProtocol).
 
-public enum ACPRequest: Codable, Sendable {
-    case createSession(CreateSessionRequest)
-    case prompt(PromptRequest)
-    case cancelSession(sessionId: String)
-    // Add more as we discover the full protocol (tool call responses, etc.)
-}
+// MARK: - JSON-RPC envelope
 
-public struct CreateSessionRequest: Codable, Sendable {
-    public let sessionId: String?
-    public let metadata: [String: String]?
+/// A JSON-RPC id, which ACP allows to be either an integer or a string.
+public enum RPCID: Codable, Hashable, Sendable {
+    case int(Int)
+    case string(String)
 
-    public init(sessionId: String? = nil, metadata: [String: String]? = nil) {
-        self.sessionId = sessionId
-        self.metadata = metadata
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let i = try? c.decode(Int.self) { self = .int(i) }
+        else { self = .string(try c.decode(String.self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .int(let i): try c.encode(i)
+        case .string(let s): try c.encode(s)
+        }
     }
 }
 
-public struct PromptRequest: Codable, Sendable {
-    public let sessionId: String
-    public let prompt: String
-    public let context: [String: String]?
+public struct RPCErrorBody: Decodable, Sendable {
+    public let code: Int
+    public let message: String
+}
 
-    public init(sessionId: String, prompt: String, context: [String: String]? = nil) {
-        self.sessionId = sessionId
-        self.prompt = prompt
-        self.context = context
+/// Just enough of an incoming line to route it (response vs notification vs request).
+struct RPCEnvelope: Decodable {
+    let id: RPCID?
+    let method: String?
+    let error: RPCErrorBody?
+}
+
+/// Generic wrapper to pull a typed `result` out of a full response line.
+struct RPCResult<T: Decodable>: Decodable { let result: T }
+/// Generic wrapper to pull typed `params` out of a notification/request line.
+struct RPCParams<T: Decodable>: Decodable { let params: T }
+
+/// Minimal JSON value used to build outgoing JSON-RPC messages.
+///
+/// Encoded with `JSONEncoder(.withoutEscapingSlashes)` — Grok Build's method
+/// dispatch rejects slash-escaped method names (e.g. `session\/new`), which
+/// `JSONSerialization` would otherwise produce.
+enum JSONValue: Encodable {
+    case string(String)
+    case int(Int)
+    case bool(Bool)
+    case null
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let s): try c.encode(s)
+        case .int(let i): try c.encode(i)
+        case .bool(let b): try c.encode(b)
+        case .null: try c.encodeNil()
+        case .array(let a): try c.encode(a)
+        case .object(let o): try c.encode(o)
+        }
     }
 }
+
+// MARK: - Typed ACP params / results
+
+struct NewSessionResult: Decodable { let sessionId: String }
+struct PromptStopResult: Decodable { let stopReason: String? }
+
+struct ContentBlock: Decodable, Sendable {
+    let type: String
+    let text: String?
+}
+
+/// `session/update` notification payload.
+struct SessionUpdateParams: Decodable {
+    let sessionId: String
+    let update: Update
+
+    struct Update: Decodable {
+        let sessionUpdate: String          // e.g. "agent_message_chunk", "agent_thought_chunk", "tool_call"
+        let content: ContentBlock?         // for message/thought chunks
+        let toolCallId: String?            // for tool_call / tool_call_update
+        let title: String?                 // tool call title
+        let kind: String?                  // tool call kind
+        let status: String?                // tool call status
+    }
+}
+
+/// `session/request_permission` request payload.
+struct PermissionParams: Decodable {
+    let sessionId: String?
+    let options: [Option]
+
+    struct Option: Decodable {
+        let optionId: String
+        let name: String?
+        let kind: String?                  // e.g. "allow_once", "allow_always", "reject_once"
+    }
+}
+
+/// `fs/read_text_file` request payload.
+struct FsReadParams: Decodable {
+    let sessionId: String?
+    let path: String
+    let line: Int?
+    let limit: Int?
+}
+
+/// `fs/write_text_file` request payload.
+struct FsWriteParams: Decodable {
+    let sessionId: String?
+    let path: String
+    let content: String
+}
+
+// MARK: - Internal high-level event (consumed by the rest of the black box)
 
 public enum ACPEvent: Codable, Sendable {
     case sessionCreated(SessionCreatedEvent)
@@ -111,35 +204,18 @@ public struct ACPErrorEvent: Codable, Sendable {
 // MARK: - Progress / Activity Events (the live "little notes" from Grok Build)
 
 /// A granular progress or status update emitted by the agent during thinking/tool use/etc.
-/// These are the short, incremental notes you see in a real Grok Build session
-/// ("Searching the web...", "Analyzing files...", "Calling MCP tool X...", etc.).
 public struct ProgressEvent: Codable, Sendable {
     public let sessionId: String?
     public let content: String
-    public let phase: String?           // e.g. "thinking", "tool_execution", "search", "analysis"
-    public let progress: Double?        // 0.0 ... 1.0 if the agent provides it
+    public let phase: String?
+    public let progress: Double?
     public let metadata: [String: String]?
 }
 
-/// Slightly more general activity note. Some agents emit these instead of (or in addition to) ProgressEvent.
+/// Slightly more general activity note.
 public struct ActivityEvent: Codable, Sendable {
     public let sessionId: String?
     public let note: String
-    public let kind: String?            // e.g. "progress", "status_update", "thinking_step", "subtask"
+    public let kind: String?
     public let metadata: [String: String]?
-}
-
-// MARK: - Wire Format
-
-/// Simple line-delimited JSON protocol wrapper commonly used for ACP/stdio agents.
-public struct ACPMessage: Codable, Sendable {
-    public let type: String // "request", "event", "response"
-    public let id: String?
-    public let payload: Data // The actual request or event encoded as JSON
-
-    public init(type: String, id: String? = nil, payload: Data) {
-        self.type = type
-        self.id = id
-        self.payload = payload
-    }
 }
