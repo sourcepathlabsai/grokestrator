@@ -22,7 +22,7 @@ Update this file when any of the following change:
 
 **iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
 
-**Current focus**: The Mac app is now a real, working application — you can add a real `grok agent stdio` connection and hold a live, streaming conversation with it, including inline images. Recent work: a buildable Xcode project (XcodeGen), the Mac UI shell + actor→SwiftUI bridge, a real JSON-RPC ACP client (verified end-to-end against the live `grok` binary), token-level streaming, inline image thumbnails, and the app icon. Next candidates: the out-of-thread permission/question overlay, more multimodal slices (audio/video/files), and the instance inspector.
+**Current focus**: The Mac app is a real, working, on-brand application. You can add a real `grok agent stdio` connection and hold a live, streaming conversation — with the out-of-thread permission overlay, choice quick-replies, full multimodal (images/audio/video/files), and the SourcePath Labs visual theme. Next candidates: finish theming the overlays/chips, an instance inspector, conversation history in the UI, and the iOS client.
 
 The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
@@ -39,7 +39,8 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - **Real ACP = newline-delimited JSON-RPC 2.0** (`grok agent stdio`). The Mac ACP client speaks it directly. (Gotchas baked in: encode with `JSONEncoder(.withoutEscapingSlashes)` — grok rejects `session\/new`; read stdout in chunks via `readabilityHandler`, not byte-by-byte.)
 - **Mock + Live conversation drivers** behind one `ConversationDriver` seam, so the UI runs offline and against real grok with identical code.
 - **Multimodal arrives as markdown in the assistant text** for grok-build (data-URI images + bare local image paths), *not* native ACP media blocks — verified by probing the binary.
-- **Agent questions & permissions render out-of-thread** in an overlay (design/02), not inline — replaces the current inline auto-approve when built.
+- **Agent questions & permissions render out-of-thread** in an overlay (design/02), not inline. Permission requests (ACP `session/request_permission`) show option buttons; free-form questions get **confident-only** quick-reply chips (heuristics + a `[[CHOICES: …]]` convention we prime grok to emit), with text always available.
+- **SourcePath Labs visual identity**: dark navy + cyan `#00F0FF` + glow, Inter (body) / Space Grotesk (display), bundled OFL fonts. Grokestrator lives under the SourcePath umbrella; tokens mirror `~/dev/alexander/app/ui/fred.css`.
 
 ### What Exists Now
 
@@ -67,15 +68,15 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - `project.yml` (XcodeGen) generates `Grokestrator.xcodeproj` with `GrokestratorMac` (macOS) + `GrokestratoriOS` (iOS) app targets, both depending on the local `GrokestratorCore` package. The `.xcodeproj` is gitignored.
 - App-code Swift 6 compile errors that had been latent (sources never built before) were fixed in PR #9.
 
-**Mac app — working** (PRs #10, #12, #13, #16, #18)
+**Mac app — working** (PRs #10, #12–#14, #16, #18, #20–#22)
 - App shell: `NavigationSplitView` (sidebar of connections + console-like transcript + composer), per design/02.
-- `ConversationDriver` seam with `MockConversationDriver` (offline) and `LiveConversationDriver` (real black box).
-- **Real ACP JSON-RPC client** (`GrokBuildSessionClient` rewrite): `initialize` → `session/new` → `session/prompt`, streamed `session/update` → `ConversationUpdate`, auto-approve permissions, `fs/read|write`. Verified end-to-end against the live binary.
-- **Add Connection** form (real/mock); launch via `GrokBuildManager`; status + Stop.
+- `ConversationDriver` seam with `MockConversationDriver` (offline, actor — demos permission + audio) and `LiveConversationDriver` (real black box).
+- **Real ACP JSON-RPC client** (`GrokBuildSessionClient`): `initialize` → `session/new` → `session/prompt`, streamed `session/update` → `ConversationUpdate`, `fs/read|write`. Verified end-to-end against the live binary.
+- **Add Connection** form (real/mock); launch via `GrokBuildManager`; status + Stop. (Launcher actor-deadlock from `waitUntilExit` fixed, #14.)
 - **Token-level streaming** of thoughts/messages (live typing).
-- **Inline images**: `ContentPart` model + markdown parser (data-URI + bare local image paths); clickable thumbnails that open in Preview, with download.
-- **App icon** (HAL-eye orchestration wheel) for both targets.
-- Fixed a launcher actor deadlock (`waitUntilExit` on the actor) that hung the first real prompt (PR #14).
+- **Agent-prompt UI** (#20): out-of-thread permission overlay (real options, replaces auto-approve) + confident quick-reply chips for questions (heuristics + `[[CHOICES]]` convention). Verified live.
+- **Multimodal** (#16, #21): `ContentPart`/`MediaSource` model + markdown/path parser → inline image thumbnails (open in Preview), audio (play/pause) + video (AVKit) players, file cards with QuickLook thumbnails + "Open with" + download.
+- **App icon** (#18, HAL-eye orchestration wheel) + **SourcePath theme** (#22): dark navy + cyan, bundled Inter/Space Grotesk, themed sidebar/transcript/composer.
 
 **Build Health**
 - ✅ `main` is green. `GrokestratorCore` builds + 12 tests pass (`swift build`/`swift test`). Both app targets build via `xcodebuild` (regenerate first: `xcodegen generate`).
@@ -84,7 +85,8 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 - `02-ui-navigation-and-interaction.md`: + section on out-of-thread agent prompts (questions & permissions overlay).
 - `06-project-structure.md`: Reflects the native structure.
 - `07-client-control-plane-protocol.md`: Client-side control plane (v0.1; built in Core, not yet exercised by apps).
-- `08-multimodal-content.md`: Non-text content model + the **verified** grok-build reality (media as markdown in text, not ACP blocks). Slice 1 (inline images) shipped.
+- `08-multimodal-content.md`: Non-text content model + the **verified** grok-build reality (media as markdown in text, not ACP blocks). Images/audio/video/files all shipped (#16, #21).
+- **SourcePath visual identity**: no doc in this repo yet; tokens live in `~/dev/alexander/app/ui/fred.css` and are implemented in `GrokestratorMac/Theme/Theme.swift` (#22).
 - `00-vision-and-north-star.md`: North Star and phasing still valid.
 - `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Historical.
 - `PROJECT_STATE.md`: This file — the live source of truth.
@@ -93,16 +95,17 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 
 ## Immediate Priorities
 Candidates for the next slices (Mac-first), roughly in value order:
-1. **Permission/question overlay** — build the out-of-thread overlay (design/02): real permission prompts replacing inline auto-approve, plus agent clarifying questions, with clickable options + free-text override. Highest impact for real daily grok use.
-2. **More multimodal** (design/08): audio player → video → file/link cards (download/Quick Look) → media caching in history.
-3. **Instance inspector** (design/02 right panel): per-instance capabilities (MCP servers, slash commands, model) on demand. (`initialize` already returns this data.)
-4. **Conversation persistence/history in the UI** (history exists in the black box; surface it).
-5. **iOS client** + media/streaming over the control plane (activates the Core client layer + design/08 `fetchResource`).
+1. **Finish theming** — apply SourcePath surfaces to the permission overlay / quick-reply chips (still system materials) and tune Space Grotesk variable-font weights if headers read thin.
+2. **Instance inspector** (design/02 right panel): per-instance capabilities (MCP servers, slash commands, model) on demand. (`initialize` already returns this data.)
+3. **Conversation persistence/history in the UI** (history exists in the black box; surface it).
+4. **iOS client** + media/streaming over the control plane (activates the Core client layer + design/08 `fetchResource`) + the SourcePath theme.
+5. **Polish**: audio scrubber + duration; media caching in history.
 
 ### Known gaps / risks
 - **Duplicate models**: Mac `GrokBuild/` defines its own `ConversationUpdate`/`ToolCallInfo`/etc. that shadow the promoted Core versions. De-dup refactor pending.
 - **Launched-grok environment**: a Finder-launched app gives grok a minimal `PATH`, so its MCP servers don't spawn (grok still answers). Pass a fuller env if MCP tools should work in-app.
 - **iOS media**: `localFile` references aren't reachable from iOS — needs the `fetchResource` control-plane capability (design/08).
+- **Variable-font weights**: SwiftUI `.weight()` on the bundled variable fonts may render at the default weight; static weights / font-descriptor axes if Space Grotesk looks off.
 - **Streaming a data-URI image** shows the raw base64 as text until the message finalizes, then renders.
 - **Icon at tiny sizes**: the radiating instance windows soften at 16–32px; a simplified iris+ring variant is a future refinement.
 
@@ -124,10 +127,9 @@ Candidates for the next slices (Mac-first), roughly in value order:
 
 ---
 
-*Last updated: 2026-05-27 — Full refresh after a run of Mac-app work (PRs #8–#18, all merged):
-- Buildable Xcode project via XcodeGen (#8) + app-code Swift 6 fixes (#9).
-- Mac UI shell + actor→SwiftUI bridge (#10); real JSON-RPC ACP client verified against the live binary (#12); token-level streaming (#13).
-- Inline image thumbnails with download (#16); app icon (#18); launcher deadlock fix (#14).
-- Design: multimodal spec (#15) + verified grok reality; out-of-thread agent-prompt overlay note (#17).
-- `main` is green: Core builds + 12 tests pass; both app targets build (via `xcodegen generate` + `xcodebuild`).
-- Next: permission/question overlay, more multimodal, instance inspector. Known gaps tracked above (duplicate models, launched-grok env, iOS media, base64 streaming, small-size icon).*
+*Last updated: 2026-05-27 (rev 2) — through PR #22, all merged:
+- Agent-prompt UI (#20): out-of-thread permission overlay + confident quick-reply chips (heuristics + `[[CHOICES]]` convention, verified live).
+- Multimodal (#21): audio/video players + file cards with QuickLook thumbnails + "Open with"; PDF first-page thumbnails.
+- SourcePath theme (#22): dark navy + cyan, bundled Inter/Space Grotesk; themed sidebar/transcript/composer + app icon.
+- `main` is green; both app targets build (via `xcodegen generate` + `xcodebuild`); Core 12 tests pass.
+- Next: finish theming (overlays/chips, variable-weight), instance inspector, conversation history in UI, iOS client. Gaps tracked above.*
