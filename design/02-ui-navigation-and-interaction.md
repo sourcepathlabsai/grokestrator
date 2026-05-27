@@ -154,6 +154,30 @@ Persistent lists of every available capability across all instances are discoura
 
 ---
 
+## Agent Prompts (Questions & Permissions) — Out of Thread
+
+The agent frequently needs a decision *from the user mid-turn*:
+- **Permission requests** (ACP `session/request_permission`) — a set of options to choose (allow once / allow always / reject), often tied to a tool call.
+- **Clarifying questions** — the agent asks the user something and offers likely answers, but the user may want to say something else.
+
+**Decision:** these are **not rendered inline in the transcript**. Instead they appear in a **lightweight overlay anchored over the thread at the spot they occur** (a popover/callout near the relevant message), so the user can resolve them in place without the answer becoming a permanent, scroll-away transcript line.
+
+### Behavior
+- The overlay **lists the suggested answers/options as click targets** (the ACP `options`, or the agent's suggested replies).
+- It always provides a **free-text override** — the user can type a custom answer instead of picking a suggestion.
+- It is **modal to that prompt** (the turn is waiting on it) but visually a floating layer over the transcript, not a new row.
+- Once answered, the overlay dismisses; a compact, non-intrusive record (e.g. "Approved: run X" / "Answered: …") may remain in the thread for history, but the *interaction* happens out of thread.
+- Keyboard-friendly: options are selectable by key; the text field is focusable for an override.
+
+### Why
+Keeps the transcript clean and console-like (low chrome), keeps the *decision* visually distinct from the conversation flow, and matches how a user expects to be interrupted for a choice — a prompt at the point of action, not a buried message.
+
+### Notes
+- This is the home for the real permission UI that currently auto-approves inline (see the ACP client). It is also the mechanism for agent-initiated questions.
+- Plumbing exists today: `ConversationUpdate.permissionRequested(PermissionRequestInfo)` carries the options; the client currently auto-approves. This overlay replaces auto-approve when implemented.
+
+---
+
 ## Open Questions / Future Considerations
 
 - Should the right panel support pinning or “keep open for this instance” behavior later?
