@@ -73,10 +73,13 @@ public actor GrokBuildInstanceLauncher {
             try process.run()
             runningProcesses[config.id] = process
 
-            // Monitor for termination
-            Task {
-                process.waitUntilExit()
-                await self.handleProcessExit(config.id, exitCode: process.terminationStatus)
+            // Monitor for termination via a callback. Do NOT call
+            // process.waitUntilExit() from a Task here: that Task inherits this
+            // actor's executor, and waitUntilExit() blocks synchronously —
+            // wedging the entire launcher actor for the process's lifetime.
+            process.terminationHandler = { proc in
+                let exitCode = proc.terminationStatus
+                Task { await self.handleProcessExit(config.id, exitCode: exitCode) }
             }
 
             return GrokBuildInstanceHandle(
