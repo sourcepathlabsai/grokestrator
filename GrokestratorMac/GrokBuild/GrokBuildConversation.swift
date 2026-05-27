@@ -11,6 +11,11 @@ import GrokestratorCore
 public enum ConversationUpdate: Sendable {
     case thought(String, metadata: [String: String]?)
     case message(String, metadata: [String: String]?)
+
+    /// Incremental streamed text for the in-progress thought / message (live typing).
+    case thoughtDelta(String)
+    case messageDelta(String)
+
     case toolCallRequested(ToolCallInfo)
     case permissionRequested(PermissionRequestInfo)
     case toolResultRecorded(toolCallId: String, isError: Bool)
@@ -217,6 +222,10 @@ public actor GrokBuildConversation {
             return .thought(t.content, metadata: t.metadata)
         case .message(let m):
             return .message(m.content, metadata: m.metadata)
+        case .thoughtDelta(let s):
+            return .thoughtDelta(s)
+        case .messageDelta(let s):
+            return .messageDelta(s)
         case .toolCall(let t):
             let info = ToolCallInfo(
                 id: t.toolCallId,

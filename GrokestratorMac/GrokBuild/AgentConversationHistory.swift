@@ -112,6 +112,10 @@ public actor AgentConversationHistory {
         case .sessionUpdate, .sessionCreated, .done:
             break
 
+        // Live deltas are UI-only; history is built from the coalesced .message/.thought.
+        case .messageDelta, .thoughtDelta:
+            break
+
         case .error(let e):
             currentTurnMessages.append(AgentMessage(role: .system, content: "[error] \(e.message)"))
 

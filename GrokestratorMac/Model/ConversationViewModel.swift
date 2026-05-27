@@ -4,30 +4,46 @@ import GrokestratorCore
 
 /// One renderable line in the conversation transcript.
 struct TranscriptEntry: Identifiable, Sendable {
-    let id = UUID()
-    let kind: Kind
+    let id: UUID
+    var kind: Kind
 
     enum Kind: Sendable {
-        /// Something the user sent.
         case userPrompt(String)
-        /// An update streamed back from the agent (or mock).
+        /// Assistant answer text (may grow live as deltas stream in).
+        case assistantMessage(String)
+        /// Assistant thinking text (may grow live as deltas stream in).
+        case thought(String)
+        /// Any other update: tool calls, progress/activity notes, errors, turn divider, etc.
         case update(ConversationUpdate)
+    }
+
+    init(id: UUID = UUID(), kind: Kind) {
+        self.id = id
+        self.kind = kind
     }
 }
 
 /// MainActor-facing state for a single conversation.
 ///
-/// This is the bridge between the actor-based, `AsyncStream<ConversationUpdate>`
-/// world (the black box / mock driver) and SwiftUI: it consumes the stream and
-/// publishes an observable transcript that views render directly.
+/// Bridges the actor-based `AsyncStream<ConversationUpdate>` (black box / mock)
+/// to SwiftUI. Streamed `messageDelta` / `thoughtDelta` updates grow the current
+/// bubble in place (live typing); the coalesced `message` / `thought` finalize it.
 @MainActor
 @Observable
 final class ConversationViewModel {
     private(set) var entries: [TranscriptEntry] = []
     private(set) var isStreaming = false
+    /// Bumped on every transcript mutation so views can keep scrolled to the bottom
+    /// even while a bubble grows in place (entry count doesn't change then).
+    private(set) var streamTick = 0
 
     private let driver: ConversationDriver
     private var streamingTask: Task<Void, Never>?
+
+    // Tracks the bubble currently being streamed into.
+    private enum StreamKind { case message, thought }
+    private var streamingID: UUID?
+    private var streamingKind: StreamKind?
 
     init(driver: ConversationDriver) {
         self.driver = driver
@@ -38,7 +54,7 @@ final class ConversationViewModel {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
-        entries.append(TranscriptEntry(kind: .userPrompt(trimmed)))
+        appendEntry(.userPrompt(trimmed))
         isStreaming = true
 
         let driver = self.driver
@@ -47,32 +63,90 @@ final class ConversationViewModel {
                 let stream = try await driver.send(trimmed)
                 for await update in stream {
                     // Task inherits the MainActor context, so this is a safe hop-back.
-                    self?.append(update)
+                    self?.handle(update)
                 }
             } catch {
-                self?.append(.error(error.localizedDescription))
+                self?.handle(.error(error.localizedDescription))
             }
+            self?.endStreaming()
             self?.isStreaming = false
         }
     }
 
     /// Appends a system-level note (e.g. launch status or errors) to the transcript.
     func appendSystem(_ text: String, isError: Bool = false) {
-        let update: ConversationUpdate = isError ? .error(text) : .sessionStatus(text)
-        entries.append(TranscriptEntry(kind: .update(update)))
+        endStreaming()
+        appendEntry(.update(isError ? .error(text) : .sessionStatus(text)))
     }
 
     /// Cancels any in-flight turn (e.g. when the view goes away).
     func cancel() {
         streamingTask?.cancel()
         streamingTask = nil
+        endStreaming()
         isStreaming = false
     }
 
-    private func append(_ update: ConversationUpdate) {
-        entries.append(TranscriptEntry(kind: .update(update)))
-        if case .turnComplete = update {
+    // MARK: - Update handling
+
+    private func handle(_ update: ConversationUpdate) {
+        switch update {
+        case .messageDelta(let t):
+            appendDelta(t, kind: .message)
+        case .thoughtDelta(let t):
+            appendDelta(t, kind: .thought)
+        case .message(let full, _):
+            finalize(full, kind: .message)
+        case .thought(let full, _):
+            finalize(full, kind: .thought)
+        case .turnComplete:
+            endStreaming()
             isStreaming = false
+            appendEntry(.update(update))
+        default:
+            endStreaming()
+            appendEntry(.update(update))
         }
+    }
+
+    private func appendDelta(_ text: String, kind: StreamKind) {
+        if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
+            switch entries[idx].kind {
+            case .assistantMessage(let s): entries[idx].kind = .assistantMessage(s + text)
+            case .thought(let s): entries[idx].kind = .thought(s + text)
+            default: break
+            }
+            streamTick += 1
+        } else {
+            endStreaming()
+            let entry = TranscriptEntry(kind: kind == .message ? .assistantMessage(text) : .thought(text))
+            entries.append(entry)
+            streamingID = entry.id
+            streamingKind = kind
+            streamTick += 1
+        }
+    }
+
+    /// A coalesced full message/thought arrived — finalize the streaming bubble
+    /// (replacing with authoritative text) or add a finalized entry if none.
+    private func finalize(_ full: String, kind: StreamKind) {
+        if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
+            entries[idx].kind = kind == .message ? .assistantMessage(full) : .thought(full)
+        } else {
+            endStreaming()
+            entries.append(TranscriptEntry(kind: kind == .message ? .assistantMessage(full) : .thought(full)))
+        }
+        endStreaming()
+        streamTick += 1
+    }
+
+    private func appendEntry(_ kind: TranscriptEntry.Kind) {
+        entries.append(TranscriptEntry(kind: kind))
+        streamTick += 1
+    }
+
+    private func endStreaming() {
+        streamingID = nil
+        streamingKind = nil
     }
 }
