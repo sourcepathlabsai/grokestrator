@@ -68,6 +68,7 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 ### Current State of Design Docs
 - `06-project-structure.md`: Reflects the native structure (updated).
 - `07-client-control-plane-protocol.md`: New design doc for the client-side control plane evolution (v0.1 reviewed, key decisions locked).
+- `08-multimodal-content.md`: Non-text content (images/audio/video/files) model, ACP mapping, download/streaming, iOS-over-Tailscale plan (v0.1, for review). Closes the text-only assumption gap. First build slice: inline images.
 - `00-vision-and-north-star.md`: North Star and phasing still valid.
 - `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Marked historical.
 - `PROJECT_STATE.md`: This file — now the live source of truth.
