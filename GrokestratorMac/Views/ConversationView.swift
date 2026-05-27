@@ -48,6 +48,8 @@ struct ConversationView: View {
                 }
                 .padding()
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
             .onChange(of: conversation.streamTick) {
                 if let last = conversation.entries.last {
                     proxy.scrollTo(last.id, anchor: .bottom)
@@ -60,18 +62,28 @@ struct ConversationView: View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Message \(instance.name)…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
+                .font(Theme.body(13))
                 .lineLimit(1...6)
                 .onSubmit(send)
                 .padding(8)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
             Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill").font(.title2)
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Theme.accent)
+                    .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
             }
             .buttonStyle(.plain)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.isStreaming)
+            .disabled(!canSend)
         }
         .padding(12)
+        .background(Theme.bgDeep)
+    }
+
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
     }
 
     @ViewBuilder
@@ -117,16 +129,16 @@ private struct TranscriptRow: View {
     var body: some View {
         switch entry.kind {
         case .userPrompt(let text):
-            row(icon: "person.fill", tint: .blue) {
-                Text(text).fontWeight(.medium).textSelection(.enabled)
+            row(icon: "person.fill", tint: Theme.textMuted) {
+                Text(text).font(Theme.body(14, .semibold)).foregroundStyle(Theme.textPrimary).textSelection(.enabled)
             }
         case .assistantMessage(let text):
-            row(icon: "sparkle", tint: .purple) {
-                Text(text).textSelection(.enabled)
+            row(icon: "sparkle", tint: Theme.accent) {
+                Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
             }
         case .assistantContent(let parts):
-            row(icon: "sparkle", tint: .purple) {
-                AssistantContentView(parts: parts)
+            row(icon: "sparkle", tint: Theme.accent) {
+                AssistantContentView(parts: parts).font(Theme.body(14)).foregroundStyle(Theme.textBody)
             }
         case .thought(let text):
             note("💭 \(text)")
@@ -184,14 +196,15 @@ private struct TranscriptRow: View {
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
+            .font(Theme.body(12))
+            .foregroundStyle(Theme.textMuted)
             .padding(.leading, 24)
     }
 
     private func mono(_ text: String) -> some View {
         Text(text)
-            .font(.system(.callout, design: .monospaced))
+            .font(Theme.mono(12))
+            .foregroundStyle(Theme.textBody)
             .padding(.leading, 24)
             .textSelection(.enabled)
     }
