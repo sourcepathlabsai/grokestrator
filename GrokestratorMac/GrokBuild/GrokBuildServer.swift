@@ -50,12 +50,12 @@ public actor GrokBuildServer {
         instances[id]
     }
 
-    private var deathHandlers: [UUID: (UUID, Int32) -> Void] = [:]
+    private var deathHandlers: [UUID: @Sendable (UUID, Int32) -> Void] = [:]
 
     /// Register a handler for when a specific instance's process dies.
-    public func onInstanceDied(id: UUID, handler: @escaping (UUID, Int32) -> Void) {
+    public func onInstanceDied(id: UUID, handler: @escaping @Sendable (UUID, Int32) -> Void) async {
         deathHandlers[id] = handler
         // Also register with the launcher
-        launcher.onInstanceDied(id: id, handler: handler)
+        await launcher.onInstanceDied(id: id, handler: handler)
     }
 }

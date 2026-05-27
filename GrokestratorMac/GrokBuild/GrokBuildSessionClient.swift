@@ -16,12 +16,14 @@ public actor GrokBuildSessionClient {
     public init(handle: GrokBuildInstanceHandle) {
         self.handle = handle
         self.reader = ACPMessageReader(dataStream: handle.stdout)
-        startPersistentReader()
+        // Start the reader once the actor is fully initialized (can't call an
+        // actor-isolated method directly from a synchronous init under Swift 6).
+        Task { await self.startPersistentReader() }
     }
 
     private func startPersistentReader() {
         readerTask = Task {
-            for await message in reader.messages() {
+            for await message in await reader.messages() {
                 await self.routeMessage(message)
             }
         }
@@ -53,9 +55,9 @@ public actor GrokBuildSessionClient {
         if let session = targetSession, let cont = activePromptStreams[session] {
             cont.yield(event)
         } else {
-            // Fallback: send to the most recently started active stream (common case for single active prompt)
-            if let last = activePromptStreams.values.last {
-                last.yield(event)
+            // Fallback: send to any active stream (common case is a single active prompt).
+            if let anyStream = activePromptStreams.values.first {
+                anyStream.yield(event)
             }
         }
     }

@@ -45,11 +45,12 @@ public actor GrokBuildInstanceLauncher {
         stdoutHandlers[config.id] = stdoutContinuation
         stderrHandlers[config.id] = stderrContinuation
 
-        // Start reading stdout
+        // Start reading stdout (FileHandle.bytes yields individual UInt8 values;
+        // wrap each as Data for the line-based ACP reader downstream).
         Task {
             let handle = stdoutPipe.fileHandleForReading
-            for try await data in handle.bytes {
-                stdoutContinuation.yield(data)
+            for try await byte in handle.bytes {
+                stdoutContinuation.yield(Data([byte]))
             }
             stdoutContinuation.finish()
         }
@@ -57,8 +58,8 @@ public actor GrokBuildInstanceLauncher {
         // Start reading stderr
         Task {
             let handle = stderrPipe.fileHandleForReading
-            for try await data in handle.bytes {
-                stderrContinuation.yield(data)
+            for try await byte in handle.bytes {
+                stderrContinuation.yield(Data([byte]))
             }
             stderrContinuation.finish()
         }
@@ -97,7 +98,7 @@ public actor GrokBuildInstanceLauncher {
         stderrHandlers.removeValue(forKey: id)
     }
 
-    private var exitHandlers: [UUID: (UUID, Int32) -> Void] = [:]
+    private var exitHandlers: [UUID: @Sendable (UUID, Int32) -> Void] = [:]
 
     private func handleProcessExit(_ id: UUID, exitCode: Int32) async {
         runningProcesses.removeValue(forKey: id)
@@ -114,17 +115,21 @@ public actor GrokBuildInstanceLauncher {
     }
 
     /// Register to be notified when a specific instance's process dies.
-    public func onInstanceDied(id: UUID, handler: @escaping (UUID, Int32) -> Void) {
+    public func onInstanceDied(id: UUID, handler: @escaping @Sendable (UUID, Int32) -> Void) {
         exitHandlers[id] = handler
     }
 
     /// Legacy registration (kept for compatibility).
-    public func registerExitHandler(for id: UUID, handler: @escaping (UUID, Int32) -> Void) {
+    public func registerExitHandler(for id: UUID, handler: @escaping @Sendable (UUID, Int32) -> Void) {
         exitHandlers[id] = handler
     }
 }
 
-public struct GrokBuildInstanceHandle {
+/// Handle to a launched Grok Build process. Wraps OS resources (`Process`,
+/// `FileHandle`) that are not themselves `Sendable`. The handle is created once
+/// by the launcher and its ownership is handed off to a single
+/// `GrokBuildSessionClient`, so crossing the actor boundary at hand-off is safe.
+public struct GrokBuildInstanceHandle: @unchecked Sendable {
     public let id: UUID
     public let process: Process
     public let stdin: FileHandle
@@ -136,6 +141,7 @@ public enum GrokBuildError: Error, LocalizedError {
     case instanceAlreadyRunning(UUID)
     case failedToLaunch(UUID, underlyingError: Error)
     case protocolError(String)
+    case instanceManagementError(String)
 
     public var errorDescription: String? {
         switch self {
@@ -145,6 +151,8 @@ public enum GrokBuildError: Error, LocalizedError {
             return "Failed to launch Grok Build instance \(id)"
         case .protocolError(let message):
             return "Grok Build protocol error: \(message)"
+        case .instanceManagementError(let message):
+            return "Grok Build instance management error: \(message)"
         }
     }
 }

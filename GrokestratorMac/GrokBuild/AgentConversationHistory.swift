@@ -109,8 +109,11 @@ public actor AgentConversationHistory {
         case .permissionRequest(let p):
             currentTurnMessages.append(AgentMessage(role: .system, content: "Permission requested: \(p.description)"))
 
-        case .sessionUpdate, .sessionCreated:
+        case .sessionUpdate, .sessionCreated, .done:
             break
+
+        case .error(let e):
+            currentTurnMessages.append(AgentMessage(role: .system, content: "[error] \(e.message)"))
 
         // Progress and activity notes — record them so they survive restarts and appear in history
         case .progress(let p):
