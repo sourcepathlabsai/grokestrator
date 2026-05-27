@@ -45,7 +45,7 @@ public struct ToolCallInfo: Identifiable, Sendable, Equatable {
 public struct PermissionRequestInfo: Identifiable, Sendable, Equatable {
     public let id: String
     public let description: String
-    public let options: [String]
+    public let options: [PermissionOption]
     public let sessionId: String?
 }
 
@@ -86,6 +86,17 @@ public actor GrokBuildConversation {
     private var pendingToolCalls: [String: ToolCallInfo] = [:]
     private var pendingPermissions: [String: PermissionRequestInfo] = [:]
     private var lastFinalAnswer: String?
+    private var primed = false
+
+    /// One-time priming instruction so the agent emits a machine-readable choices
+    /// block we can render as buttons. Sent (hidden) ahead of the first prompt only;
+    /// the user's prompt is recorded/displayed unchanged.
+    private static let choicesInstruction = """
+    [Grokestrator UI note] When you ask me to pick among discrete options, append \
+    on its own line a block: [[CHOICES: option one | option two | ...]] using the \
+    literal option labels (keep your normal message too). Omit it when there are no \
+    discrete choices to pick.
+    """
 
     public init(instanceID: UUID, sessionID: String, client: GrokBuildSessionClient, persistenceURL: URL? = nil) {
         self.instanceID = instanceID
@@ -110,8 +121,11 @@ public actor GrokBuildConversation {
         await history.startNewTurn(prompt: prompt)
         try? await history.load()
 
-        // This is the only place that talks to the raw ACP client
-        let rawStream = try await client.sendPrompt(sessionId: sessionID, prompt: prompt)
+        // This is the only place that talks to the raw ACP client. On the first
+        // turn, prime the agent with the choices convention (hidden from history/UI).
+        let wireText = primed ? prompt : "\(Self.choicesInstruction)\n\n\(prompt)"
+        primed = true
+        let rawStream = try await client.sendPrompt(sessionId: sessionID, prompt: wireText)
 
         let (wrapped, continuation) = AsyncStream<ConversationUpdate>.makeStream(bufferingPolicy: .unbounded)
 

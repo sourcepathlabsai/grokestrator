@@ -11,7 +11,18 @@ struct ConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
+                .overlay(alignment: .bottom) {
+                    if let perm = conversation.pendingPermission {
+                        PermissionOverlay(request: perm) { option in
+                            conversation.answerPermission(option)
+                        }
+                        .padding(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy, value: conversation.pendingPermission)
             Divider()
+            quickReplyBar
             composer
         }
         .navigationTitle(instance.name)
@@ -61,6 +72,34 @@ struct ConversationView: View {
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.isStreaming)
         }
         .padding(12)
+    }
+
+    @ViewBuilder
+    private var quickReplyBar: some View {
+        let replies = conversation.quickReplies
+        if !replies.isEmpty, !conversation.isStreaming, conversation.pendingPermission == nil {
+            Group {
+                if replies.count <= 3 && replies.allSatisfy({ $0.count <= 14 }) {
+                    HStack(spacing: 8) { chips(replies); Spacer() }   // short → a row
+                } else {
+                    VStack(spacing: 6) { chips(replies) }              // long/many → a stack
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func chips(_ replies: [String]) -> some View {
+        ForEach(replies, id: \.self) { reply in
+            Button { conversation.send(reply) } label: {
+                Text(reply).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .fixedSize(horizontal: replies.count <= 3 && replies.allSatisfy { $0.count <= 14 }, vertical: false)
+        }
     }
 
     private var streamingMarkerID: String { "streaming-marker" }
@@ -160,5 +199,44 @@ private struct TranscriptRow: View {
     private func argsString(_ args: [String: String]?) -> String {
         guard let args, !args.isEmpty else { return "" }
         return args.map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")
+    }
+}
+
+/// A floating card shown over the thread when the agent requests permission.
+/// Lists the options as click targets (allow variants prominent); the choice is
+/// sent back to the agent. (Free-text answers for agent *questions* are a follow-up.)
+private struct PermissionOverlay: View {
+    let request: PermissionRequestInfo
+    let onChoose: (PermissionOption) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Grok is asking permission", systemImage: "lock.shield")
+                .font(.headline)
+                .foregroundStyle(.orange)
+
+            Text(request.description)
+                .font(.callout)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 8) {
+                ForEach(request.options) { option in
+                    Button {
+                        onChoose(option)
+                    } label: {
+                        Text(option.label).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(option.isAllow ? Color.accentColor : Color.secondary)
+                    .controlSize(.large)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 540)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
+        .shadow(radius: 16, y: 6)
     }
 }

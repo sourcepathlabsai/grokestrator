@@ -35,6 +35,12 @@ struct TranscriptEntry: Identifiable, Sendable {
 final class ConversationViewModel {
     private(set) var entries: [TranscriptEntry] = []
     private(set) var isStreaming = false
+    /// A permission request awaiting the user's decision (shown over the thread,
+    /// not inline). `nil` when there is nothing to answer.
+    private(set) var pendingPermission: PermissionRequestInfo?
+    /// Confident quick-reply options for the last assistant question (set when a
+    /// message finalizes; cleared on the next prompt). Empty ⇒ user types.
+    private(set) var quickReplies: [String] = []
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
     /// even while a bubble grows in place (entry count doesn't change then).
     private(set) var streamTick = 0
@@ -57,6 +63,7 @@ final class ConversationViewModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         appendEntry(.userPrompt(trimmed))
+        quickReplies = []
         isStreaming = true
 
         let driver = self.driver
@@ -81,6 +88,16 @@ final class ConversationViewModel {
         appendEntry(.update(isError ? .error(text) : .sessionStatus(text)))
     }
 
+    /// Answers the pending permission request and dismisses the overlay,
+    /// leaving a compact record in the thread.
+    func answerPermission(_ option: PermissionOption) {
+        guard let perm = pendingPermission else { return }
+        pendingPermission = nil
+        appendEntry(.update(.activityNote("\(option.isAllow ? "Approved" : "Declined"): \(perm.description)", kind: "permission", metadata: nil)))
+        let driver = self.driver
+        Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
+    }
+
     /// Cancels any in-flight turn (e.g. when the view goes away).
     func cancel() {
         streamingTask?.cancel()
@@ -101,6 +118,10 @@ final class ConversationViewModel {
             finalize(full, kind: .message)
         case .thought(let full, _):
             finalize(full, kind: .thought)
+        case .permissionRequested(let info):
+            // Surface over the thread (overlay), not as an inline row.
+            endStreaming()
+            pendingPermission = info
         case .turnComplete:
             endStreaming()
             isStreaming = false
@@ -143,13 +164,16 @@ final class ConversationViewModel {
         streamTick += 1
     }
 
-    /// A finalized assistant message is parsed for inline content (images);
-    /// if it contains any non-text part, it becomes `.assistantContent`.
+    /// A finalized assistant message is analyzed for quick-reply options (which
+    /// also strips any `[[CHOICES]]` block from the displayed text) and parsed for
+    /// inline content (images). Thoughts pass through unchanged.
     private func finalizedKind(_ full: String, kind: StreamKind) -> TranscriptEntry.Kind {
         guard kind == .message else { return .thought(full) }
-        let parts = ContentParser.parse(full)
+        let (display, options) = QuickReplyDetector.analyze(full)
+        quickReplies = options
+        let parts = ContentParser.parse(display)
         let hasMedia = parts.contains { if case .text = $0 { return false } else { return true } }
-        return hasMedia ? .assistantContent(parts) : .assistantMessage(full)
+        return hasMedia ? .assistantContent(parts) : .assistantMessage(display)
     }
 
     private func appendEntry(_ kind: TranscriptEntry.Kind) {
