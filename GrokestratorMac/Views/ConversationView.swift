@@ -37,9 +37,9 @@ struct ConversationView: View {
                 }
                 .padding()
             }
-            .onChange(of: conversation.entries.count) {
+            .onChange(of: conversation.streamTick) {
                 if let last = conversation.entries.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
         }
@@ -81,6 +81,12 @@ private struct TranscriptRow: View {
             row(icon: "person.fill", tint: .blue) {
                 Text(text).fontWeight(.medium).textSelection(.enabled)
             }
+        case .assistantMessage(let text):
+            row(icon: "sparkle", tint: .purple) {
+                Text(text).textSelection(.enabled)
+            }
+        case .thought(let text):
+            note("💭 \(text)")
         case .update(let update):
             updateBody(update)
         }
@@ -95,6 +101,9 @@ private struct TranscriptRow: View {
             }
         case .thought(let text, _):
             note("💭 \(text)")
+        case .messageDelta, .thoughtDelta:
+            // Handled by ConversationViewModel as live bubble growth, never rendered here.
+            EmptyView()
         case .progressNote(let text, let phase, _):
             note("\(phase.map { "[\($0)] " } ?? "")\(text)")
         case .activityNote(let text, let kind, _):

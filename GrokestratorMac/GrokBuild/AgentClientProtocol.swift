@@ -134,6 +134,12 @@ public enum ACPEvent: Codable, Sendable {
     case sessionCreated(SessionCreatedEvent)
     case message(MessageEvent)
     case thought(ThoughtEvent)
+
+    /// Incremental streamed text for the in-progress assistant message / thought.
+    /// Emitted live per chunk; the coalesced `.message` / `.thought` still arrives
+    /// at block end (for history + as the authoritative finalized text).
+    case messageDelta(String)
+    case thoughtDelta(String)
     case toolCall(ToolCallEvent)
     case toolResult(ToolResultEvent)
     case permissionRequest(PermissionRequestEvent)

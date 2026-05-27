@@ -156,11 +156,17 @@ public actor GrokBuildSessionClient {
         switch p.update.sessionUpdate {
         case "agent_thought_chunk":
             if !messageBuffer.isEmpty { flushMessage(sid) }
-            if let t = p.update.content?.text { thoughtBuffer += t }
+            if let t = p.update.content?.text {
+                thoughtBuffer += t
+                emit(.thoughtDelta(t))   // live streaming
+            }
 
         case "agent_message_chunk":
             if !thoughtBuffer.isEmpty { flushThought(sid) }
-            if let t = p.update.content?.text { messageBuffer += t }
+            if let t = p.update.content?.text {
+                messageBuffer += t
+                emit(.messageDelta(t))   // live streaming
+            }
 
         case "tool_call":
             flushThought(sid); flushMessage(sid)

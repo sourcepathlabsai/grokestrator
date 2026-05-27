@@ -50,13 +50,26 @@ public struct MockConversationDriver: ConversationDriver {
                     continuation.yield(update)
                 }
 
-                await emit(.thought("Parsing request: \"\(prompt)\"", metadata: nil), after: 300)
+                // Stream a thought token-by-token, then finalize it.
+                let thought = "Parsing request: \"\(prompt)\""
+                for word in thought.split(separator: " ") {
+                    await emit(.thoughtDelta(String(word) + " "), after: 60)
+                }
+                await emit(.thought(thought, metadata: nil), after: 100)
+
                 await emit(.progressNote("Scanning workspace", phase: "scan", metadata: nil))
                 await emit(.activityNote("Read 3 files", kind: "io", metadata: nil))
                 await emit(.toolCallRequested(ToolCallInfo(id: "t1", toolName: "search", arguments: ["query": prompt], sessionId: nil)))
                 await emit(.progressNote("Synthesizing answer", phase: "draft", metadata: nil))
-                await emit(.message("(\(label)) Here's a response to: \(prompt)", metadata: nil), after: 550)
-                await emit(.turnComplete(finalAnswer: "(\(label)) done"), after: 200)
+
+                // Stream the answer token-by-token, then finalize it.
+                let answer = "(\(label)) Here's a response to: \(prompt)"
+                for word in answer.split(separator: " ") {
+                    await emit(.messageDelta(String(word) + " "), after: 70)
+                }
+                await emit(.message(answer, metadata: nil), after: 120)
+
+                await emit(.turnComplete(finalAnswer: answer), after: 150)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
