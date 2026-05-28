@@ -77,54 +77,42 @@ final class GrokestratorModel {
         for link in remoteLinks { Task { await self.connectAndAttach(link) } }
     }
 
-    /// Default app state: load the persisted Connection registry and seed a
-    /// mock Connection on first run (so the UI isn't empty for someone who
-    /// hasn't created any). Non-archived entries become UI items; entries
-    /// with `autoRestart == true` are launched in the background.
+    /// Default app state: load the persisted Connection registry and build UI
+    /// items for the non-archived entries. Connections with `autoRestart == true`
+    /// are launched in the background. First run shows an empty sidebar; the
+    /// "+" button creates the first real Connection.
     convenience init() {
-        let stored = ConnectionStore.load()
-        let firstRun = stored.isEmpty
-        var registry = stored
-
-        // First-run mock seed — added to the registry so it persists.
-        if firstRun {
-            registry = [ManagedConnection(
-                name: "Mock Grok (offline)",
-                command: "/mock/grok",
-                arguments: [],
-                workingDirectory: nil,
-                autoRestart: false,
-                shared: false
-            )]
+        // Drop any legacy mock entries from an older build's first-run seed
+        // (`command == "/mock/grok"`). MockConversationDriver is gone; trying
+        // to launch a fake binary would just fail.
+        let registry = ConnectionStore.load().filter { $0.command != "/mock/grok" }
+        // If we removed something, rewrite so we don't keep filtering forever.
+        if registry.count != ConnectionStore.load().count {
             ConnectionStore.save(registry)
         }
 
-        // UI items for every non-archived Connection.
-        var seededInstances: [InstanceItem] = []
-        for conn in registry where !conn.archived {
-            // The mock seed gets a MockConversationDriver; everything else gets a Live driver.
-            // We can't distinguish without convention — use the special command path "/mock/grok".
-            let driver: ConversationDriver = conn.command == "/mock/grok"
-                ? MockConversationDriver(label: conn.name)
-                : LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id)   // replaced below
-            seededInstances.append(InstanceItem(id: conn.id, name: conn.name, status: .stopped, driver: driver))
-        }
-        self.init(instances: seededInstances, connections: registry)
-
-        // Re-bind LiveConversationDrivers to the actual manager (the temp ones
-        // created above used a throwaway manager because `self` wasn't ready).
-        for (idx, item) in instances.enumerated() {
-            if let conn = registry.first(where: { $0.id == item.id }), conn.command != "/mock/grok" {
-                instances[idx] = InstanceItem(
+        let seededInstances: [InstanceItem] = registry
+            .filter { !$0.archived }
+            .map { conn in
+                InstanceItem(
                     id: conn.id, name: conn.name, status: .stopped,
-                    driver: LiveConversationDriver(manager: manager, instanceID: conn.id)
+                    driver: LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id)   // re-bound below
                 )
             }
+        self.init(instances: seededInstances, connections: registry)
+
+        // Re-bind LiveConversationDrivers to the actual manager (the items
+        // above used a throwaway manager because `self` wasn't ready yet).
+        for (idx, item) in instances.enumerated() {
+            instances[idx] = InstanceItem(
+                id: item.id, name: item.name, status: .stopped,
+                driver: LiveConversationDriver(manager: manager, instanceID: item.id)
+            )
         }
         if selectedInstanceID == nil { selectedInstanceID = instances.first?.id }
 
         // Auto-launch every non-archived Connection with autoRestart == true.
-        for conn in registry where !conn.archived && conn.autoRestart && conn.command != "/mock/grok" {
+        for conn in registry where !conn.archived && conn.autoRestart {
             Task { [weak self] in await self?.launchConnection(conn) }
         }
     }
@@ -156,13 +144,7 @@ final class GrokestratorModel {
         return [localGroup] + remoteGroups
     }
 
-    // MARK: - Local instances
-
-    func addMockConnection(name: String) {
-        let item = InstanceItem(name: name, status: .running, driver: MockConversationDriver(label: name))
-        instances.append(item)
-        selectedInstanceID = item.id
-    }
+    // MARK: - Local Connections
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
                            autoRestart: Bool = true, shared: Bool = true) {
@@ -231,12 +213,10 @@ final class GrokestratorModel {
     /// main sidebar and from every remote GKSC. Reversible via `restore`.
     func archive(_ item: InstanceItem) {
         guard let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
-        // Stop the grok process if running. (No-op for mock.)
-        if connections[idx].command != "/mock/grok" {
-            Task { [server] in
-                await manager.stopInstance(id: item.id)
-                await server.broadcastInstancesIfChanged()
-            }
+        let server = self.server
+        Task {
+            await manager.stopInstance(id: item.id)
+            await server.broadcastInstancesIfChanged()
         }
         connections[idx].archived = true
         ConnectionStore.save(connections)
@@ -251,11 +231,10 @@ final class GrokestratorModel {
         guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
         connections[idx].archived = false
         ConnectionStore.save(connections)
-
-        let driver: ConversationDriver = connection.command == "/mock/grok"
-            ? MockConversationDriver(label: connection.name)
-            : LiveConversationDriver(manager: manager, instanceID: connection.id)
-        let item = InstanceItem(id: connection.id, name: connection.name, status: .stopped, driver: driver)
+        let item = InstanceItem(
+            id: connection.id, name: connection.name, status: .stopped,
+            driver: LiveConversationDriver(manager: manager, instanceID: connection.id)
+        )
         instances.append(item)
     }
 
