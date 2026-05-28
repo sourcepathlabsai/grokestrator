@@ -1,65 +1,124 @@
 # Grokestrator
 
-A high-fidelity native desktop application for comfortably orchestrating multiple Grok Build instances from one place.
+**Drive your [grok](https://grok.com) sessions across every Mac and iPad you own — over [Tailscale](https://tailscale.com).**
 
-## What is Grokestrator?
+Open Grokestrator on your home Mac, start a build session, walk away. Pick up your iPad on the couch — the full transcript is right there, live. Type a new prompt; it appears on the Mac too. Permission requests pop on whichever device you're looking at. Image and video results render inline on iPad. The grok process keeps running on the Mac the whole time.
 
-If you regularly work with multiple Grok Build sessions (different configurations, different projects, local vs research instances, etc.), you know the pain:
-
-- Constant context switching between terminals
-- Losing history and context when moving between instances
-- Difficulty keeping track of which instance has which capabilities (MCPs, skills, slash commands, etc.)
-
-**Grokestrator** aims to solve this by giving you one comfortable, powerful interface that lets you manage and fluidly work across many Grok Build instances — while preserving the rich, dense experience you already like from the console.
-
-## Current Status (Early Development)
-
-- **Platform**: macOS + iOS, built as **native Swift + SwiftUI**.
-- **Mac app**: Hybrid — runs both the client UI *and* the server. The stationary dev Mac owns `grok` instance lifecycle (launch/monitor/auto-restart), conversation history, and persistence.
-- **iOS app**: Client-only — drives the Mac server (including voice/hands-free) over Tailscale.
-- **Shared core**: `GrokestratorCore` (a Swift package) is the single source of truth for models, the control-plane protocol, and persistence.
-- **Status**: Core foundation and the Grok Build integration layer (the "black box") are implemented. Active work is the client control-plane protocol so iOS/Mac clients can drive remote Grok Build instances.
-
-See [`PROJECT_STATE.md`](PROJECT_STATE.md) for the live, authoritative snapshot.
-
-> **Note on history**: An earlier iteration explored a Tauri/Rust/Svelte stack. After evaluating real iOS-client, voice, and hybrid-Mac-server requirements, the project moved to pure native Swift + SwiftUI.
-
-## Goals
-
-- Deliver a tool that power users of Grok Build actually want to use daily
-- Maintain high visual and behavioral fidelity to the existing Grok console experience
-- Minimize cognitive load when working with many instances
-- Move fast with a strong design foundation
-
-## Design Documents
-
-All major design decisions are documented in the `design/` folder:
-
-- [Vision & North Star](design/00-vision-and-north-star.md)
-- [Architecture & Components](design/01-architecture-and-components.md) *(historical)*
-- [UI Navigation & Interaction Model](design/02-ui-navigation-and-interaction.md)
-- [Technology & Build Strategy](design/03-technology-and-build-strategy.md) *(historical)*
-- [Conversation Model](design/04-conversation-model.md)
-- [Data & Persistence Model](design/05-data-persistence-model.md)
-- [Project Structure](design/06-project-structure.md)
-- [Client Control Plane Protocol](design/07-client-control-plane-protocol.md)
-- [Multimodal (Non-Text) Content](design/08-multimodal-content.md)
-
-## Tech Stack (Current)
-
-- **Apps**: Swift + SwiftUI (native macOS hybrid client+server, native iOS client)
-- **Shared core**: `GrokestratorCore` Swift package (models, control-plane protocol, persistence)
-- **Instance integration**: Agent Client Protocol (ACP) over stdio to each Grok Build instance
-- **Remote transport**: Tailscale between iOS/Mac clients and the Mac server
-
-## Getting Involved
-
-This project is in very early stages. More details (including how to build and run) will be added as implementation progresses.
-
-## License
-
-TBD
+> Screenshots and a demo video coming this weekend.
 
 ---
 
-*Note: This is currently a private repository during initial development.*
+## Getting Started
+
+### Prerequisites
+
+You need four things. Set the first two up first; they apply to your whole machine.
+
+1. **grok** — xAI's coding agent. Install per [grok.com](https://grok.com) and run `grok` once in a terminal to authenticate. Grokestrator drives `grok agent stdio` under the hood; if `grok` works in your terminal, it'll work here.
+2. **Tailscale** — secure mesh networking between your devices. **[Create a free account at tailscale.com](https://tailscale.com)** and install the client on every Mac and iPad you want to use Grokestrator across. Personal use is free; the tailnet is the trust boundary (Grokestrator does not add an extra auth layer).
+3. **Xcode 15+** (Swift 6 toolchain).
+4. **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`.
+
+### Build and run on the Mac
+
+```bash
+git clone https://github.com/bobprofleet/grokestrator.git
+cd grokestrator
+xcodegen generate         # produces Grokestrator.xcodeproj (gitignored)
+open Grokestrator.xcodeproj
+```
+
+In Xcode:
+
+1. Select the **GrokestratorMac** scheme.
+2. Build & run (⌘R).
+3. Click the **+** in the sidebar → *Add Local Connection…*
+4. Name it, point the *Command* at your `grok` binary (the default — `~/.grok/bin/grok` — is right for a standard install), leave arguments as `agent stdio`.
+5. Hit Add. The Connection persists; Grokestrator now drives that grok instance.
+
+That's it for the Mac. You can stop here if you only want a desktop client.
+
+### Build and run on iPad / iPhone
+
+Same project, different scheme:
+
+1. In Xcode, select the **GrokestratoriOS** scheme.
+2. Pick your iPad or iPhone as the destination.
+3. Build & run.
+
+The iOS app is a **client-only** companion — it doesn't run grok itself; it drives whatever Grokestrator server you point it at over Tailscale.
+
+> You'll need an [Apple Developer Program](https://developer.apple.com/programs/) membership to install on a real device. The iOS Simulator works without one but can't reach your Mac's grok over Tailscale.
+
+### Going cross-device
+
+To let your iPad (or another Mac) drive grok running on your home Mac:
+
+1. On the **host Mac**: open Grokestrator → ⌘, *(Settings)* → toggle **Run server on this Mac** on. Note the port (default `7847`).
+2. On the **other device**: open Grokestrator → **+** in the sidebar → *Add Remote Server…* → name it, host = the Mac's [MagicDNS](https://tailscale.com/kb/1081/magicdns) name (e.g. `mac-mini`) or 100.x.y.z address, port = `7847`. Add.
+3. The remote Mac's Connections appear in a new sidebar section. Tap one → see the live transcript. Drive it as if it were local.
+
+---
+
+## What it does
+
+- **Persistent Connections.** Each `grok` instance is a named Connection with its working directory, auto-launch flag, and full conversation history saved to disk. Quit Grokestrator, reopen — your sessions are right where you left them.
+- **Real-time multi-device mirroring.** Every connected device sees the same conversation as it happens. Prompt from any device; everyone watches the response stream.
+- **Multimodal results.** Images, video, audio, and files generated by grok render inline — on Mac and iOS.
+- **Slash commands + agent capabilities.** The Inspector panel shows the connected instance's model, context window, MCP servers, and slash command catalog. Type `/` to autocomplete.
+- **Permission overlays.** When grok asks for permission, every connected device prompts; first device to answer wins.
+- **Archive, don't delete.** Connections move to an archived state when you're done — config + transcript preserved, reversible from the Archived view.
+- **Tailscale-native.** No exposed ports, no extra auth, no relay servers. Your tailnet is the trust boundary.
+
+---
+
+## How it's built
+
+- **Native Swift + SwiftUI**, Swift 6 strict concurrency. macOS 14+ / iOS 17+.
+- **`GrokestratorCore`** Swift package — wire protocol, transport, conversation/history models, persistence. The single source of truth for both targets.
+- **Mac app is hybrid**: both the server (owns grok instance lifecycle, conversation history, the Tailscale listener) *and* a UI client.
+- **iOS app is client-only**: drives a Grokestrator server over Tailscale; never hosts grok itself.
+- **Wire layer**: newline-delimited JSON of `GrokestratorMessage` envelopes over plain TCP via `Network.framework`. Tailscale provides transport encryption + peer authentication.
+- **Broadcast model**: every Connection has one authoritative transcript on the server; every connected device subscribes and receives a snapshot on join + live updates thereafter.
+
+For deeper dives into the design:
+
+- **[Vision & North Star](design/00-vision-and-north-star.md)** — what this is for.
+- **[Architecture & Components](design/01-architecture-and-components.md)** — the moving pieces.
+- **[UI Navigation & Interaction](design/02-ui-navigation-and-interaction.md)** — sidebar, Instance Inspector, capability discovery.
+- **[Technology & Build Strategy](design/03-technology-and-build-strategy.md)** — why native Swift; build choices.
+- **[Conversation Model](design/04-conversation-model.md)** — turns, messages, structured history.
+- **[Data & Persistence Model](design/05-data-persistence-model.md)** — what's on disk and where.
+- **[Project Structure](design/06-project-structure.md)** — module layout.
+- **[Client Control Plane Protocol](design/07-client-control-plane-protocol.md)** — the wire.
+- **[Multimodal Content](design/08-multimodal-content.md)** — how images/video/audio/files surface and render.
+- **[Slash Commands](design/09-slash-commands.md)** — shell builtins vs pager builtins, the curated catalog.
+
+---
+
+## Troubleshooting
+
+**`grok` won't launch from Grokestrator but works in a terminal.** A GUI-launched `.app` inherits a stripped `PATH` and a minimal environment, so grok's MCP servers and PATH-dependent tools (like the `imagine` image-gen tool) silently fail. Grokestrator works around this by spawning your interactive login shell at launch and adopting its environment — but if you have unusual rc-file setup, exporting the variables grok needs in `~/.zprofile` (which gets loaded for login shells) is the most reliable path.
+
+**Remote device can't see the host's Connections.** Check (a) the host Mac has **Run server** toggled on in Settings, (b) both devices are signed into the same Tailscale tailnet, (c) the host Mac is awake (Grokestrator doesn't ship Wake-on-LAN), and (d) the Connection isn't archived or marked unshared.
+
+**"Connection details never appeared."** Some grok configurations are slow on first `initialize` — the Inspector polls for ~6s before giving up. Click into the conversation and back, or send a quick prompt to kick it.
+
+---
+
+## Status
+
+Early access. The model is solid; rough edges remain. File issues for anything that surprises you.
+
+**Roadmap signal** (not promises):
+
+- Signed/notarized Mac app + TestFlight for iOS — so users don't have to build from source.
+- Live token-count streaming during a turn.
+- Per-Connection MCP overrides.
+- Headless Linux server build (drive your tailnet's GPU box from a laptop).
+
+---
+
+## License
+
+To be decided before signed binaries ship. The repository is currently provided for evaluation and contribution; no warranty.
