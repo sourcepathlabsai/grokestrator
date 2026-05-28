@@ -29,10 +29,11 @@ public protocol ConversationDriver: Sendable {
     func usage() async -> SessionUsage?
 }
 
+#if os(macOS)
 /// Drives a conversation against the local Mac's own `GrokBuildManager` —
-/// the in-process equivalent of `RemoteConversationDriver`. Both subscribe to
-/// the same broadcast plumbing, so the local UI sees turns initiated from
-/// remote clients identically to its own.
+/// the in-process equivalent of `RemoteConversationDriver`. **Mac-only**:
+/// iOS is a client-only app and never hosts its own grok processes; it always
+/// drives over the wire via `RemoteConversationDriver`.
 public struct LiveConversationDriver: ConversationDriver {
     public let manager: GrokBuildManager
     public let instanceID: UUID
@@ -64,6 +65,7 @@ public struct LiveConversationDriver: ConversationDriver {
         await manager.usage(for: instanceID)
     }
 }
+#endif
 
 /// Scripted, delayed updates that resemble a real turn (thoughts, notes, a
 /// tool call, a permission it waits on, then a final message). Powers the

@@ -2,29 +2,8 @@ import Foundation
 import Observation
 import GrokestratorCore
 
-/// A connection (Grok Build instance) shown in the sidebar, plus its conversation.
-///
-/// `serverID == nil` ⇒ a local instance (this Mac); otherwise the `serverID`
-/// matches a `RemoteServerLink.id`.
-@MainActor
-@Observable
-final class InstanceItem: Identifiable {
-    let id: UUID
-    var name: String
-    var status: InstanceStatus
-    let conversation: ConversationViewModel
-    /// `nil` for local; non-nil for remote (= the `RemoteServerLink.id`).
-    let serverID: UUID?
-
-    init(id: UUID = UUID(), name: String, status: InstanceStatus,
-         driver: ConversationDriver, serverID: UUID? = nil) {
-        self.id = id
-        self.name = name
-        self.status = status
-        self.conversation = ConversationViewModel(driver: driver)
-        self.serverID = serverID
-    }
-}
+// `InstanceItem` moved to GrokestratorShared/Model/InstanceItem.swift so iOS
+// can use the same type.
 
 /// A sidebar grouping — "This Mac" first, then each remote server with its
 /// instances. The view layer reads these and renders one `Section` per group.

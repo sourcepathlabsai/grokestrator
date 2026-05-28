@@ -1,14 +1,19 @@
 import SwiftUI
-import GrokestratorCore
 
 @main
 struct GrokestratoriOSApp: App {
-    // In Xcode, add the local package via:
-    // File > Add Packages > Add Local... → select ../Packages/GrokestratorCore
+    @State private var model = iOSAppModel()
+
+    init() {
+        Theme.registerFonts()
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            iOSContentView(model: model)
+                .tint(Theme.accent)
+                .preferredColorScheme(.dark)
+                .background(Theme.bg.ignoresSafeArea())
         }
     }
 }
