@@ -116,6 +116,12 @@ public actor GrokBuildConversation {
         try await client.currentCapabilities()
     }
 
+    /// Token / context usage for the session (for the inspector). Does not force a
+    /// handshake — returns zeros until the first turn has reported usage.
+    public func usage() async -> SessionUsage {
+        await client.currentUsage()
+    }
+
     // MARK: - Public Black-Box API (no raw ACP leakage to callers)
 
     /// Send a prompt through the black box.

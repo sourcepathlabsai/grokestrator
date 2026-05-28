@@ -158,6 +158,13 @@ public actor GrokBuildManager {
         return try await convo.capabilities()
     }
 
+    /// Token / context usage for an instance (inspector). Nil if no conversation
+    /// has been started yet (no handshake is forced).
+    public func usage(for instanceID: UUID) async -> SessionUsage? {
+        guard let convo = activeConversations[instanceID] else { return nil }
+        return await convo.usage()
+    }
+
     /// Get a clean state snapshot (history + pending tool/permission counts + alive status).
     /// This is the primary observation point for the rest of the Mac app.
     public func state(for instanceID: UUID) async -> ConversationState? {

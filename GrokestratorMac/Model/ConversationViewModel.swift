@@ -50,6 +50,16 @@ final class ConversationViewModel {
 
     /// Slash commands advertised by the instance (for the composer popup).
     var slashCommands: [SlashCommand] { capabilities?.commands ?? [] }
+    /// Token / context usage for the Instance Inspector. Refreshed after each turn.
+    private(set) var usage: SessionUsage?
+    /// The composer's draft text — kept on the VM so other surfaces (notably the
+    /// Instance Inspector's slash-command list, which inserts on double-click) can
+    /// write into it without going through the view.
+    var draft: String = ""
+    /// Bumped to ask the composer to take keyboard focus (e.g. right after an
+    /// inserted slash command, so the user can immediately type the argument).
+    private(set) var focusToken: Int = 0
+    func requestComposerFocus() { focusToken += 1 }
 
     private let driver: ConversationDriver
     private var streamingTask: Task<Void, Never>?
@@ -71,6 +81,15 @@ final class ConversationViewModel {
         Task { [weak self] in
             let caps = await driver.capabilities()
             if let caps { self?.capabilities = caps }
+        }
+    }
+
+    /// Refreshes token / context usage (for the inspector). Called on view appear
+    /// and after each turn completes.
+    func refreshUsage() {
+        let driver = self.driver
+        Task { [weak self] in
+            if let u = await driver.usage() { self?.usage = u }
         }
     }
 
@@ -96,6 +115,7 @@ final class ConversationViewModel {
             }
             self?.endStreaming()
             self?.isStreaming = false
+            self?.refreshUsage()
         }
     }
 

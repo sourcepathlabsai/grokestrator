@@ -4,11 +4,13 @@ import GrokestratorCore
 /// The main working surface: a console-like transcript plus a prompt composer.
 struct ConversationView: View {
     @Bindable var instance: InstanceItem
-    @State private var draft = ""
     /// Highlighted row in the slash-command popup (keyboard navigation).
     @State private var slashHighlight = 0
     /// Set when the user dismisses the popup with Escape; reset when the token changes.
     @State private var slashDismissed = false
+    /// Owned by the view so we can programmatically focus the field when the
+    /// inspector inserts a command via double-click.
+    @FocusState private var composerFocused: Bool
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -34,7 +36,11 @@ struct ConversationView: View {
         }
         .navigationTitle(instance.name)
         .navigationSubtitle(instance.status.rawValue)
-        .task { conversation.loadCapabilities() }
+        .task {
+            conversation.loadCapabilities()
+            conversation.refreshUsage()
+        }
+        .onChange(of: conversation.focusToken) { composerFocused = true }
     }
 
     private var transcript: some View {
@@ -67,11 +73,14 @@ struct ConversationView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(instance.name)…  (type / for commands)", text: $draft, axis: .vertical)
+        // Local @Bindable wrapper so the TextField can bind to the VM's `draft`.
+        @Bindable var conv = instance.conversation
+        return HStack(alignment: .bottom, spacing: 8) {
+            TextField("Message \(instance.name)…  (type / for commands)", text: $conv.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Theme.body(13))
                 .lineLimit(1...6)
+                .focused($composerFocused)
                 .onSubmit(send)
                 .onChange(of: slashToken) { slashHighlight = 0; slashDismissed = false }
                 .onKeyPress(action: handleComposerKey)
@@ -93,7 +102,7 @@ struct ConversationView: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
+        !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
     }
 
     // MARK: - Slash command popup
@@ -101,6 +110,7 @@ struct ConversationView: View {
     /// The command token being typed: non-nil only while the draft is a leading
     /// `/word` with no space yet (i.e. the user is still typing the command name).
     private var slashToken: String? {
+        let draft = conversation.draft
         guard draft.hasPrefix("/") else { return nil }
         let rest = draft.dropFirst()
         return rest.contains(" ") ? nil : String(rest)
@@ -122,7 +132,7 @@ struct ConversationView: View {
 
     /// Inserts the chosen command, leaving the cursor ready to type any argument.
     private func applyCommand(_ cmd: SlashCommand) {
-        draft = "/\(cmd.name) "
+        conversation.draft = "/\(cmd.name) "
         slashHighlight = 0
     }
 
@@ -176,8 +186,8 @@ struct ConversationView: View {
     private var streamingMarkerID: String { "streaming-marker" }
 
     private func send() {
-        conversation.send(draft)
-        draft = ""
+        conversation.send(conversation.draft)
+        conversation.draft = ""
     }
 }
 
@@ -321,32 +331,45 @@ private struct SlashCommandPopup: View {
     let onPick: (SlashCommand) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(matches.enumerated()), id: \.element.id) { index, cmd in
-                Button { onPick(cmd) } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
-                        if let hint = cmd.hint {
-                            Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+        // ScrollViewReader keeps the keyboard-highlighted row in view as the user
+        // arrows past the visible window of a (potentially long) merged list.
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(matches.enumerated()), id: \.element.id) { index, cmd in
+                        Button { onPick(cmd) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
+                                if let hint = cmd.hint {
+                                    Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                                }
+                                Spacer(minLength: 12)
+                                if let d = cmd.description {
+                                    Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                                        .lineLimit(1).truncationMode(.tail)
+                                        .frame(maxWidth: 280, alignment: .trailing)
+                                }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(index == highlight ? Theme.accentSoft : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: Theme.radiusXs))
+                            .contentShape(Rectangle())
                         }
-                        Spacer(minLength: 12)
-                        if let d = cmd.description {
-                            Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
-                                .lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: 280, alignment: .trailing)
-                        }
+                        .buttonStyle(.plain)
+                        .id(cmd.id)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(index == highlight ? Theme.accentSoft : Color.clear,
-                                in: RoundedRectangle(cornerRadius: Theme.radiusXs))
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+            }
+            .frame(maxHeight: 220)
+            .onChange(of: highlight) {
+                if matches.indices.contains(highlight) {
+                    withAnimation(.snappy) { proxy.scrollTo(matches[highlight].id, anchor: .center) }
+                }
             }
         }
-        .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(6)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
         .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
         .padding(.horizontal, 12)

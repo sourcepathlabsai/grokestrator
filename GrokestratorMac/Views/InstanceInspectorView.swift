@@ -1,17 +1,26 @@
 import SwiftUI
 
 /// Right-hand inspector (design/02 "Instance Inspector"). Reflects the currently
-/// selected instance: its model + context window, MCP servers, and slash commands.
-/// Capabilities are captured from the ACP `initialize` result (secret-free).
+/// selected instance: model + context window, session usage, MCP servers, and
+/// slash commands; also surfaces a Stop control for the underlying grok process.
+///
+/// Capabilities are captured from the ACP `initialize` result (secret-free) and
+/// kept current by `available_commands_update`. Usage is captured live from
+/// `session/update._meta.totalTokens` and finalized from the `session/prompt`
+/// result `_meta` (input/output/cached/reasoning breakdown).
 struct InstanceInspectorView: View {
     let instance: InstanceItem?
+    @Bindable var model: GrokestratorModel
 
     var body: some View {
         Group {
             if let instance {
                 content(for: instance)
                     .id(instance.id)               // repopulate when selection changes
-                    .task(id: instance.id) { instance.conversation.loadCapabilities() }
+                    .task(id: instance.id) {
+                        instance.conversation.loadCapabilities()
+                        instance.conversation.refreshUsage()
+                    }
             } else {
                 ContentUnavailableView("No instance", systemImage: "sidebar.right",
                                        description: Text("Select a connection to inspect it."))
@@ -23,14 +32,16 @@ struct InstanceInspectorView: View {
     @ViewBuilder
     private func content(for instance: InstanceItem) -> some View {
         let caps = instance.conversation.capabilities
+        let usage = instance.conversation.usage
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header(instance, caps: caps)
 
                 if let caps {
-                    if let model = caps.currentModel { modelSection(model, all: caps.models) }
+                    if let model = caps.currentModel { modelSection(model) }
+                    if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps.mcpServers)
-                    commandsSection(caps.commands)
+                    commandsSection(caps.commands, instance: instance)
                 } else {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -48,10 +59,14 @@ struct InstanceInspectorView: View {
     // MARK: - Sections
 
     private func header(_ instance: InstanceItem, caps: AgentCapabilities?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(instance.name)
-                .font(Theme.display(16, .semibold))
-                .foregroundStyle(Theme.textPrimary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(instance.name)
+                    .font(Theme.display(16, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                stopButton(instance)
+            }
             HStack(spacing: 6) {
                 Text(instance.status.rawValue).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
                 if let v = caps?.agentVersion {
@@ -68,7 +83,21 @@ struct InstanceInspectorView: View {
         }
     }
 
-    private func modelSection(_ model: AgentModel, all: [AgentModel]) -> some View {
+    @ViewBuilder
+    private func stopButton(_ instance: InstanceItem) -> some View {
+        if instance.status == .running || instance.status == .starting {
+            Button(role: .destructive) {
+                model.stop(instance)
+            } label: {
+                Label("Stop", systemImage: "stop.circle").font(Theme.body(11, .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Terminate this grok process")
+        }
+    }
+
+    private func modelSection(_ model: AgentModel) -> some View {
         section("Model", systemImage: "cpu") {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.name ?? model.id).font(Theme.body(13, .semibold)).foregroundStyle(Theme.textBody)
@@ -76,9 +105,60 @@ struct InstanceInspectorView: View {
                     Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
                 }
                 if let tokens = model.contextTokens {
-                    Text("\(tokens / 1000)K context window").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                    Text("\(fmtTokens(tokens)) context window").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
                 }
             }
+        }
+    }
+
+    /// Token usage: a context-window bar (total / window) and the last turn's
+    /// input / output / cached / reasoning breakdown.
+    private func usageSection(_ usage: SessionUsage) -> some View {
+        section("Session Usage", systemImage: "gauge.with.dots.needle.bottom.50percent") {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Context").font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                        Spacer()
+                        if let w = usage.contextWindow {
+                            Text("\(fmtTokens(usage.totalTokens)) / \(fmtTokens(w))")
+                                .font(Theme.mono(11)).foregroundStyle(Theme.textBody)
+                            if let f = usage.fraction {
+                                Text(String(format: "(%.1f%%)", f * 100))
+                                    .font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                            }
+                        } else {
+                            Text("\(fmtTokens(usage.totalTokens))").font(Theme.mono(11)).foregroundStyle(Theme.textBody)
+                        }
+                    }
+                    if let f = usage.fraction {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3).fill(Theme.surface)
+                                RoundedRectangle(cornerRadius: 3).fill(Theme.accent)
+                                    .frame(width: max(2, geo.size.width * f))
+                                    .shadow(color: Theme.glow, radius: 4)
+                            }
+                        }
+                        .frame(height: 6)
+                    }
+                }
+                Divider().overlay(Theme.border)
+                Text("LAST TURN").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)
+                HStack(spacing: 14) {
+                    if let v = usage.inputTokens { stat("input", v) }
+                    if let v = usage.outputTokens { stat("output", v) }
+                    if let v = usage.cachedReadTokens { stat("cached", v) }
+                    if let v = usage.reasoningTokens { stat("reasoning", v) }
+                }
+            }
+        }
+    }
+
+    private func stat(_ label: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(fmtTokens(value)).font(Theme.mono(12)).foregroundStyle(Theme.textBody)
+            Text(label).font(Theme.body(10)).foregroundStyle(Theme.textFaint)
         }
     }
 
@@ -105,29 +185,64 @@ struct InstanceInspectorView: View {
         }
     }
 
+    /// Slash commands are merged (advertised ∪ documented built-ins) so the list
+    /// is long enough to need its own scroll. Capped at ~280pt so the inspector's
+    /// other sections stay visible without the whole panel becoming a single scroll.
+    /// Rows double-click to insert `/<name> ` into the composer and focus it.
     @ViewBuilder
-    private func commandsSection(_ commands: [SlashCommand]) -> some View {
+    private func commandsSection(_ commands: [SlashCommand], instance: InstanceItem) -> some View {
         section("Slash Commands", systemImage: "terminal", count: commands.count) {
             if commands.isEmpty {
                 emptyRow("None advertised")
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(commands) { cmd in
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 6) {
-                                Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
-                                if let hint = cmd.hint {
-                                    Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Double-click to insert into the composer.")
+                        .font(Theme.body(10))
+                        .foregroundStyle(Theme.textFaint)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(commands) { cmd in
+                                CommandRow(command: cmd) {
+                                    instance.conversation.draft = "/\(cmd.name) "
+                                    instance.conversation.requestComposerFocus()
                                 }
                             }
-                            if let d = cmd.description {
-                                Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
-                                    .lineLimit(2)
-                            }
                         }
+                        .padding(.trailing, 4)
                     }
+                    .frame(maxHeight: 280)
                 }
             }
+        }
+    }
+
+    /// A clickable command row with a hover highlight; double-click inserts.
+    private struct CommandRow: View {
+        let command: SlashCommand
+        let onInsert: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text("/\(command.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
+                    if let hint = command.hint {
+                        Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                    }
+                }
+                if let d = command.description {
+                    Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? Theme.accentSoft : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Theme.radiusXs))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture(count: 2) { onInsert() }
+            .help("Double-click to insert /\(command.name)")
         }
     }
 
@@ -152,5 +267,12 @@ struct InstanceInspectorView: View {
 
     private func emptyRow(_ text: String) -> some View {
         Text(text).font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+    }
+
+    /// `512000` → `"512K"`, `16435` → `"16.4K"`, `812` → `"812"`.
+    private func fmtTokens(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        let k = Double(n) / 1000
+        return n >= 100_000 ? String(format: "%.0fK", k) : String(format: "%.1fK", k)
     }
 }
