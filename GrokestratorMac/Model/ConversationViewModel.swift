@@ -52,6 +52,14 @@ final class ConversationViewModel {
     var slashCommands: [SlashCommand] { capabilities?.commands ?? [] }
     /// Token / context usage for the Instance Inspector. Refreshed after each turn.
     private(set) var usage: SessionUsage?
+    /// The composer's draft text — kept on the VM so other surfaces (notably the
+    /// Instance Inspector's slash-command list, which inserts on double-click) can
+    /// write into it without going through the view.
+    var draft: String = ""
+    /// Bumped to ask the composer to take keyboard focus (e.g. right after an
+    /// inserted slash command, so the user can immediately type the argument).
+    private(set) var focusToken: Int = 0
+    func requestComposerFocus() { focusToken += 1 }
 
     private let driver: ConversationDriver
     private var streamingTask: Task<Void, Never>?

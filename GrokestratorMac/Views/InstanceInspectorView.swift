@@ -41,7 +41,7 @@ struct InstanceInspectorView: View {
                     if let model = caps.currentModel { modelSection(model) }
                     if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps.mcpServers)
-                    commandsSection(caps.commands)
+                    commandsSection(caps.commands, instance: instance)
                 } else {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -188,34 +188,61 @@ struct InstanceInspectorView: View {
     /// Slash commands are merged (advertised ∪ documented built-ins) so the list
     /// is long enough to need its own scroll. Capped at ~280pt so the inspector's
     /// other sections stay visible without the whole panel becoming a single scroll.
+    /// Rows double-click to insert `/<name> ` into the composer and focus it.
     @ViewBuilder
-    private func commandsSection(_ commands: [SlashCommand]) -> some View {
+    private func commandsSection(_ commands: [SlashCommand], instance: InstanceItem) -> some View {
         section("Slash Commands", systemImage: "terminal", count: commands.count) {
             if commands.isEmpty {
                 emptyRow("None advertised")
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(commands) { cmd in
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 6) {
-                                    Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
-                                    if let hint = cmd.hint {
-                                        Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
-                                    }
-                                }
-                                if let d = cmd.description {
-                                    Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
-                                        .lineLimit(2)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Double-click to insert into the composer.")
+                        .font(Theme.body(10))
+                        .foregroundStyle(Theme.textFaint)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(commands) { cmd in
+                                CommandRow(command: cmd) {
+                                    instance.conversation.draft = "/\(cmd.name) "
+                                    instance.conversation.requestComposerFocus()
                                 }
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .padding(.trailing, 4)
                     }
-                    .padding(.trailing, 4)
+                    .frame(maxHeight: 280)
                 }
-                .frame(maxHeight: 280)
             }
+        }
+    }
+
+    /// A clickable command row with a hover highlight; double-click inserts.
+    private struct CommandRow: View {
+        let command: SlashCommand
+        let onInsert: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text("/\(command.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
+                    if let hint = command.hint {
+                        Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                    }
+                }
+                if let d = command.description {
+                    Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? Theme.accentSoft : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Theme.radiusXs))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture(count: 2) { onInsert() }
+            .help("Double-click to insert /\(command.name)")
         }
     }
 
