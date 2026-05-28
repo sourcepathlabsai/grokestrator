@@ -8,6 +8,7 @@ import GrokestratorCore
 struct iOSConversationView: View {
     @Bindable var instance: InstanceItem
     @FocusState private var composerFocused: Bool
+    @State private var showInspector = false
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -25,16 +26,62 @@ struct iOSConversationView: View {
                 }
                 .animation(.snappy, value: conversation.pendingPermission)
             Divider().overlay(Theme.border)
+            if showSlashPopup {
+                iOSSlashCommandPopup(matches: slashMatches) { applyCommand($0) }
+            }
             composer
         }
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(instance.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showInspector.toggle() } label: {
+                    Label("Inspector", systemImage: "sidebar.right")
+                }
+            }
+        }
+        .inspector(isPresented: $showInspector) {
+            // On iPad: trailing column. On iPhone: system collapses to a sheet.
+            iOSInstanceInspectorView(instance: instance)
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+        }
         .task(id: instance.id) {
             // Live session subscription. `.task(id:)` auto-cancels on switch.
             await conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
+    }
+
+    // MARK: - Slash command popup
+
+    /// The token being typed: non-nil only while the draft is a leading
+    /// `/word` with no space yet (still typing the command name).
+    private var slashToken: String? {
+        let draft = conversation.draft
+        guard draft.hasPrefix("/") else { return nil }
+        let rest = draft.dropFirst()
+        return rest.contains(" ") ? nil : String(rest)
+    }
+
+    /// Commands matching the typed token (prefix match; all commands for a bare `/`).
+    private var slashMatches: [SlashCommand] {
+        guard let token = slashToken else { return [] }
+        let cmds = conversation.slashCommands
+        guard !token.isEmpty else { return cmds }
+        let q = token.lowercased()
+        return cmds.filter { $0.name.lowercased().hasPrefix(q) }
+    }
+
+    private var showSlashPopup: Bool {
+        !conversation.isStreaming
+            && conversation.pendingPermission == nil
+            && !slashMatches.isEmpty
+    }
+
+    private func applyCommand(_ cmd: SlashCommand) {
+        conversation.draft = "/\(cmd.name) "
+        composerFocused = true
     }
 
     // MARK: - Transcript
@@ -220,5 +267,48 @@ private struct iOSPermissionOverlay: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
         .shadow(radius: 16, y: 6)
+    }
+}
+
+/// iOS slash-command popup: appears above the composer when the draft leads
+/// with `/`. **Tap to insert** (no `.onKeyPress` arrow-nav available on iOS;
+/// the keyboard generally lacks arrow keys anyway). Scrollable so a long
+/// catalog (~30 commands) doesn't dominate the screen.
+struct iOSSlashCommandPopup: View {
+    let matches: [SlashCommand]
+    let onPick: (SlashCommand) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(matches) { cmd in
+                    Button { onPick(cmd) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("/\(cmd.name)").font(Theme.mono(13)).foregroundStyle(Theme.accent)
+                            if let hint = cmd.hint {
+                                Text(hint).font(Theme.mono(11)).foregroundStyle(Theme.textFaint)
+                            }
+                            Spacer(minLength: 12)
+                            if let d = cmd.description {
+                                Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                                    .lineLimit(1).truncationMode(.tail)
+                                    .frame(maxWidth: 220, alignment: .trailing)
+                            }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: 200, alignment: .leading)
+        .padding(6)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
     }
 }
