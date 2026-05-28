@@ -147,9 +147,12 @@ final class ConversationViewModel {
         }
     }
 
-    /// Replay a history snapshot into transcript entries — converts
-    /// `[AgentTurn]` to user-prompt + assistant-message entries. Used both when
-    /// joining a Connection for the first time and when the Connection switches.
+    /// Replay a history snapshot into transcript entries. Mirrors the live
+    /// `finalize` path: each assistant message is parsed with `ContentParser`
+    /// so inline image/audio/video/file references in historical responses
+    /// render the same way they do live. Thoughts (stored with a `"[thought] "`
+    /// content prefix per `AgentConversationHistory.appendEvent`) are restored
+    /// as `.thought` entries so the UI styling matches.
     private func replay(turns: [AgentTurn]) {
         var rebuilt: [TranscriptEntry] = []
         for turn in turns {
@@ -157,7 +160,12 @@ final class ConversationViewModel {
             for msg in turn.messages {
                 switch msg.role {
                 case .assistant, .system:
-                    rebuilt.append(TranscriptEntry(kind: .assistantMessage(msg.content)))
+                    if msg.content.hasPrefix("[thought] ") {
+                        let stripped = String(msg.content.dropFirst("[thought] ".count))
+                        rebuilt.append(TranscriptEntry(kind: .thought(stripped)))
+                    } else {
+                        rebuilt.append(TranscriptEntry(kind: kind(forMessageContent: msg.content)))
+                    }
                 case .tool:
                     rebuilt.append(TranscriptEntry(kind: .update(
                         .activityNote("tool: \(msg.content)", kind: "tool", metadata: nil)
@@ -273,9 +281,18 @@ final class ConversationViewModel {
         guard kind == .message else { return .thought(full) }
         let (display, options) = QuickReplyDetector.analyze(full)
         quickReplies = options
-        let parts = ContentParser.parse(display)
+        return self.kind(forMessageContent: display)
+    }
+
+    /// Parses an assistant-message string into the right transcript-entry kind:
+    /// `.assistantContent(parts)` when `ContentParser` finds inline media,
+    /// `.assistantMessage(text)` otherwise. Shared by the live finalize path
+    /// and history replay, so a re-opened transcript renders identically to
+    /// the original live stream.
+    private func kind(forMessageContent text: String) -> TranscriptEntry.Kind {
+        let parts = ContentParser.parse(text)
         let hasMedia = parts.contains { if case .text = $0 { return false } else { return true } }
-        return hasMedia ? .assistantContent(parts) : .assistantMessage(display)
+        return hasMedia ? .assistantContent(parts) : .assistantMessage(text)
     }
 
     private func appendEntry(_ kind: TranscriptEntry.Kind) {
