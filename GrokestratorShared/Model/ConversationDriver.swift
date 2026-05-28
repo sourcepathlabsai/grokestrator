@@ -29,10 +29,11 @@ public protocol ConversationDriver: Sendable {
     func usage() async -> SessionUsage?
 }
 
+#if os(macOS)
 /// Drives a conversation against the local Mac's own `GrokBuildManager` —
-/// the in-process equivalent of `RemoteConversationDriver`. Both subscribe to
-/// the same broadcast plumbing, so the local UI sees turns initiated from
-/// remote clients identically to its own.
+/// the in-process equivalent of `RemoteConversationDriver`. **Mac-only**:
+/// iOS is a client-only app and never hosts its own grok processes; it always
+/// drives over the wire via `RemoteConversationDriver`.
 public struct LiveConversationDriver: ConversationDriver {
     public let manager: GrokBuildManager
     public let instanceID: UUID
@@ -47,9 +48,29 @@ public struct LiveConversationDriver: ConversationDriver {
     }
 
     public func subscribe() async -> AsyncStream<ConnectionStreamEvent> {
-        // If the conversation can't be created (e.g. process not yet launched),
-        // return an empty terminated stream — the UI will show no history.
-        (try? await manager.subscribe(to: instanceID)) ?? AsyncStream { $0.finish() }
+        // Race-tolerant: when a Connection has just been created, the UI's
+        // `.task` may call this before `manager.startInstance` has set up the
+        // underlying `GrokBuildConversation`. Wait for the conversation to
+        // exist (polling every ~300ms) then forward all events. Cancellation
+        // of the outer stream (view goes away) cancels the wait.
+        let manager = self.manager
+        let instanceID = self.instanceID
+        return AsyncStream<ConnectionStreamEvent>(bufferingPolicy: .unbounded) { continuation in
+            let task = Task {
+                while !Task.isCancelled {
+                    if let inner = try? await manager.subscribe(to: instanceID) {
+                        for await event in inner {
+                            if Task.isCancelled { break }
+                            continuation.yield(event)
+                        }
+                        break    // inner stream ended cleanly
+                    }
+                    try? await Task.sleep(nanoseconds: 300_000_000)   // retry until the instance is alive
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func respondToPermission(permissionId: String, optionId: String) async {
@@ -64,6 +85,7 @@ public struct LiveConversationDriver: ConversationDriver {
         await manager.usage(for: instanceID)
     }
 }
+#endif
 
 /// Scripted, delayed updates that resemble a real turn (thoughts, notes, a
 /// tool call, a permission it waits on, then a final message). Powers the

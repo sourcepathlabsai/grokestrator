@@ -35,6 +35,7 @@ targets:
     platform: macOS
     sources:
       - path: GrokestratorMac
+      - path: GrokestratorShared
     dependencies:
       - package: GrokestratorCore
         product: GrokestratorCore
@@ -54,6 +55,9 @@ targets:
     platform: iOS
     sources:
       - path: GrokestratoriOS
+      - path: GrokestratorShared
+      - path: GrokestratorMac/Resources/Fonts    # SourcePath fonts — shared with Mac
+        buildPhase: resources
     dependencies:
       - package: GrokestratorCore
         product: GrokestratorCore

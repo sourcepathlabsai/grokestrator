@@ -72,14 +72,24 @@ final class ConversationViewModel {
         self.driver = driver
     }
 
-    /// Loads instance capabilities once (idempotent). Safe to call on view appear;
-    /// for a live instance this also triggers the ACP initialize/session handshake.
+    /// Loads instance capabilities once (idempotent). Race-tolerant: polls the
+    /// driver a few times so a freshly-created Connection (whose grok process
+    /// is still starting up) eventually surfaces its model / MCP / commands
+    /// instead of leaving the inspector empty.
     func loadCapabilities(force: Bool = false) {
         guard force || capabilities == nil else { return }
         let driver = self.driver
         Task { [weak self] in
-            let caps = await driver.capabilities()
-            if let caps { self?.capabilities = caps }
+            // ~6s @ 300ms — long enough for grok's initialize handshake under
+            // the worst observed launch latency, short enough that the user
+            // doesn't sit waiting if the instance is truly broken.
+            for _ in 0..<20 {
+                if let caps = await driver.capabilities(), caps != .empty {
+                    self?.capabilities = caps
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
         }
     }
 
@@ -98,10 +108,13 @@ final class ConversationViewModel {
     /// cleanly. Cancellation of the awaiting Task ends the subscription.
     func startSubscription() async {
         // A fresh subscription always begins with `.snapshot` — wipe local
-        // state so we don't accumulate from a previous selection.
+        // state so we don't accumulate from a previous selection. Crucially
+        // reset `isStreaming` too: a stuck spinner from a previous (possibly
+        // raced) send shouldn't survive into a re-subscribe.
         entries = []
         quickReplies = []
         pendingPermission = nil
+        isStreaming = false
         endStreaming()
         streamTick += 1
 
@@ -156,6 +169,11 @@ final class ConversationViewModel {
             }
         }
         entries = rebuilt
+        // A snapshot is the server's authoritative view — nothing is mid-stream
+        // by definition. Reset transient streaming flags so spinners and quick
+        // replies don't carry over from a previous, possibly raced, state.
+        isStreaming = false
+        endStreaming()
         streamTick += 1
         refreshUsage()
     }

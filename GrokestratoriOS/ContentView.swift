@@ -1,30 +1,27 @@
 import SwiftUI
 import GrokestratorCore
 
-struct ContentView: View {
-    // Example of using Core types (will resolve once the local package is added in Xcode)
-    private let sampleServers: [ServerAddress] = [
-        ServerAddress(name: "Dev Mac", tailscaleAddress: "100.64.0.1", port: 8080),
-        ServerAddress(name: "Research Rig", tailscaleAddress: "100.64.12.34", port: 8080)
-    ]
+/// Root iOS scene. NavigationSplitView collapses to a navigation stack on
+/// iPhone (sidebar pushes detail) and shows a two-column split on iPad.
+struct iOSContentView: View {
+    @Bindable var model: iOSAppModel
 
     var body: some View {
-        NavigationStack {
-            List(sampleServers) { server in
-                VStack(alignment: .leading) {
-                    Text(server.name)
-                        .font(.headline)
-                    Text("\(server.tailscaleAddress):\(server.port)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+        NavigationSplitView {
+            iOSConnectionsListView(model: model)
+        } detail: {
+            if let id = model.selectedInstanceID,
+               let instance = model.instances.first(where: { $0.id == id }) {
+                iOSConversationView(instance: instance)
+            } else {
+                ContentUnavailableView(
+                    "Select a Connection",
+                    systemImage: "tray",
+                    description: Text("Pick a Connection from a server in the sidebar.")
+                )
+                .foregroundStyle(Theme.textMuted)
             }
-            .navigationTitle("Grokestrator")
-            .navigationBarTitleDisplayMode(.inline)
         }
+        .navigationSplitViewStyle(.balanced)
     }
-}
-
-#Preview {
-    ContentView()
 }
