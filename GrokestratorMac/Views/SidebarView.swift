@@ -7,40 +7,50 @@ struct SidebarView: View {
     @Bindable var model: GrokestratorModel
     @State private var showingAdd = false
     @State private var showingAddRemote = false
+    @State private var showingArchived = false
 
     var body: some View {
-        List(selection: $model.selectedInstanceID) {
-            ForEach(model.sidebarGroups) { group in
-                Section {
-                    if group.instances.isEmpty {
-                        Text(group.isRemote ? (group.isConnected ? "No remote instances" : "Disconnected")
-                                            : "No connections yet")
-                            .font(Theme.body(11))
-                            .foregroundStyle(Theme.textFaint)
-                            .padding(.vertical, 4)
-                    } else {
-                        ForEach(group.instances) { instance in
-                            InstanceRow(instance: instance)
-                                .tag(instance.id)
-                                .contextMenu {
-                                    if instance.status == .running || instance.status == .starting {
-                                        Button("Stop") { model.stop(instance) }
+        VStack(spacing: 0) {
+            List(selection: $model.selectedInstanceID) {
+                ForEach(model.sidebarGroups) { group in
+                    Section {
+                        if group.instances.isEmpty {
+                            Text(group.isRemote ? (group.isConnected ? "No remote instances" : "Disconnected")
+                                                : "No connections yet")
+                                .font(Theme.body(11))
+                                .foregroundStyle(Theme.textFaint)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(group.instances) { instance in
+                                InstanceRow(instance: instance)
+                                    .tag(instance.id)
+                                    .contextMenu {
+                                        if instance.status == .running || instance.status == .starting {
+                                            Button("Stop") { model.stop(instance) }
+                                        }
+                                        // Archive is only meaningful for local Connections — remote
+                                        // instances are managed by their owning server.
+                                        if instance.serverID == nil {
+                                            Button("Archive") { model.archive(instance) }
+                                        }
                                     }
-                                }
+                            }
                         }
+                    } header: {
+                        SectionHeader(group: group, onRemove: group.isRemote ? {
+                            if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
+                                model.removeRemoteServer(link)
+                            }
+                        } : nil)
                     }
-                } header: {
-                    SectionHeader(group: group, onRemove: group.isRemote ? {
-                        if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
-                            model.removeRemoteServer(link)
-                        }
-                    } : nil)
                 }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+
+            archivedFooter
         }
         .navigationTitle("Grokestrator")
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .background(Theme.bgDeep)
         .toolbar {
             ToolbarItem {
@@ -54,6 +64,28 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
+        .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
+    }
+
+    /// Footer button revealing the archived Connections sheet. Hidden when nothing
+    /// is archived to keep the sidebar quiet on first use.
+    @ViewBuilder
+    private var archivedFooter: some View {
+        let count = model.archivedConnections.count
+        if count > 0 {
+            Divider().overlay(Theme.border)
+            Button { showingArchived = true } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "archivebox").font(.system(size: 11))
+                    Text("Archived (\(count))").font(Theme.body(11))
+                    Spacer()
+                }
+                .foregroundStyle(Theme.textFaint)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 

@@ -18,6 +18,8 @@ struct AddConnectionView: View {
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
     @State private var workingDirectory = ""
+    @State private var autoRestart = true       // default on (memory: connection-semantics)
+    @State private var shared = true            // default on (Tailscale is the trust boundary)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +46,9 @@ struct AddConnectionView: View {
                     Text("`grok agent stdio` runs the agent over stdio — the mode this app talks to.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Toggle("Auto-launch on Grokestrator startup", isOn: $autoRestart)
+                    Toggle("Share with remote Grokestrator clients", isOn: $shared)
                 }
             }
             .formStyle(.grouped)
@@ -80,7 +85,8 @@ struct AddConnectionView: View {
         case .real:
             let args = argumentsText.split(separator: " ").map(String.init)
             let cwd = workingDirectory.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workingDirectory
-            model.addRealConnection(name: finalName, command: command, arguments: args, workingDirectory: cwd)
+            model.addRealConnection(name: finalName, command: command, arguments: args,
+                                    workingDirectory: cwd, autoRestart: autoRestart, shared: shared)
         }
     }
 
