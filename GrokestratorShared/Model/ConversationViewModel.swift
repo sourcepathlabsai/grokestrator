@@ -128,13 +128,20 @@ final class ConversationViewModel {
     }
 
     /// Fires a prompt at the driver. **Fire-and-forget** in the broadcast model:
-    /// the user prompt + every response update flows back via the active
-    /// subscription, not from this call's return.
+    /// every response update flows back via the active subscription, not from
+    /// this call's return.
+    ///
+    /// The user's prompt is appended **optimistically** before the network /
+    /// actor round-trip so it shows up in the transcript *immediately*. The
+    /// broadcast echo (the `.userPrompt` event we'll receive over the
+    /// subscription) is then deduped in `handle(_:)` via tail-match. Result:
+    /// the UI never looks frozen, even when grok itself is slow to come up.
     func send(_ prompt: String) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
         quickReplies = []
         isStreaming = true
+        appendEntry(.userPrompt(trimmed))   // optimistic echo
         let driver = self.driver
         Task { [weak self] in
             do {
@@ -208,8 +215,12 @@ final class ConversationViewModel {
         switch update {
         case .userPrompt(let text):
             // Either we initiated this prompt (and the subscription is echoing
-            // it back), or another client did. Either way, record it once.
+            // back our optimistic local append from `send`) or another client
+            // did. Dedup via tail-match: if the very last entry is already a
+            // `.userPrompt` with the same text, drop the echo. Otherwise — a
+            // turn started by another connected client — append it.
             endStreaming()
+            if case .userPrompt(let last) = entries.last?.kind, last == text { break }
             appendEntry(.userPrompt(text))
         case .messageDelta(let t):
             appendDelta(t, kind: .message)

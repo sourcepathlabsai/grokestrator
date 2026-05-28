@@ -106,9 +106,16 @@ public actor GrokBuildConversation {
     /// Returns the prompt's stable UUID so callers can later cancel.
     @discardableResult
     public func sendPrompt(_ prompt: String) async throws -> UUID {
-        // Prepare history for the new turn (idempotent if previous was finished)
+        // Prepare history for the new turn (idempotent if previous was finished).
+        // We deliberately do NOT call `history.load()` here:
+        //   - history was already loaded at conversation creation;
+        //   - re-loading overwrites `turns` with disk state, which can lose any
+        //     in-memory turn `startNewTurn` just finalized but hasn't saved;
+        //   - on a large history the file parse stalls this actor for visible
+        //     time, delaying the `.userPrompt` broadcast below (and making the
+        //     UI look frozen while we're really just re-reading what we already
+        //     had). Confirmed via a slow-Grokestrator-connection bug report.
         await history.startNewTurn(prompt: prompt)
-        try? await history.load()
         // Broadcast the prompt so every subscriber records it — including the
         // Mac UI watching a Connection driven from another device.
         broadcast(.userPrompt(prompt))
