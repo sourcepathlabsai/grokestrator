@@ -155,6 +155,13 @@ public actor GrokBuildManager {
         return try await convo.sendPrompt(prompt)
     }
 
+    /// Cancels the currently in-flight turn for this Connection. No-op if no
+    /// conversation exists yet for the instance.
+    public func cancelPrompt(for instanceID: UUID) async {
+        guard let convo = activeConversations[instanceID] else { return }
+        await convo.cancelCurrent()
+    }
+
     /// Subscribe to a Connection's broadcast stream. First event is `.snapshot`
     /// of the current transcript; subsequent events are `.update`s for everything
     /// that happens going forward, regardless of which client initiated the prompt.

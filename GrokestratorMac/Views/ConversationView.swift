@@ -94,14 +94,25 @@ struct ConversationView: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(Theme.accent)
-                    .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
+            if conversation.isStreaming {
+                Button(action: { conversation.cancelCurrent() }) {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                        .shadow(color: .red.opacity(0.5), radius: 4)
+                }
+                .buttonStyle(.plain)
+                .help("Stop the current turn")
+            } else {
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Theme.accent)
+                        .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
         }
         .padding(12)
         .background(Theme.bgDeep)

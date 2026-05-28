@@ -135,6 +135,26 @@ public actor GrokBuildSessionClient {
     /// and file access). Kept for source compatibility with the black box.
     public func sendToolResult(sessionId _: String, toolCallId _: String, result _: String, isError _: Bool = false) async throws {}
 
+    /// Stops the current turn. Sends a best-effort `session/cancel` notification
+    /// to grok (the server may or may not honor it on this version), then
+    /// **locally** finishes the active stream so the conversation's awaiting
+    /// for-loop unwinds and broadcasts `turnComplete`. Spinner clears
+    /// immediately even if grok keeps streaming briefly — those late updates
+    /// land on a nil `activeStream` and are harmlessly dropped.
+    public func cancelCurrentPrompt() async {
+        if let sid = sessionId {
+            write(.object([
+                "jsonrpc": .string("2.0"),
+                "method": .string("session/cancel"),
+                "params": .object(["sessionId": .string(sid)]),
+            ]))
+        }
+        activeStream?.finish()
+        activeStream = nil
+        thoughtBuffer = ""
+        messageBuffer = ""
+    }
+
     /// Resolves a pending permission request with the chosen ACP `optionId`.
     public func respondToPermission(permissionId: String, chosenOption: String, sessionId _: String) async throws {
         guard let id = pendingPermissions.removeValue(forKey: permissionId) else { return }

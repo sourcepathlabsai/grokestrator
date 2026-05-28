@@ -69,6 +69,14 @@ public actor GrokBuildConversation {
 
     // MARK: - Public Black-Box API (no raw ACP leakage to callers)
 
+    /// Stops the currently in-flight turn for this Connection. Propagates to
+    /// the ACP client which finishes the active stream — the broadcast loop
+    /// then unwinds and emits `turnComplete` to every subscriber, so every
+    /// connected device (Mac UI + remote GKSCs) sees the spinner clear.
+    public func cancelCurrent() async {
+        await client.cancelCurrentPrompt()
+    }
+
     /// Subscribe to this Connection's broadcast stream — every update for the
     /// conversation, regardless of which client initiates the prompt. First
     /// event is always a `.snapshot` of the current history.

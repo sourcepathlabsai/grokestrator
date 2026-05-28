@@ -138,7 +138,15 @@ public actor MacGrokestratorServer {
                 await outbox.toClient(.grokBuild(.usageUpdated(instanceID: instanceID, usage: usage)), clientID)
             }
 
-        case .cancelPrompt, .sendToolResult, .getPromptState:
+        case .cancelPrompt(let instanceID, _):
+            // A remote client (iPad / another Mac) clicked Stop. Forward to
+            // the local manager, which unwinds the active stream and
+            // broadcasts `turnComplete` to every subscriber (so the spinner
+            // clears on *every* connected device, not just the one that
+            // pressed the button).
+            await manager.cancelPrompt(for: instanceID)
+
+        case .sendToolResult, .getPromptState:
             // Not exercised by the MVP client; safe to ignore.
             break
         }

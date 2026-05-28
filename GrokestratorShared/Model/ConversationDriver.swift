@@ -22,6 +22,12 @@ public protocol ConversationDriver: Sendable {
     /// Answer a pending permission request with the chosen ACP `optionId`.
     func respondToPermission(permissionId: String, optionId: String) async
 
+    /// Stops the currently in-flight turn (Stop button). Best-effort: tells
+    /// the underlying agent to stop, and locally unwinds the active stream so
+    /// `turnComplete` rides through the broadcast and every connected device's
+    /// spinner clears.
+    func cancel() async
+
     /// The instance's capabilities (model, MCP servers, slash commands).
     func capabilities() async -> AgentCapabilities?
 
@@ -75,6 +81,10 @@ public struct LiveConversationDriver: ConversationDriver {
 
     public func respondToPermission(permissionId: String, optionId: String) async {
         try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: optionId)
+    }
+
+    public func cancel() async {
+        await manager.cancelPrompt(for: instanceID)
     }
 
     public func capabilities() async -> AgentCapabilities? {
