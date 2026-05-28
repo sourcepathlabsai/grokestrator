@@ -42,6 +42,7 @@ public enum GrokestratorResponse: Codable, Sendable {
 public enum GrokestratorEvent: Codable, Sendable {
     // Server -> Client push events
     case instanceStatusChanged(ManagedInstance)
+    case instancesUpdated([ManagedInstance])    // full list, sent on connect + on add/remove/status-change
     case newMessage(Message)
     case conversationUpdated(Conversation)
     case serverStateChanged(ServerState)
@@ -89,6 +90,13 @@ public enum GrokBuildRequest: Codable, Sendable {
 
     /// Request current state for a specific prompt (pending tools, etc.).
     case getPromptState(instanceID: UUID, promptID: UUID)
+
+    /// Ask the server for an instance's capabilities (model + MCP servers +
+    /// slash commands). Used by the remote Instance Inspector / slash popup.
+    case getCapabilities(instanceID: UUID)
+
+    /// Ask the server for an instance's current token / context usage snapshot.
+    case getUsage(instanceID: UUID)
 }
 
 /// Responses from the server for GrokBuildRequest messages.
@@ -121,4 +129,12 @@ public enum GrokBuildEvent: Codable, Sendable {
 
     /// Generic error for the prompt / instance.
     case error(instanceID: UUID?, promptID: UUID?, message: String)
+
+    /// Server's reply to `GrokBuildRequest.getCapabilities`. Also sent unsolicited
+    /// when capabilities change live (e.g. after `available_commands_update`).
+    case capabilitiesUpdated(instanceID: UUID, capabilities: AgentCapabilities)
+
+    /// Server's reply to `GrokBuildRequest.getUsage`. Also sent after each turn
+    /// completes so remote clients keep an accurate Session Usage view.
+    case usageUpdated(instanceID: UUID, usage: SessionUsage)
 }

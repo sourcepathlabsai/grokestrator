@@ -17,5 +17,11 @@ struct GrokestratorMacApp: App {
                 .preferredColorScheme(.dark)
                 .background(Theme.bg)
         }
+
+        Settings {
+            SettingsView(model: model)
+                .tint(Theme.accent)
+                .preferredColorScheme(.dark)
+        }
     }
 }

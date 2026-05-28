@@ -1,4 +1,5 @@
 import Foundation
+import GrokestratorCore
 
 /// High-level client for one running Grok Build instance, speaking real ACP
 /// (newline-delimited JSON-RPC 2.0) over stdio.

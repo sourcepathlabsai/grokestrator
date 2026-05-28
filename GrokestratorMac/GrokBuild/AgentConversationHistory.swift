@@ -1,50 +1,8 @@
 import Foundation
+import GrokestratorCore
 
-/// A clean, high-level representation of a conversation with a Grok Build instance.
-/// This is what the rest of the app should use instead of raw ACP events.
-public struct AgentMessage: Identifiable, Codable, Sendable {
-    public let id: UUID
-    public let role: Role
-    public let content: String
-    public let timestamp: Date
-    public let metadata: [String: String]?
-
-    public enum Role: String, Codable, Sendable {
-        case user
-        case assistant
-        case system
-        case tool
-    }
-
-    public init(
-        id: UUID = UUID(),
-        role: Role,
-        content: String,
-        timestamp: Date = Date(),
-        metadata: [String: String]? = nil
-    ) {
-        self.id = id
-        self.role = role
-        self.content = content
-        self.timestamp = timestamp
-        self.metadata = metadata
-    }
-}
-
-/// Represents one turn in the conversation (user prompt + everything the agent produced in response).
-public struct AgentTurn: Identifiable, Codable, Sendable {
-    public let id: UUID
-    public let userPrompt: String
-    public let messages: [AgentMessage]   // thoughts, final messages, tool calls, etc.
-    public let timestamp: Date
-
-    public init(userPrompt: String, messages: [AgentMessage], timestamp: Date = Date()) {
-        self.id = UUID()
-        self.userPrompt = userPrompt
-        self.messages = messages
-        self.timestamp = timestamp
-    }
-}
+// `AgentMessage` and `AgentTurn` moved to GrokestratorCore — identical shapes;
+// dedup of the long-flagged duplicate-models issue.
 
 /// Maintains the full conversation history for one session with a Grok Build instance.
 /// This is the "black box" state that callers can query.

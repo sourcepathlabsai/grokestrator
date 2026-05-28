@@ -20,6 +20,17 @@ public actor GrokBuildClientSession {
     private var pendingToolCallsByPrompt: [UUID: [ToolCallInfo]] = [:]
     private var isValid = true
 
+    /// Cached capabilities/usage so the inspector renders something on first
+    /// open even before the first `*Updated` event arrives. Refreshed on demand.
+    private var cachedCapabilities: AgentCapabilities = .empty
+    private var cachedUsage: SessionUsage = .empty
+
+    /// Single in-flight continuation per kind. Resolved by the matching
+    /// `*Updated` event (with the fresh snapshot) or by the timeout task (with the
+    /// cached snapshot). Non-throwing — we always resolve so the UI never stalls.
+    private var capContinuation: CheckedContinuation<AgentCapabilities, Never>?
+    private var usageContinuation: CheckedContinuation<SessionUsage, Never>?
+
     // MARK: - Initialization
 
     /// Optional callback used to register active prompts with the parent client
@@ -144,6 +155,65 @@ public actor GrokBuildClientSession {
         try await sendRequest(.grokBuild(request))
     }
 
+    /// Responds to a permission request for an in-flight prompt.
+    public func respondToPermission(promptID: UUID, permissionId: String, chosenOption: String) async throws {
+        guard isValid else { throw GrokestratorError.sessionInvalidated }
+        try await sendRequest(.grokBuild(.respondToPermission(
+            instanceID: instanceID, promptID: promptID,
+            permissionId: permissionId, chosenOption: chosenOption
+        )))
+    }
+
+    /// Fetches the latest capabilities for this remote instance. Sends a
+    /// `getCapabilities` request and awaits the matching `capabilitiesUpdated`
+    /// event. Falls back to the cached value on timeout so the UI never stalls.
+    public func getCapabilities(timeout: Double = 5) async -> AgentCapabilities {
+        guard isValid else { return cachedCapabilities }
+        do { try await sendRequest(.grokBuild(.getCapabilities(instanceID: instanceID))) }
+        catch { return cachedCapabilities }
+
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            await self?.resolveCapabilitiesWithCache()
+        }
+        let result = await withCheckedContinuation { (cont: CheckedContinuation<AgentCapabilities, Never>) in
+            self.capContinuation = cont
+        }
+        watchdog.cancel()
+        return result
+    }
+
+    /// Fetches the latest token / context usage snapshot. Same pattern.
+    public func getUsage(timeout: Double = 5) async -> SessionUsage {
+        guard isValid else { return cachedUsage }
+        do { try await sendRequest(.grokBuild(.getUsage(instanceID: instanceID))) }
+        catch { return cachedUsage }
+
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            await self?.resolveUsageWithCache()
+        }
+        let result = await withCheckedContinuation { (cont: CheckedContinuation<SessionUsage, Never>) in
+            self.usageContinuation = cont
+        }
+        watchdog.cancel()
+        return result
+    }
+
+    private func resolveCapabilitiesWithCache() {
+        if let cont = capContinuation {
+            capContinuation = nil
+            cont.resume(returning: cachedCapabilities)
+        }
+    }
+
+    private func resolveUsageWithCache() {
+        if let cont = usageContinuation {
+            usageContinuation = nil
+            cont.resume(returning: cachedUsage)
+        }
+    }
+
     // MARK: - Event Handling (called by the owning client)
 
     /// Called by the parent `GrokestratorClient` when a `GrokBuildEvent` arrives for this instance.
@@ -175,6 +245,22 @@ public actor GrokBuildClientSession {
             guard instID == instanceID else { return }
             // A dead remote instance can no longer service this session at all.
             invalidate(reason: "Remote Grok Build instance died")
+
+        case .capabilitiesUpdated(let instID, let caps):
+            guard instID == instanceID else { return }
+            cachedCapabilities = caps
+            if let cont = capContinuation {
+                capContinuation = nil
+                cont.resume(returning: caps)
+            }
+
+        case .usageUpdated(let instID, let usage):
+            guard instID == instanceID else { return }
+            cachedUsage = usage
+            if let cont = usageContinuation {
+                usageContinuation = nil
+                cont.resume(returning: usage)
+            }
 
         default:
             break

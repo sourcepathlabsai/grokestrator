@@ -2,73 +2,11 @@ import Foundation
 import GrokestratorCore
 
 // MARK: - High-level Black Box Types (public API - no ACP leakage)
-
-/// A high-level update from a Grok Build conversation.
-/// Callers (Mac app UI, ServerState, etc.) consume this instead of raw ACP events.
-///
-/// This now includes the live "little progress notes" that real Grok Build instances emit
-/// during thinking, tool use, searching, etc.
-public enum ConversationUpdate: Sendable {
-    case thought(String, metadata: [String: String]?)
-    case message(String, metadata: [String: String]?)
-
-    /// Incremental streamed text for the in-progress thought / message (live typing).
-    case thoughtDelta(String)
-    case messageDelta(String)
-
-    case toolCallRequested(ToolCallInfo)
-    case permissionRequested(PermissionRequestInfo)
-    case toolResultRecorded(toolCallId: String, isError: Bool)
-    case error(String)
-    case turnComplete(finalAnswer: String?)
-    case sessionStatus(String)
-
-    // The granular live progress / activity notes from the agent ("Searching...", "Analyzing...", etc.)
-    case progressNote(String, phase: String?, metadata: [String: String]?)
-    case activityNote(String, kind: String?, metadata: [String: String]?)
-
-    /// We received an event shape we don't fully understand yet (from the .unknown fallback).
-    /// The raw JSON is included so the Mac app (or a debug view) can still display or log it.
-    case unknownEvent(rawJSON: String?)
-}
-
-/// Structured information about a tool the agent wants to call.
-/// The caller uses this (or the id) to decide whether to approve and what result to supply.
-public struct ToolCallInfo: Identifiable, Sendable, Equatable {
-    public let id: String
-    public let toolName: String
-    public let arguments: [String: String]?
-    public let sessionId: String?
-}
-
-/// Structured information about a permission the agent is requesting.
-public struct PermissionRequestInfo: Identifiable, Sendable, Equatable {
-    public let id: String
-    public let description: String
-    public let options: [PermissionOption]
-    public let sessionId: String?
-}
-
-/// Result of a completed prompt turn through the black box.
-public struct PromptResult: Sendable {
-    public let updates: [ConversationUpdate]
-    public let finalAnswer: String?
-    public let turnsAdded: Int
-    public let hadToolCalls: Bool
-    public let hadPermissionRequests: Bool
-}
-
-/// Lightweight snapshot for the rest of the Mac app (already existed, now enriched).
-public struct ConversationState: Sendable {
-    public let instanceID: UUID
-    public let sessionID: String
-    public let turns: [AgentTurn]
-    public let lastAssistantMessage: AgentMessage?
-    public let isInActiveTurn: Bool
-    public let pendingToolCallCount: Int
-    public let pendingPermissionCount: Int
-    public let isAlive: Bool
-}
+//
+// `ConversationUpdate`, `ToolCallInfo`, `PermissionRequestInfo`, `PermissionOption`,
+// `PromptResult`, and `ConversationState` were previously duplicated here. They
+// now live in GrokestratorCore (the canonical home, since they cross the wire
+// when driving instances remotely) — the dedup PROJECT_STATE flagged is done.
 
 /// The primary black-box object for interacting with a single Grok Build instance.
 ///
