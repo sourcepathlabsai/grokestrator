@@ -258,4 +258,17 @@ final class GrokestratorModel {
             }
         }
     }
+
+    // MARK: - App-quit cleanup
+
+    /// Single entry point for clean shutdown. Stops the local listener (releases
+    /// the port), disconnects every remote link, and terminates every running
+    /// grok child process this Mac launched (SIGTERM → wait → SIGKILL survivors).
+    /// Called from `AppDelegate.applicationWillTerminate` under a bounded
+    /// semaphore so the OS doesn't yank us before we finish.
+    func shutdownAll(timeout: TimeInterval = 1.0) async {
+        await server.stop()
+        for link in remoteLinks { await link.disconnect() }
+        await manager.terminateAll(timeout: timeout)
+    }
 }

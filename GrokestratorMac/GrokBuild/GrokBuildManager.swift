@@ -33,6 +33,18 @@ public actor GrokBuildManager {
         }
     }
 
+    /// Terminates every running grok process this Mac is hosting. Drains the
+    /// active-conversation table so callers don't hand back dead handles after
+    /// a shutdown. Used by app-quit cleanup.
+    public func terminateAll(timeout: TimeInterval = 1.0) async {
+        await server.stopAll(timeout: timeout)
+        for (id, var inst) in instanceStates {
+            inst.status = .stopped
+            instanceStates[id] = inst
+        }
+        activeConversations.removeAll()
+    }
+
     /// Returns the current view of all managed instances (suitable for updating ServerState).
     public func currentInstances() -> [ManagedInstance] {
         Array(instanceStates.values)
