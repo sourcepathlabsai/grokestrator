@@ -52,6 +52,12 @@ final class ConversationViewModel {
     var slashCommands: [SlashCommand] { capabilities?.commands ?? [] }
     /// Token / context usage for the Instance Inspector. Refreshed after each turn.
     private(set) var usage: SessionUsage?
+    /// `true` once `loadCapabilities` has succeeded at least once — i.e. grok
+    /// answered `initialize` and we have its model/MCP/commands. Drives the
+    /// "Connecting…" banner: shown when we're trying to load but haven't yet.
+    /// Cleared on subscribe (a fresh Connection-switch shows the banner again
+    /// while the new instance's capabilities come up).
+    private(set) var sessionReady: Bool = false
     /// The composer's draft text — kept on the VM so other surfaces (notably the
     /// Instance Inspector's slash-command list, which inserts on double-click) can
     /// write into it without going through the view.
@@ -72,23 +78,24 @@ final class ConversationViewModel {
         self.driver = driver
     }
 
-    /// Loads instance capabilities once (idempotent). Race-tolerant: polls the
-    /// driver a few times so a freshly-created Connection (whose grok process
-    /// is still starting up) eventually surfaces its model / MCP / commands
-    /// instead of leaving the inspector empty.
+    /// Loads instance capabilities. **Patient**: polls forever until grok's
+    /// `initialize` returns or the view goes away (the parent Task's cancellation
+    /// breaks the loop). Earlier versions capped at 6s, which lost the race on
+    /// Connections with several MCP servers — `initialize` legitimately takes
+    /// 10–30 s while `npx`/`uvx` spawn each server. The UI surfaces a
+    /// "Connecting…" banner via `sessionReady == false` so a long wait reads
+    /// as progress rather than a deadlocked spinner.
     func loadCapabilities(force: Bool = false) {
         guard force || capabilities == nil else { return }
         let driver = self.driver
         Task { [weak self] in
-            // ~6s @ 300ms — long enough for grok's initialize handshake under
-            // the worst observed launch latency, short enough that the user
-            // doesn't sit waiting if the instance is truly broken.
-            for _ in 0..<20 {
+            while !Task.isCancelled {
                 if let caps = await driver.capabilities(), caps != .empty {
                     self?.capabilities = caps
+                    self?.sessionReady = true
                     return
                 }
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                try? await Task.sleep(nanoseconds: 500_000_000)   // 500 ms
             }
         }
     }
@@ -110,11 +117,14 @@ final class ConversationViewModel {
         // A fresh subscription always begins with `.snapshot` — wipe local
         // state so we don't accumulate from a previous selection. Crucially
         // reset `isStreaming` too: a stuck spinner from a previous (possibly
-        // raced) send shouldn't survive into a re-subscribe.
+        // raced) send shouldn't survive into a re-subscribe. `sessionReady`
+        // resets so the "Connecting…" banner reappears while the new
+        // Connection's capabilities come up.
         entries = []
         quickReplies = []
         pendingPermission = nil
         isStreaming = false
+        sessionReady = capabilities != nil
         endStreaming()
         streamTick += 1
 
