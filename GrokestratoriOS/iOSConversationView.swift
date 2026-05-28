@@ -117,10 +117,9 @@ struct iOSConversationView: View {
 
 // MARK: - Row + overlay
 
-/// Renders one transcript entry. Text-only on iOS v1: media (`.assistantContent`)
-/// is shown as text parts inline + an "Attachment" placeholder for non-text
-/// parts. PR D adds real media rendering on iOS (UIKit equivalents of the
-/// Mac's AppKit-based viewers).
+/// Renders one transcript entry. Media (`.assistantContent`) now renders via
+/// `iOSAssistantContentView` — inline UIImage / AVPlayerViewController / QuickLook
+/// for the corresponding `ContentPart` kinds (PR D).
 private struct iOSTranscriptRow: View {
     let entry: TranscriptEntry
 
@@ -136,19 +135,7 @@ private struct iOSTranscriptRow: View {
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
-                        if case .text(let text) = part {
-                            Text(text).font(Theme.body(15)).foregroundStyle(Theme.textBody).textSelection(.enabled)
-                        } else {
-                            HStack(spacing: 4) {
-                                Image(systemName: "paperclip").foregroundStyle(Theme.textFaint)
-                                Text("Attachment (PR D will render this)")
-                                    .font(Theme.body(11)).foregroundStyle(Theme.textFaint)
-                            }
-                        }
-                    }
-                }
+                iOSAssistantContentView(parts: parts)
             }
         case .thought(let text):
             note("💭 \(text)")
