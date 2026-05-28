@@ -217,6 +217,16 @@ final class ConversationViewModel {
         isStreaming = false
     }
 
+    /// User pressed Stop. Asks the driver to cancel the in-flight turn —
+    /// which broadcasts `turnComplete` back through the subscription, so every
+    /// connected device (this Mac + any remote GKSCs viewing the same
+    /// Connection) sees the spinner clear together.
+    func cancelCurrent() {
+        guard isStreaming else { return }
+        let driver = self.driver
+        Task { await driver.cancel() }
+    }
+
     // MARK: - Update handling
 
     private func handle(_ update: ConversationUpdate) {

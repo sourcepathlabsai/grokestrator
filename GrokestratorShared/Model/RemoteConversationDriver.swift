@@ -32,6 +32,14 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
                                                chosenOption: optionId)
     }
 
+    public func cancel() async {
+        guard let promptID = lastPromptID else { return }
+        // The wire's `cancelPrompt(instanceID:promptID:)` already existed; the
+        // server (MacGrokestratorServer) now routes it to `manager.cancelPrompt`,
+        // which broadcasts `turnComplete` to every subscriber.
+        try? await session.cancelPrompt(promptID: promptID)
+    }
+
     public func capabilities() async -> AgentCapabilities? {
         await session.getCapabilities()
     }
