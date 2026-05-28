@@ -10,7 +10,10 @@ public actor GrokBuildInstanceLauncher {
     private var stdoutHandlers: [UUID: AsyncStream<Data>.Continuation] = [:]
     private var stderrHandlers: [UUID: AsyncStream<Data>.Continuation] = [:]
 
-    public init() {}
+    public init() {
+        // Resolve the login-shell environment ahead of the first launch.
+        LoginShellEnvironment.warm()
+    }
 
     /// Launches a Grok Build instance based on the provided configuration.
     /// Returns a handle that can be used to communicate with the instance.
@@ -25,9 +28,16 @@ public actor GrokBuildInstanceLauncher {
         if let cwd = config.workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
         }
-        if let env = config.environmentOverrides {
-            process.environment = ProcessInfo.processInfo.environment.merging(env) { _, new in new }
+        // Launch grok with the user's real login-shell environment (full PATH +
+        // exported vars), then layer any per-instance overrides on top. A
+        // Finder-launched .app otherwise hands grok a stripped environment, so its
+        // MCP servers and PATH/API-dependent tools (e.g. the `imagine` tool) fail
+        // and it silently falls back to bash.
+        var environment = LoginShellEnvironment.shared
+        if let overrides = config.environmentOverrides {
+            environment.merge(overrides) { _, new in new }
         }
+        process.environment = environment
 
         // Setup pipes for stdio communication (the primary way we talk to grok build)
         let stdoutPipe = Pipe()
