@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Privacy manifest for the Grokestrator iOS client.
+
+    The iOS app is a transport-only client over Tailscale to a user-run
+    Grokestrator server. It collects no analytics, no diagnostics, no
+    identifiers; ships no third-party SDKs; speaks to no servers other
+    than the one the user explicitly configured.
+
+    Required Reasons APIs:
+      * NSPrivacyAccessedAPICategoryUserDefaults — RemoteServer.swift
+        persists the user's list of remote servers (host + port + name)
+        in UserDefaults so they're remembered across launches. Reason
+        CA92.1 = "Access info from same app, per documentation".
+-->
+<plist version="1.0">
+<dict>
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
