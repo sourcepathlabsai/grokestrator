@@ -3,12 +3,14 @@ import Foundation
 /// A snapshot of what a Grok Build instance can do, captured from the ACP
 /// `initialize` result and kept current by `available_commands_update`.
 ///
-/// This is the data the Instance Inspector (design/02 right panel) renders and
-/// the source for the composer's slash-command popup. It is deliberately
-/// **secret-free**: MCP server `env` values (which the `initialize` payload
-/// carries in plaintext — Obsidian/neo4j/postgres credentials) are never copied
-/// in here. We keep only the server's identity and transport.
-public struct AgentCapabilities: Sendable, Equatable {
+/// Lives in Core because it crosses the wire: a remote Grokestrator client (the
+/// Mac client driving another Mac's server, or an iOS client) needs the same
+/// shape to populate its Instance Inspector.
+///
+/// Deliberately **secret-free**: MCP server `env` values (which grok's
+/// `initialize` payload carries in plaintext — Obsidian/neo4j/postgres
+/// credentials) are never copied in here. Only identity and transport.
+public struct AgentCapabilities: Sendable, Equatable, Codable {
     public var agentVersion: String?
     public var workingDirectory: String?
     public var currentModelId: String?
@@ -41,7 +43,7 @@ public struct AgentCapabilities: Sendable, Equatable {
 }
 
 /// One model the instance can run. `id` is the ACP `modelId`.
-public struct AgentModel: Sendable, Equatable, Identifiable {
+public struct AgentModel: Sendable, Equatable, Codable, Identifiable {
     public let id: String
     public let name: String?
     public let description: String?
@@ -57,7 +59,7 @@ public struct AgentModel: Sendable, Equatable, Identifiable {
 
 /// An MCP server configured on the instance. Identity + transport only — no
 /// `env`/secret material is ever carried here.
-public struct MCPServerInfo: Sendable, Equatable, Identifiable {
+public struct MCPServerInfo: Sendable, Equatable, Codable, Identifiable {
     public let id: String
     public let name: String?
     public let type: String?      // "stdio" | "http" | "sse"
@@ -76,7 +78,7 @@ public struct MCPServerInfo: Sendable, Equatable, Identifiable {
 
 /// A slash command the instance advertises (built-ins like `/compact` and
 /// skills like `/graphify`). `hint` is the argument hint, when the command takes one.
-public struct SlashCommand: Sendable, Equatable, Identifiable {
+public struct SlashCommand: Sendable, Equatable, Codable, Identifiable {
     public var id: String { name }
     public let name: String
     public let description: String?
@@ -94,8 +96,8 @@ public struct SlashCommand: Sendable, Equatable, Identifiable {
 ///
 /// Grok exposes commands from two sources: *shell builtins* (advertised over ACP
 /// in `availableCommands` — we capture those live) and *pager builtins* handled
-/// by grok's own TUI, which Grokestrator replaces, so they never reach us over the
-/// wire. This catalog backfills the documented commands that make sense when
+/// by grok's own TUI, which Grokestrator replaces, so they never reach us over
+/// the wire. This catalog backfills the documented commands that make sense when
 /// driving the agent over ACP. Pure terminal-UI toggles (`/exit`, `/home`,
 /// `/theme`, `/vim-mode`, `/multiline`, `/compact-mode`, `/terminal-setup`,
 /// `/release-notes`) are intentionally omitted — they control a TUI we don't use.
@@ -136,7 +138,7 @@ public enum GrokBuiltinCommands {
 /// Token / context-window usage for the session. `totalTokens` is the running
 /// context consumed (streamed live in every `session/update._meta`); the rest is
 /// the most-recent turn's breakdown (from the `session/prompt` result `_meta`).
-public struct SessionUsage: Sendable, Equatable {
+public struct SessionUsage: Sendable, Equatable, Codable {
     public var totalTokens: Int
     public var contextWindow: Int?
     public var inputTokens: Int?

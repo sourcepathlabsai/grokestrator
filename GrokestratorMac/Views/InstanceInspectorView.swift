@@ -1,4 +1,5 @@
 import SwiftUI
+import GrokestratorCore
 
 /// Right-hand inspector (design/02 "Instance Inspector"). Reflects the currently
 /// selected instance: model + context window, session usage, MCP servers, and

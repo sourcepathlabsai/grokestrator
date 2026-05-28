@@ -1,4 +1,5 @@
 import Foundation
+import GrokestratorCore
 
 // MARK: - Agent Client Protocol (ACP) for Grok Build
 //
@@ -242,21 +243,8 @@ public struct PermissionRequestEvent: Codable, Sendable {
     public let options: [PermissionOption]
 }
 
-/// One selectable answer to a permission request. `id` is the ACP `optionId`
-/// sent back to the agent; `kind` is `allow_once`/`allow_always`/`reject_once`/`reject_always`.
-public struct PermissionOption: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public let label: String
-    public let kind: String?
-
-    public init(id: String, label: String, kind: String?) {
-        self.id = id
-        self.label = label
-        self.kind = kind
-    }
-
-    public var isAllow: Bool { (kind ?? "").hasPrefix("allow") }
-}
+// `PermissionOption` moved to GrokestratorCore (Models/GrokBuildConversation.swift)
+// so the wire protocol can carry it directly.
 
 public struct SessionUpdateEvent: Codable, Sendable {
     public let sessionId: String

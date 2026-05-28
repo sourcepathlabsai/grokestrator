@@ -15,6 +15,11 @@ import Foundation
 public enum ConversationUpdate: Sendable, Codable {
     case thought(String, metadata: [String: String]?)
     case message(String, metadata: [String: String]?)
+
+    /// Incremental streamed text for the in-progress thought / message (live typing).
+    case thoughtDelta(String)
+    case messageDelta(String)
+
     case toolCallRequested(ToolCallInfo)
     case permissionRequested(PermissionRequestInfo)
     case toolResultRecorded(toolCallId: String, isError: Bool)
@@ -49,15 +54,31 @@ public struct ToolCallInfo: Identifiable, Sendable, Equatable, Codable {
 public struct PermissionRequestInfo: Identifiable, Sendable, Equatable, Codable {
     public let id: String
     public let description: String
-    public let options: [String]
+    public let options: [PermissionOption]
     public let sessionId: String?
 
-    public init(id: String, description: String, options: [String], sessionId: String? = nil) {
+    public init(id: String, description: String, options: [PermissionOption], sessionId: String? = nil) {
         self.id = id
         self.description = description
         self.options = options
         self.sessionId = sessionId
     }
+}
+
+/// One selectable answer to a permission request. `id` is the ACP `optionId`
+/// sent back to the agent; `kind` is `allow_once`/`allow_always`/`reject_once`/`reject_always`.
+public struct PermissionOption: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let label: String
+    public let kind: String?
+
+    public init(id: String, label: String, kind: String?) {
+        self.id = id
+        self.label = label
+        self.kind = kind
+    }
+
+    public var isAllow: Bool { (kind ?? "").hasPrefix("allow") }
 }
 
 /// Result of a completed prompt turn.
@@ -67,6 +88,15 @@ public struct PromptResult: Sendable, Codable {
     public let turnsAdded: Int
     public let hadToolCalls: Bool
     public let hadPermissionRequests: Bool
+
+    public init(updates: [ConversationUpdate], finalAnswer: String?, turnsAdded: Int,
+                hadToolCalls: Bool, hadPermissionRequests: Bool) {
+        self.updates = updates
+        self.finalAnswer = finalAnswer
+        self.turnsAdded = turnsAdded
+        self.hadToolCalls = hadToolCalls
+        self.hadPermissionRequests = hadPermissionRequests
+    }
 }
 
 /// Lightweight snapshot of current conversation state.
@@ -79,6 +109,19 @@ public struct ConversationState: Sendable, Codable {
     public let pendingToolCallCount: Int
     public let pendingPermissionCount: Int
     public let isAlive: Bool
+
+    public init(instanceID: UUID, sessionID: String, turns: [AgentTurn],
+                lastAssistantMessage: AgentMessage?, isInActiveTurn: Bool,
+                pendingToolCallCount: Int, pendingPermissionCount: Int, isAlive: Bool) {
+        self.instanceID = instanceID
+        self.sessionID = sessionID
+        self.turns = turns
+        self.lastAssistantMessage = lastAssistantMessage
+        self.isInActiveTurn = isInActiveTurn
+        self.pendingToolCallCount = pendingToolCallCount
+        self.pendingPermissionCount = pendingPermissionCount
+        self.isAlive = isAlive
+    }
 }
 
 // MARK: - Structured History Types
