@@ -43,7 +43,7 @@ public final class RemoteServerStore {
 /// `RemoteConversationDriver`s for each remote instance on demand.
 @MainActor
 @Observable
-public final class RemoteServerLink: @preconcurrency Identifiable {
+public final class RemoteServerLink: Identifiable {
     public enum LinkState: Equatable, Sendable {
         case disconnected
         case connecting

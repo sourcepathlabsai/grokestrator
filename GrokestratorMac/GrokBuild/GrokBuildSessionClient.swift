@@ -67,7 +67,7 @@ public actor GrokBuildSessionClient {
             for await line in await reader.lines() {
                 await self.handleLine(line)
             }
-            await self.handleDisconnect()
+            self.handleDisconnect()
         }
     }
 
@@ -122,9 +122,9 @@ public actor GrokBuildSessionClient {
                     as: PromptStopResult.self,
                     timeout: nil
                 )
-                await self.completePrompt(result: result)
+                self.completePrompt(result: result)
             } catch {
-                await self.failPrompt(error)
+                self.failPrompt(error)
             }
         }
 
@@ -401,7 +401,7 @@ public actor GrokBuildSessionClient {
             if let timeout {
                 Task {
                     try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    await self.timeoutPending(id, method: method)
+                    self.timeoutPending(id, method: method)
                 }
             } else {
                 armIdleWatchdog(id: id, method: method)
@@ -442,7 +442,7 @@ public actor GrokBuildSessionClient {
     /// or days) is preserved, while a genuinely dead connection still gets cleaned up.
     private func armIdleWatchdog(id: RPCID, method: String) {
         Task {
-            while await self.idleCheck(id: id, method: method) == false {
+            while self.idleCheck(id: id, method: method) == false {
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)   // re-check each minute
             }
         }

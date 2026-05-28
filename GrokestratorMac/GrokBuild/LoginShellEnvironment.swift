@@ -51,11 +51,18 @@ enum LoginShellEnvironment {
 
     /// Reads the pipe to EOF, terminating the process if it overruns `timeout`
     /// (so a misbehaving rc file can't wedge launches).
+    ///
+    /// The captured `Data` lives in a class box rather than a `var` because
+    /// Swift 6 strict concurrency (rightly) refuses to let a closure mutate
+    /// a stack-local `var` from another thread, even though our semaphore
+    /// makes the access actually safe. `@unchecked Sendable` documents that
+    /// we own the synchronization manually.
     private static func readToEnd(_ fh: FileHandle, process: Process, timeout: Double) -> Data {
+        final class DataBox: @unchecked Sendable { var value = Data() }
+        let box = DataBox()
         let sem = DispatchSemaphore(value: 0)
-        var out = Data()
         DispatchQueue.global(qos: .userInitiated).async {
-            out = fh.readDataToEndOfFile()
+            box.value = fh.readDataToEndOfFile()
             sem.signal()
         }
         if sem.wait(timeout: .now() + timeout) == .timedOut {
@@ -64,7 +71,7 @@ enum LoginShellEnvironment {
         } else {
             process.waitUntilExit()
         }
-        return out
+        return box.value
     }
 
     /// Extracts the `KEY=VALUE` lines between the two sentinel markers.
