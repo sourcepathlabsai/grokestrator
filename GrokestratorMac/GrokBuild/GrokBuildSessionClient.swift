@@ -26,6 +26,19 @@ public actor GrokBuildSessionClient {
     /// Drives the Instance Inspector and the composer's slash-command popup.
     private var capabilities = AgentCapabilities.empty
 
+    /// Permission categories the user chose "always allow" for, this session
+    /// (e.g. "Bash"). grok re-asks even after `allow_always`, so once the user has
+    /// blessed a category we answer matching requests ourselves. Per-session: a
+    /// fresh process starts with an empty set.
+    private var alwaysAllowCategories: Set<String> = []
+    /// Per-pending-permission memo, so we can learn the user's choice when it returns.
+    private var permissionMemos: [String: PermissionMemo] = [:]
+    private struct PermissionMemo { let category: String?; let optionKinds: [String: String] }
+
+    /// Token / context-window usage, updated live from `session/update._meta` and
+    /// finalized from the `session/prompt` result `_meta`.
+    private var usage = SessionUsage.empty
+
     // Active prompt streaming + chunk coalescing.
     private var activeStream: AsyncStream<ACPEvent>.Continuation?
     private var thoughtBuffer = ""
@@ -73,6 +86,14 @@ public actor GrokBuildSessionClient {
         return capabilities
     }
 
+    /// Current token / context usage (running totals + last turn's breakdown).
+    /// Fills the context window from the captured model so callers can show a %.
+    public func currentUsage() -> SessionUsage {
+        var u = usage
+        u.contextWindow = capabilities.currentModel?.contextTokens
+        return u
+    }
+
     /// Sends a prompt and returns a stream of high-level `ACPEvent`s for the turn.
     /// The `sessionId` argument is accepted for source compatibility but ignored —
     /// the client manages its own (single) ACP session.
@@ -100,7 +121,7 @@ public actor GrokBuildSessionClient {
                     as: PromptStopResult.self,
                     timeout: nil
                 )
-                await self.completePrompt(stopReason: result.stopReason)
+                await self.completePrompt(result: result)
             } catch {
                 await self.failPrompt(error)
             }
@@ -116,10 +137,16 @@ public actor GrokBuildSessionClient {
     /// Resolves a pending permission request with the chosen ACP `optionId`.
     public func respondToPermission(permissionId: String, chosenOption: String, sessionId _: String) async throws {
         guard let id = pendingPermissions.removeValue(forKey: permissionId) else { return }
+        // Learn: if the user picked an "allow always" option, remember this category
+        // so future matching requests are answered without bothering them again.
+        if let memo = permissionMemos.removeValue(forKey: permissionId),
+           let category = memo.category, memo.optionKinds[chosenOption] == "allow_always" {
+            alwaysAllowCategories.insert(category)
+        }
         // Answering revives the turn: refresh the idle clock so the watchdog gives
         // grok a full window to resume before considering the connection stalled.
         noteActivity()
-        respond(id: id, result: .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(chosenOption)])]))
+        respond(id: id, result: selectedOutcome(chosenOption))
     }
 
     /// Finishes the active prompt stream early.
@@ -154,6 +181,7 @@ public actor GrokBuildSessionClient {
             )
             cwd = initResult.meta?.currentWorkingDirectory ?? cwd
             capabilities = initResult.toCapabilities()
+            capabilities.commands = GrokBuiltinCommands.merged(advertised: capabilities.commands)
             initialized = true
         }
 
@@ -187,6 +215,7 @@ public actor GrokBuildSessionClient {
         else { return } // ignore vendor _x.ai/* and other notifications for now
 
         noteActivity()   // the turn is alive — refresh the idle watchdog
+        if let t = p.meta?.totalTokens { usage.totalTokens = t }   // running context usage
         let sid = p.sessionId
         switch p.update.sessionUpdate {
         case "agent_thought_chunk":
@@ -214,9 +243,11 @@ public actor GrokBuildSessionClient {
             }
 
         case "available_commands_update":
-            // The authoritative, possibly-updating command list (plugins can change it).
+            // The authoritative, possibly-updating advertised list (plugins can change
+            // it), merged with the documented built-in catalog for discoverability.
             if let cmds = p.update.availableCommands {
-                capabilities.commands = cmds.map { SlashCommand(name: $0.name, description: $0.description, hint: $0.input?.hint) }
+                let advertised = cmds.map { SlashCommand(name: $0.name, description: $0.description, hint: $0.input?.hint) }
+                capabilities.commands = GrokBuiltinCommands.merged(advertised: advertised)
             }
 
         case "plan", "current_mode_update":
@@ -235,10 +266,26 @@ public actor GrokBuildSessionClient {
                 respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
                 return
             }
+            // If the user already chose "always allow" for this category (e.g. bash),
+            // answer it ourselves — grok re-asks even after `allow_always`.
+            if let category = p.category, alwaysAllowCategories.contains(category),
+               let allow = p.options.first(where: { $0.kind == "allow_always" }) ?? p.options.first(where: { $0.kind == "allow_once" }) {
+                respond(id: id, result: selectedOutcome(allow.optionId))
+                emit(.activity(ActivityEvent(
+                    sessionId: p.sessionId ?? sessionId ?? "",
+                    note: "Auto-approved (\(category), remembered): \(p.toolCall?.title ?? "permission")",
+                    kind: "permission_auto", metadata: nil)))
+                return
+            }
             // Suspend the request: keep its JSON-RPC id pending and surface it to the
-            // user. `respondToPermission` resolves it once the user chooses.
+            // user. `respondToPermission` resolves it once the user chooses; the memo
+            // lets us learn an allow-always choice when it comes back.
             let permissionId = idString(id)
             pendingPermissions[permissionId] = id
+            permissionMemos[permissionId] = PermissionMemo(
+                category: p.category,
+                optionKinds: Dictionary(p.options.map { ($0.optionId, $0.kind ?? "") }, uniquingKeysWith: { a, _ in a })
+            )
             let options = p.options.map { PermissionOption(id: $0.optionId, label: $0.name ?? $0.optionId, kind: $0.kind) }
             emit(.permissionRequest(PermissionRequestEvent(
                 sessionId: p.sessionId ?? sessionId ?? "",
@@ -279,7 +326,8 @@ public actor GrokBuildSessionClient {
 
     // MARK: - Prompt completion / streaming helpers
 
-    private func completePrompt(stopReason _: String?) {
+    private func completePrompt(result: PromptStopResult) {
+        if let m = result.meta { updateUsage(from: m) }
         let sid = sessionId ?? ""
         flushThought(sid)
         flushMessage(sid)
@@ -352,6 +400,20 @@ public actor GrokBuildSessionClient {
     }
 
     private func noteActivity() { lastActivity = Date() }
+
+    /// The JSON-RPC result body for a chosen permission option.
+    private func selectedOutcome(_ optionId: String) -> JSONValue {
+        .object(["outcome": .object(["outcome": .string("selected"), "optionId": .string(optionId)])])
+    }
+
+    /// Folds a turn's token breakdown into `usage` (keeping a non-zero running total).
+    private func updateUsage(from m: TokenMeta) {
+        if let t = m.totalTokens, t > 0 { usage.totalTokens = t }
+        if let v = m.inputTokens { usage.inputTokens = v }
+        if let v = m.outputTokens { usage.outputTokens = v }
+        if let v = m.cachedReadTokens { usage.cachedReadTokens = v }
+        if let v = m.reasoningTokens { usage.reasoningTokens = v }
+    }
 
     /// Watches an in-flight long-running request (the prompt). It fails the request
     /// only after `promptIdleLimit` of *total* silence, and **never** while a

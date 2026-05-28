@@ -23,7 +23,7 @@ struct ContentView: View {
             }
         }
         .inspector(isPresented: $showInspector) {
-            InstanceInspectorView(instance: model.selectedInstance)
+            InstanceInspectorView(instance: model.selectedInstance, model: model)
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
         }
         .toolbar {

@@ -50,6 +50,8 @@ final class ConversationViewModel {
 
     /// Slash commands advertised by the instance (for the composer popup).
     var slashCommands: [SlashCommand] { capabilities?.commands ?? [] }
+    /// Token / context usage for the Instance Inspector. Refreshed after each turn.
+    private(set) var usage: SessionUsage?
 
     private let driver: ConversationDriver
     private var streamingTask: Task<Void, Never>?
@@ -71,6 +73,15 @@ final class ConversationViewModel {
         Task { [weak self] in
             let caps = await driver.capabilities()
             if let caps { self?.capabilities = caps }
+        }
+    }
+
+    /// Refreshes token / context usage (for the inspector). Called on view appear
+    /// and after each turn completes.
+    func refreshUsage() {
+        let driver = self.driver
+        Task { [weak self] in
+            if let u = await driver.usage() { self?.usage = u }
         }
     }
 
@@ -96,6 +107,7 @@ final class ConversationViewModel {
             }
             self?.endStreaming()
             self?.isStreaming = false
+            self?.refreshUsage()
         }
     }
 

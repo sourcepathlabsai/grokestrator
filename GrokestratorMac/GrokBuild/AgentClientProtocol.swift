@@ -79,7 +79,24 @@ enum JSONValue: Encodable {
 // MARK: - Typed ACP params / results
 
 struct NewSessionResult: Decodable { let sessionId: String }
-struct PromptStopResult: Decodable { let stopReason: String? }
+
+/// `session/prompt` result. `_meta` carries the turn's token usage (verified
+/// against grok 0.2.3: totalTokens / input / output / cachedRead / reasoning).
+struct PromptStopResult: Decodable {
+    let stopReason: String?
+    let meta: TokenMeta?
+    enum CodingKeys: String, CodingKey { case stopReason, meta = "_meta" }
+}
+
+/// Token usage block — appears on the `session/prompt` result `_meta` and
+/// (as a running `totalTokens`) on `session/update` `_meta`.
+struct TokenMeta: Decodable {
+    let totalTokens: Int?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cachedReadTokens: Int?
+    let reasoningTokens: Int?
+}
 
 struct ContentBlock: Decodable, Sendable {
     let type: String
@@ -90,6 +107,8 @@ struct ContentBlock: Decodable, Sendable {
 struct SessionUpdateParams: Decodable {
     let sessionId: String
     let update: Update
+    let meta: TokenMeta?               // running token usage (e.g. `_meta.totalTokens`)
+    enum CodingKeys: String, CodingKey { case sessionId, update, meta = "_meta" }
 
     struct Update: Decodable {
         let sessionUpdate: String          // e.g. "agent_message_chunk", "agent_thought_chunk", "tool_call"
@@ -119,6 +138,15 @@ struct PermissionParams: Decodable {
 
     struct ToolCall: Decodable {
         let title: String?
+        let kind: String?                  // e.g. "execute", "edit", "read"
+        let rawInput: RawInput?
+
+        /// Tool-specific input. `variant` (e.g. "Bash") is the most precise category
+        /// for remembering an allow-always choice ("don't ask again for bash commands").
+        struct RawInput: Decodable {
+            let variant: String?
+            let command: String?
+        }
     }
 
     struct Option: Decodable {
@@ -126,6 +154,10 @@ struct PermissionParams: Decodable {
         let name: String?
         let kind: String?                  // "allow_once" | "allow_always" | "reject_once" | "reject_always"
     }
+
+    /// Stable category for "remember this kind of permission": the rawInput variant
+    /// (e.g. "Bash") when present, else the tool-call kind (e.g. "execute").
+    var category: String? { toolCall?.rawInput?.variant ?? toolCall?.kind }
 }
 
 /// `fs/read_text_file` request payload.

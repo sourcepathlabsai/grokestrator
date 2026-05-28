@@ -34,7 +34,10 @@ struct ConversationView: View {
         }
         .navigationTitle(instance.name)
         .navigationSubtitle(instance.status.rawValue)
-        .task { conversation.loadCapabilities() }
+        .task {
+            conversation.loadCapabilities()
+            conversation.refreshUsage()
+        }
     }
 
     private var transcript: some View {
@@ -321,32 +324,45 @@ private struct SlashCommandPopup: View {
     let onPick: (SlashCommand) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(matches.enumerated()), id: \.element.id) { index, cmd in
-                Button { onPick(cmd) } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
-                        if let hint = cmd.hint {
-                            Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+        // ScrollViewReader keeps the keyboard-highlighted row in view as the user
+        // arrows past the visible window of a (potentially long) merged list.
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(matches.enumerated()), id: \.element.id) { index, cmd in
+                        Button { onPick(cmd) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("/\(cmd.name)").font(Theme.mono(12)).foregroundStyle(Theme.accent)
+                                if let hint = cmd.hint {
+                                    Text(hint).font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                                }
+                                Spacer(minLength: 12)
+                                if let d = cmd.description {
+                                    Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                                        .lineLimit(1).truncationMode(.tail)
+                                        .frame(maxWidth: 280, alignment: .trailing)
+                                }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(index == highlight ? Theme.accentSoft : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: Theme.radiusXs))
+                            .contentShape(Rectangle())
                         }
-                        Spacer(minLength: 12)
-                        if let d = cmd.description {
-                            Text(d).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
-                                .lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: 280, alignment: .trailing)
-                        }
+                        .buttonStyle(.plain)
+                        .id(cmd.id)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(index == highlight ? Theme.accentSoft : Color.clear,
-                                in: RoundedRectangle(cornerRadius: Theme.radiusXs))
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+            }
+            .frame(maxHeight: 220)
+            .onChange(of: highlight) {
+                if matches.indices.contains(highlight) {
+                    withAnimation(.snappy) { proxy.scrollTo(matches[highlight].id, anchor: .center) }
+                }
             }
         }
-        .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(6)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
         .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
         .padding(.horizontal, 12)
