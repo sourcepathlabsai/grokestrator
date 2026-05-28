@@ -85,27 +85,45 @@ public actor MacGrokestratorServer {
                                  from clientID: GrokestratorListener.ClientID,
                                  outbox: GrokestratorListener.ListenerOutbox) async {
         switch req {
-        case .startPrompt(let instanceID, let prompt, let promptID):
-            let pid = promptID ?? UUID()
+        case .startPrompt(let instanceID, let prompt, _):
+            // Fire-and-forget in the broadcast model: updates flow out to every
+            // subscriber of this Connection (including the requesting client,
+            // assuming they also issued `subscribeToConnection`). After the
+            // turn ends we push fresh usage so all remote inspectors update.
             do {
-                let stream = try await manager.sendPrompt(to: instanceID, prompt: prompt)
-                // Fan updates out as conversationUpdate events, sent to this client.
+                _ = try await manager.sendPrompt(to: instanceID, prompt: prompt)
+            } catch {
+                await outbox.toClient(.grokBuild(.error(instanceID: instanceID, promptID: nil, message: error.localizedDescription)), clientID)
+            }
+
+        case .subscribeToConnection(let instanceID):
+            // Open a broadcast subscription on the conversation, forward each
+            // event to this specific client. The conversation actor delivers a
+            // `.snapshot` first, then `.update`s indefinitely. The forwarding
+            // Task ends when the client disconnects (we don't currently track
+            // per-(client,instance) cancellation — a follow-up).
+            do {
+                let stream = try await manager.subscribe(to: instanceID)
                 Task {
-                    for await update in stream {
-                        await outbox.toClient(
-                            .grokBuild(.conversationUpdate(instanceID: instanceID, promptID: pid, update: update)),
-                            clientID
-                        )
-                        if case .turnComplete = update { break }
-                    }
-                    // After the stream ends, push fresh usage so the remote inspector updates.
-                    if let usage = await self.manager.usage(for: instanceID) {
-                        await outbox.toClient(.grokBuild(.usageUpdated(instanceID: instanceID, usage: usage)), clientID)
+                    for await event in stream {
+                        switch event {
+                        case .snapshot(let turns):
+                            await outbox.toClient(.grokBuild(.historySnapshot(instanceID: instanceID, turns: turns)), clientID)
+                        case .update(let u):
+                            await outbox.toClient(.grokBuild(.conversationUpdate(instanceID: instanceID, promptID: UUID(), update: u)), clientID)
+                        }
                     }
                 }
             } catch {
-                await outbox.toClient(.grokBuild(.error(instanceID: instanceID, promptID: pid, message: error.localizedDescription)), clientID)
+                await outbox.toClient(.grokBuild(.error(instanceID: instanceID, promptID: nil, message: error.localizedDescription)), clientID)
             }
+
+        case .unsubscribeFromConnection:
+            // The stream terminates naturally when the conversation's subscriber
+            // continuation drops; nothing to do here today (single subscription
+            // per client is the MVP). A future iteration can carry a subscription
+            // token to scope this.
+            break
 
         case .respondToPermission(let instanceID, _, let permissionId, let chosenOption):
             try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: chosenOption)

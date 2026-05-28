@@ -1,26 +1,28 @@
 import Foundation
 import GrokestratorCore
 
-/// Drives a conversation against a Grok Build instance running on a *remote*
-/// Grokestrator server (typically reachable over Tailscale). Wraps a
-/// `GrokBuildClientSession` so the UI's existing `ConversationDriver` seam
-/// works identically for local and remote instances.
+/// Drives a Connection that lives on a *remote* Grokestrator server, reachable
+/// over Tailscale. Wraps a `GrokBuildClientSession` so the UI's
+/// `ConversationDriver` seam works identically for local and remote.
 ///
-/// Owned by the parent `RemoteServerLink`, which holds the shared
-/// `GrokestratorClient` + network transport for a server.
+/// **Broadcast model (PR B):** `send` is fire-and-forget; updates flow back via
+/// `subscribe()`, including the `.snapshot` of existing history. That's what
+/// makes "pick up iPad → see the same transcript as the Mac" work.
 public final class RemoteConversationDriver: ConversationDriver, @unchecked Sendable {
     private let session: GrokBuildClientSession
-    /// Tracks the most recent prompt so `respondToPermission` can address it.
+    /// Most recent prompt id, so `respondToPermission` can address its turn.
     private var lastPromptID: UUID?
 
     public init(session: GrokBuildClientSession) {
         self.session = session
     }
 
-    public func send(_ prompt: String) async throws -> AsyncStream<ConversationUpdate> {
-        let started = try await session.startPrompt(prompt)
-        lastPromptID = started.promptID
-        return started.updates
+    public func send(_ prompt: String) async throws {
+        lastPromptID = try await session.startPrompt(prompt)
+    }
+
+    public func subscribe() async -> AsyncStream<ConnectionStreamEvent> {
+        await session.subscribe()
     }
 
     public func respondToPermission(permissionId: String, optionId: String) async {

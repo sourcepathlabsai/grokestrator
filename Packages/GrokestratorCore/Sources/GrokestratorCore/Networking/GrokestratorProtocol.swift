@@ -97,6 +97,15 @@ public enum GrokBuildRequest: Codable, Sendable {
 
     /// Ask the server for an instance's current token / context usage snapshot.
     case getUsage(instanceID: UUID)
+
+    /// Subscribe to a Connection's broadcast stream — the shared-session model.
+    /// Server replies with `historySnapshot` then keeps forwarding every
+    /// `conversationUpdate` for this Connection, regardless of which client
+    /// initiated the prompt. The client sees the same transcript GKSS itself sees.
+    case subscribeToConnection(instanceID: UUID)
+
+    /// Stop receiving broadcast events for a Connection (drops the subscription).
+    case unsubscribeFromConnection(instanceID: UUID)
 }
 
 /// Responses from the server for GrokBuildRequest messages.
@@ -137,4 +146,9 @@ public enum GrokBuildEvent: Codable, Sendable {
     /// Server's reply to `GrokBuildRequest.getUsage`. Also sent after each turn
     /// completes so remote clients keep an accurate Session Usage view.
     case usageUpdated(instanceID: UUID, usage: SessionUsage)
+
+    /// One-shot snapshot of the Connection's full transcript at subscribe time.
+    /// Sent immediately after `subscribeToConnection`, before any subsequent
+    /// `conversationUpdate` events. Clients replay this to populate their view.
+    case historySnapshot(instanceID: UUID, turns: [AgentTurn])
 }

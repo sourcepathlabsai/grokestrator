@@ -40,6 +40,12 @@ struct ConversationView: View {
             conversation.loadCapabilities()
             conversation.refreshUsage()
         }
+        // Subscription lives as long as this view is visible. `.task(id:)` so
+        // selecting a different Connection cleanly tears the previous one down
+        // and starts a fresh one (snapshot replay → live updates).
+        .task(id: instance.id) {
+            await conversation.startSubscription()
+        }
         .onChange(of: conversation.focusToken) { composerFocused = true }
     }
 
@@ -225,8 +231,9 @@ private struct TranscriptRow: View {
             }
         case .thought(let text, _):
             note("💭 \(text)")
-        case .messageDelta, .thoughtDelta:
-            // Handled by ConversationViewModel as live bubble growth, never rendered here.
+        case .messageDelta, .thoughtDelta, .userPrompt:
+            // Deltas grow bubbles in place; userPrompt is appended as its own
+            // TranscriptEntry kind. None render through this case.
             EmptyView()
         case .progressNote(let text, let phase, _):
             note("\(phase.map { "[\($0)] " } ?? "")\(text)")

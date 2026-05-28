@@ -145,17 +145,22 @@ public actor GrokBuildManager {
 
     // MARK: - High-level Black Box APIs (recommended for most of the Mac app)
 
-    /// Send a prompt through the black box. Returns high-level ConversationUpdate stream.
-    /// Callers (UI, etc.) never need to know about ACP, ToolCallEvent, or the protocol.
-    public func sendPrompt(to instanceID: UUID, prompt: String) async throws -> AsyncStream<ConversationUpdate> {
+    /// Fire a prompt at the underlying grok process. **Fire-and-forget** in the
+    /// broadcast model — updates flow out to every subscriber of the Connection
+    /// (local UI + every remote GKSC). Use `subscribe(to:)` to receive them.
+    /// Returns the prompt's stable UUID so the caller can cancel later if needed.
+    @discardableResult
+    public func sendPrompt(to instanceID: UUID, prompt: String) async throws -> UUID {
         let convo = try await conversation(for: instanceID)
         return try await convo.sendPrompt(prompt)
     }
 
-    /// Send a prompt and receive a rich, structured result with all updates and outcome info.
-    public func sendPromptAndCollect(to instanceID: UUID, prompt: String) async throws -> PromptResult {
+    /// Subscribe to a Connection's broadcast stream. First event is `.snapshot`
+    /// of the current transcript; subsequent events are `.update`s for everything
+    /// that happens going forward, regardless of which client initiated the prompt.
+    public func subscribe(to instanceID: UUID) async throws -> AsyncStream<ConnectionStreamEvent> {
         let convo = try await conversation(for: instanceID)
-        return try await convo.sendPromptAndCollect(prompt)
+        return await convo.subscribe()
     }
 
     /// Get the current conversation history for an instance (structured turns, not raw events).

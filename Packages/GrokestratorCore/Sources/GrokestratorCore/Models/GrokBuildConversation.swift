@@ -13,6 +13,12 @@ import Foundation
 /// A high-level update from a Grok Build conversation.
 /// This is the primary type clients (and the Mac UI) will consume.
 public enum ConversationUpdate: Sendable, Codable {
+    /// The user-submitted prompt that started a new turn. Broadcast so every
+    /// subscriber (any device viewing the same Connection) sees the prompt
+    /// even when *another* client typed it — that's what makes shared sessions
+    /// look identical on Mac and iPad.
+    case userPrompt(String)
+
     case thought(String, metadata: [String: String]?)
     case message(String, metadata: [String: String]?)
 
@@ -122,6 +128,17 @@ public struct ConversationState: Sendable, Codable {
         self.pendingPermissionCount = pendingPermissionCount
         self.isAlive = isAlive
     }
+}
+
+/// One event in a Connection's broadcast stream. Every subscriber (local Mac
+/// UI + every connected GKSC) receives the same sequence: a one-time
+/// `.snapshot` carrying the full history at subscribe time, followed by
+/// `.update` events for everything that happens from that point on,
+/// **regardless of which client initiated the prompt**. That's what makes
+/// GKSS the single source of truth — every viewer sees the same conversation.
+public enum ConnectionStreamEvent: Sendable, Codable {
+    case snapshot([AgentTurn])
+    case update(ConversationUpdate)
 }
 
 // MARK: - Structured History Types
