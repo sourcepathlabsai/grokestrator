@@ -224,6 +224,7 @@ public actor GrokestratorClient {
             case .error(let instID, _, _): return instID
             case .capabilitiesUpdated(let instID, _): return instID
             case .usageUpdated(let instID, _): return instID
+            case .historySnapshot(let instID, _): return instID
             }
         }()
 

@@ -27,8 +27,7 @@ struct GrokestratorClientTests {
         let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
         // Start prompt
-        let started = try await buildSession.startPrompt("Review the architecture")
-        let promptID = started.promptID
+        let promptID = try await buildSession.startPrompt("Review the architecture")
 
         // Simulate realistic server responses
         let progress1 = ConversationUpdate.progressNote("Analyzing modules...", phase: "scan", metadata: nil)
@@ -59,8 +58,7 @@ struct GrokestratorClientTests {
         let instanceID = UUID()
         let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
-        let started = try await buildSession.startPrompt("Run static analysis")
-        let promptID = started.promptID
+        let promptID = try await buildSession.startPrompt("Run static analysis")
 
         // Server requests a tool
         let toolCall = ToolCallInfo(id: "tool-42", toolName: "run_swiftlint", arguments: ["path": "Sources"])
@@ -102,10 +100,10 @@ struct GrokestratorClientTests {
         let instanceID = UUID()
         let buildSession = await client.grokBuildSession(for: instanceID, on: serverSession)
 
-        let started = try await buildSession.startPrompt("Long running analysis")
+        let promptID = try await buildSession.startPrompt("Long running analysis")
 
         // Cancel it
-        try await buildSession.cancelPrompt(promptID: started.promptID)
+        try await buildSession.cancelPrompt(promptID: promptID)
 
         let sent = await transport.sentRequests[serverSession.id] ?? []
         #expect(sent.count == 2)

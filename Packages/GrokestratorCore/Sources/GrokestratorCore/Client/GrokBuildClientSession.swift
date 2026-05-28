@@ -20,6 +20,13 @@ public actor GrokBuildClientSession {
     private var pendingToolCallsByPrompt: [UUID: [ToolCallInfo]] = [:]
     private var isValid = true
 
+    /// Broadcast subscribers — the wire-side equivalent of
+    /// `GrokBuildConversation.subscribe()`. Server delivers a `historySnapshot`
+    /// then ongoing `conversationUpdate` events; this session translates those
+    /// inbound events into `ConnectionStreamEvent`s and fans them to all UI
+    /// subscribers (typically one per remote view).
+    private var broadcastSubscribers: [UUID: AsyncStream<ConnectionStreamEvent>.Continuation] = [:]
+
     /// Cached capabilities/usage so the inspector renders something on first
     /// open even before the first `*Updated` event arrives. Refreshed on demand.
     private var cachedCapabilities: AgentCapabilities = .empty
@@ -55,43 +62,47 @@ public actor GrokBuildClientSession {
 
     // MARK: - Public API
 
-    /// Result of starting a prompt: the stable `promptID` for this turn plus the
-    /// stream of `ConversationUpdate` values it will produce.
-    ///
-    /// The caller needs the `promptID` to later send tool results, respond to
-    /// permissions, or cancel this specific prompt.
-    public struct StartedPrompt: Sendable {
-        public let promptID: UUID
-        public let updates: AsyncStream<ConversationUpdate>
+    // `StartedPrompt` (the per-prompt stream wrapper) was removed when the
+    // broadcast model replaced per-call streams. See `subscribe()`.
+
+    /// Fires a prompt at the remote instance. **Fire-and-forget** in the
+    /// broadcast model: updates flow back via `subscribe()`, not through this
+    /// call. Returns the prompt's stable id so the caller can cancel later.
+    @discardableResult
+    public func startPrompt(_ text: String) async throws -> UUID {
+        guard isValid else { throw GrokestratorError.sessionInvalidated }
+        let promptID = UUID()
+        let request = GrokBuildRequest.startPrompt(
+            instanceID: instanceID, prompt: text, promptID: promptID
+        )
+        try await sendRequest(.grokBuild(request))
+        registerPrompt?(promptID, instanceID)
+        return promptID
     }
 
-    /// Starts a new prompt on the remote instance.
-    /// Returns the prompt's stable `promptID` and a stream of `ConversationUpdate`
-    /// values (messages, progress notes, tool calls, etc.).
-    @discardableResult
-    public func startPrompt(_ text: String) async throws -> StartedPrompt {
-        guard isValid else {
-            throw GrokestratorError.sessionInvalidated
+    /// Subscribe to the remote Connection's broadcast stream. Sends a
+    /// `subscribeToConnection` request; the server replies with `historySnapshot`
+    /// then forwards every `conversationUpdate` for this Connection (initiated
+    /// by *any* client). Translated into `ConnectionStreamEvent`s.
+    public func subscribe() async -> AsyncStream<ConnectionStreamEvent> {
+        let (stream, cont) = AsyncStream<ConnectionStreamEvent>.makeStream(bufferingPolicy: .unbounded)
+        let token = UUID()
+        broadcastSubscribers[token] = cont
+        cont.onTermination = { [weak self] _ in
+            Task { await self?.removeBroadcastSubscriber(token) }
         }
+        // Ask the server to start delivering. Failure to send leaves the stream
+        // open but empty — the UI shows whatever the cache has.
+        try? await sendRequest(.grokBuild(.subscribeToConnection(instanceID: instanceID)))
+        return stream
+    }
 
-        let promptID = UUID()
-        let (stream, continuation) = AsyncStream<ConversationUpdate>.makeStream(bufferingPolicy: .unbounded)
+    private func removeBroadcastSubscriber(_ token: UUID) {
+        broadcastSubscribers.removeValue(forKey: token)
+    }
 
-        activePrompts[promptID] = continuation
-        pendingToolCallsByPrompt[promptID] = []
-
-        let request = GrokBuildRequest.startPrompt(
-            instanceID: instanceID,
-            prompt: text,
-            promptID: promptID
-        )
-
-        try await sendRequest(.grokBuild(request))
-
-        // Register so the parent client can route prompt-scoped events accurately
-        registerPrompt?(promptID, instanceID)
-
-        return StartedPrompt(promptID: promptID, updates: stream)
+    private func broadcastEvent(_ event: ConnectionStreamEvent) {
+        for (_, cont) in broadcastSubscribers { cont.yield(event) }
     }
 
     /// Sends the result of a tool call back to the remote agent.
@@ -104,11 +115,8 @@ public actor GrokBuildClientSession {
         guard isValid else {
             throw GrokestratorError.sessionInvalidated
         }
-        guard activePrompts[promptID] != nil else {
-            throw GrokestratorError.protocolError("No active prompt with id \(promptID)")
-        }
-
-        // Optimistically remove from local pending list
+        // Best-effort local cleanup. The broadcast model means we don't track
+        // per-prompt active streams anymore — the server is the source of truth.
         pendingToolCallsByPrompt[promptID]?.removeAll { $0.id == toolCallId }
 
         let request = GrokBuildRequest.sendToolResult(
@@ -122,19 +130,12 @@ public actor GrokBuildClientSession {
         try await sendRequest(.grokBuild(request))
     }
 
-    /// Cancels an in-progress prompt.
+    /// Cancels an in-progress prompt. Best-effort: the server will stop the
+    /// turn and broadcast a `.turnComplete` to every subscriber.
     public func cancelPrompt(promptID: UUID) async throws {
-        guard let continuation = activePrompts.removeValue(forKey: promptID) else { return }
-
+        guard isValid else { throw GrokestratorError.sessionInvalidated }
         pendingToolCallsByPrompt.removeValue(forKey: promptID)
-
-        let request = GrokBuildRequest.cancelPrompt(
-            instanceID: instanceID,
-            promptID: promptID
-        )
-
-        try? await sendRequest(.grokBuild(request))
-        continuation.finish()
+        try? await sendRequest(.grokBuild(.cancelPrompt(instanceID: instanceID, promptID: promptID)))
     }
 
     /// Returns the currently known pending tool calls for a given prompt (best-effort).
@@ -221,25 +222,25 @@ public actor GrokBuildClientSession {
         guard isValid else { return }
 
         switch event {
-        case .conversationUpdate(let instID, let promptID, let update):
+        case .conversationUpdate(let instID, _, let update):
             guard instID == instanceID else { return }
-            activePrompts[promptID]?.yield(update)
+            // Broadcast model: every inbound update fans to all UI subscribers,
+            // regardless of which prompt (or which client) initiated it.
+            broadcastEvent(.update(update))
 
-            if case .turnComplete = update {
-                activePrompts[promptID]?.finish()
-                activePrompts.removeValue(forKey: promptID)
-                pendingToolCallsByPrompt.removeValue(forKey: promptID)
-            }
+        case .historySnapshot(let instID, let turns):
+            guard instID == instanceID else { return }
+            broadcastEvent(.snapshot(turns))
 
         case .pendingToolCallsChanged(let instID, let promptID, let calls):
             guard instID == instanceID else { return }
             pendingToolCallsByPrompt[promptID] = calls
 
-        case .promptCompleted(let instID, let promptID, _):
+        case .promptCompleted(let instID, _, _):
             guard instID == instanceID else { return }
-            activePrompts[promptID]?.finish()
-            activePrompts.removeValue(forKey: promptID)
-            pendingToolCallsByPrompt.removeValue(forKey: promptID)
+            // Nothing to terminate in the broadcast model — subscriptions are
+            // open-ended; the `.turnComplete` update already rode through.
+            break
 
         case .instanceDied(let instID, _):
             guard instID == instanceID else { return }
@@ -277,10 +278,13 @@ public actor GrokBuildClientSession {
     // MARK: - Private
 
     private func invalidateAllPrompts(reason: String) {
-        for (_, continuation) in activePrompts {
-            continuation.yield(.error(reason))
-            continuation.finish()
+        // Per-prompt streams are gone (broadcast model). Notify any UI
+        // subscriber via an error update then close their stream.
+        for (_, cont) in broadcastSubscribers {
+            cont.yield(.update(.error(reason)))
+            cont.finish()
         }
+        broadcastSubscribers.removeAll()
         activePrompts.removeAll()
         pendingToolCallsByPrompt.removeAll()
     }

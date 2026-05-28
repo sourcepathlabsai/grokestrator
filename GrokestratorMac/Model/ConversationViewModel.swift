@@ -62,7 +62,6 @@ final class ConversationViewModel {
     func requestComposerFocus() { focusToken += 1 }
 
     private let driver: ConversationDriver
-    private var streamingTask: Task<Void, Never>?
 
     // Tracks the bubble currently being streamed into.
     private enum StreamKind { case message, thought }
@@ -93,30 +92,72 @@ final class ConversationViewModel {
         }
     }
 
-    /// Sends a prompt and streams the response into `entries`.
+    /// Opens (or re-opens) the Connection's broadcast subscription and pumps
+    /// `.snapshot` + `.update` events into `entries`. Call once per view
+    /// appear, with the matching `id:` so a Connection switch re-subscribes
+    /// cleanly. Cancellation of the awaiting Task ends the subscription.
+    func startSubscription() async {
+        // A fresh subscription always begins with `.snapshot` — wipe local
+        // state so we don't accumulate from a previous selection.
+        entries = []
+        quickReplies = []
+        pendingPermission = nil
+        endStreaming()
+        streamTick += 1
+
+        let stream = await driver.subscribe()
+        for await event in stream {
+            switch event {
+            case .snapshot(let turns): replay(turns: turns)
+            case .update(let update): handle(update)
+            }
+        }
+    }
+
+    /// Fires a prompt at the driver. **Fire-and-forget** in the broadcast model:
+    /// the user prompt + every response update flows back via the active
+    /// subscription, not from this call's return.
     func send(_ prompt: String) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
-
-        appendEntry(.userPrompt(trimmed))
         quickReplies = []
         isStreaming = true
-
         let driver = self.driver
-        streamingTask = Task { [weak self] in
+        Task { [weak self] in
             do {
-                let stream = try await driver.send(trimmed)
-                for await update in stream {
-                    // Task inherits the MainActor context, so this is a safe hop-back.
-                    self?.handle(update)
-                }
+                try await driver.send(trimmed)
             } catch {
                 self?.handle(.error(error.localizedDescription))
+                self?.endStreaming()
+                self?.isStreaming = false
             }
-            self?.endStreaming()
-            self?.isStreaming = false
-            self?.refreshUsage()
         }
+    }
+
+    /// Replay a history snapshot into transcript entries — converts
+    /// `[AgentTurn]` to user-prompt + assistant-message entries. Used both when
+    /// joining a Connection for the first time and when the Connection switches.
+    private func replay(turns: [AgentTurn]) {
+        var rebuilt: [TranscriptEntry] = []
+        for turn in turns {
+            rebuilt.append(TranscriptEntry(kind: .userPrompt(turn.userPrompt)))
+            for msg in turn.messages {
+                switch msg.role {
+                case .assistant, .system:
+                    rebuilt.append(TranscriptEntry(kind: .assistantMessage(msg.content)))
+                case .tool:
+                    rebuilt.append(TranscriptEntry(kind: .update(
+                        .activityNote("tool: \(msg.content)", kind: "tool", metadata: nil)
+                    )))
+                case .user:
+                    // Already covered by the turn's userPrompt above; skip dup.
+                    break
+                }
+            }
+        }
+        entries = rebuilt
+        streamTick += 1
+        refreshUsage()
     }
 
     /// Appends a system-level note (e.g. launch status or errors) to the transcript.
@@ -135,10 +176,10 @@ final class ConversationViewModel {
         Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
     }
 
-    /// Cancels any in-flight turn (e.g. when the view goes away).
+    /// Soft-cancel: clears local streaming state. The subscription itself is
+    /// owned by the view's `.task(id:)` and is auto-cancelled when the view
+    /// goes away, dropping the server-side broadcaster registration cleanly.
     func cancel() {
-        streamingTask?.cancel()
-        streamingTask = nil
         endStreaming()
         isStreaming = false
     }
@@ -147,6 +188,11 @@ final class ConversationViewModel {
 
     private func handle(_ update: ConversationUpdate) {
         switch update {
+        case .userPrompt(let text):
+            // Either we initiated this prompt (and the subscription is echoing
+            // it back), or another client did. Either way, record it once.
+            endStreaming()
+            appendEntry(.userPrompt(text))
         case .messageDelta(let t):
             appendDelta(t, kind: .message)
         case .thoughtDelta(let t):
@@ -163,6 +209,7 @@ final class ConversationViewModel {
             endStreaming()
             isStreaming = false
             appendEntry(.update(update))
+            refreshUsage()
         default:
             endStreaming()
             appendEntry(.update(update))
