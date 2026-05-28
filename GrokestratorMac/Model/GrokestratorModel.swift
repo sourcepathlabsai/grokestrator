@@ -202,6 +202,36 @@ final class GrokestratorModel {
         }
     }
 
+    // MARK: - Name lookup (collision detection for the Add form)
+
+    /// First active (non-archived) Connection with this name, case-insensitively.
+    /// `nil` ⇒ name is free among active Connections. Used by the Add form to
+    /// reject duplicates outright.
+    func activeConnection(named name: String) -> ManagedConnection? {
+        let key = name.trimmingCharacters(in: .whitespaces).lowercased()
+        return connections.first { !$0.archived && $0.name.lowercased() == key }
+    }
+
+    /// First archived Connection with this name, case-insensitively. Used by
+    /// the Add form to offer Restore (the user is probably looking for their
+    /// previous config + history) vs Create-new (explicit fresh start).
+    func archivedConnection(named name: String) -> ManagedConnection? {
+        let key = name.trimmingCharacters(in: .whitespaces).lowercased()
+        return connections.first { $0.archived && $0.name.lowercased() == key }
+    }
+
+    /// Renames a Connection in the registry (and on disk). Used by the
+    /// Create-new path to disambiguate an archived "X" from a freshly-added
+    /// active "X" by suffixing the archived entry with an ISO-date marker.
+    func renameConnection(_ connection: ManagedConnection, to newName: String) {
+        guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
+        connections[idx].name = newName
+        ConnectionStore.save(connections)
+        if let item = instances.first(where: { $0.id == connection.id }) {
+            item.name = newName
+        }
+    }
+
     // MARK: - Archive / Restore / Delete Permanently
 
     /// Connections currently in the archived state (hidden from sidebar + remote).
