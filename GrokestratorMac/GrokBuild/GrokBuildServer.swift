@@ -37,6 +37,16 @@ public actor GrokBuildServer {
         }
     }
 
+    /// Terminates every running instance. Called from app-quit cleanup.
+    public func stopAll(timeout: TimeInterval = 1.0) async {
+        await launcher.terminateAll(timeout: timeout)
+        clients.removeAll()
+        for (id, var inst) in instances {
+            inst.status = .stopped
+            instances[id] = inst
+        }
+    }
+
     public func getClient(for id: UUID) -> GrokBuildSessionClient? {
         clients[id]
     }

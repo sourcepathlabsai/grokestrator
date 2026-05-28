@@ -116,6 +116,40 @@ public actor GrokBuildInstanceLauncher {
         stderrHandlers.removeValue(forKey: id)
     }
 
+    /// Terminates every running grok process. Sends `SIGTERM` to each, waits up
+    /// to `timeout` for graceful exit, then `SIGKILL`s any survivor. Called on
+    /// app quit so we don't leave orphan grok processes — the very thing the
+    /// user observed ("the grok session has been alive the whole time").
+    public func terminateAll(timeout: TimeInterval = 1.0) async {
+        let processes = Array(runningProcesses.values)
+        let ids = Array(runningProcesses.keys)
+        guard !processes.isEmpty else { return }
+
+        for p in processes { p.terminate() }   // SIGTERM, in parallel
+
+        // Wait briefly for graceful exit, polling every 50ms.
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if processes.allSatisfy({ !$0.isRunning }) { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        // Anyone still alive gets SIGKILL.
+        for p in processes where p.isRunning {
+            kill(p.processIdentifier, SIGKILL)
+        }
+
+        // Clean up bookkeeping for all of them (handlers may have already finished
+        // when the process actually died; .finish() is idempotent).
+        for id in ids {
+            stdoutHandlers[id]?.finish()
+            stderrHandlers[id]?.finish()
+            stdoutHandlers.removeValue(forKey: id)
+            stderrHandlers.removeValue(forKey: id)
+            runningProcesses.removeValue(forKey: id)
+        }
+    }
+
     private var exitHandlers: [UUID: @Sendable (UUID, Int32) -> Void] = [:]
 
     private func handleProcessExit(_ id: UUID, exitCode: Int32) async {
