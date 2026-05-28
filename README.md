@@ -22,7 +22,7 @@ You need four things. Set the first two up first; they apply to your whole machi
 ### Build and run on the Mac
 
 ```bash
-git clone https://github.com/bobprofleet/grokestrator.git
+git clone https://github.com/sourcepathlabsai/grokestrator.git
 cd grokestrator
 xcodegen generate         # produces Grokestrator.xcodeproj (gitignored)
 open Grokestrator.xcodeproj
