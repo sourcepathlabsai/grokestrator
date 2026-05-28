@@ -1,0 +1,88 @@
+import Foundation
+import GrokestratorCore
+
+/// On-disk registry of every Connection this Mac has ever created
+/// (active + archived). GKSS loads it on boot and writes on every mutation —
+/// add, edit, archive, restore, delete-permanently.
+///
+/// **Layout** (per `connection-semantics` memory):
+/// ```
+/// ~/Library/Application Support/Grokestrator/
+///   connections.json                                    ← this file (the registry)
+///   connections/<connectionID>/history.json             ← per-Connection transcript
+/// ```
+/// Existing `conversations/<id>.json` files (the legacy history location) are
+/// migrated lazily on first read so users don't lose prior transcripts.
+public enum ConnectionStore {
+    // MARK: - Paths (nonisolated — pure path math + filesystem ops, thread-safe)
+
+    public static var supportDir: URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Grokestrator", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    public static var registryURL: URL { supportDir.appendingPathComponent("connections.json") }
+
+    /// Per-Connection directory: `~/Library/Application Support/Grokestrator/connections/<id>/`.
+    public static func connectionDir(for id: UUID) -> URL {
+        let dir = supportDir.appendingPathComponent("connections", isDirectory: true)
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    public static func historyURL(for id: UUID) -> URL {
+        let url = connectionDir(for: id).appendingPathComponent("history.json")
+        migrateLegacyHistoryIfNeeded(id: id, into: url)
+        return url
+    }
+
+    /// One-shot migration of any file at the legacy `conversations/<id>.json`
+    /// path to the new `connections/<id>/history.json` location. Skips if the
+    /// new location already has a file.
+    private static func migrateLegacyHistoryIfNeeded(id: UUID, into newURL: URL) {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: newURL.path) else { return }
+        let legacy = supportDir
+            .appendingPathComponent("conversations", isDirectory: true)
+            .appendingPathComponent("\(id.uuidString).json")
+        guard fm.fileExists(atPath: legacy.path) else { return }
+        try? fm.moveItem(at: legacy, to: newURL)
+    }
+
+    // MARK: - Registry I/O
+
+    public static func load() -> [ManagedConnection] {
+        guard let data = try? Data(contentsOf: registryURL) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ManagedConnection].self, from: data)) ?? []
+    }
+
+    public static func save(_ connections: [ManagedConnection]) {
+        // Strip runtime fields before persisting — only the config survives a boot.
+        let sanitized = connections.map { conn -> ManagedConnection in
+            var c = conn
+            c.status = .stopped
+            c.lastExitCode = nil
+            c.pid = nil
+            return c
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(sanitized) else { return }
+        try? data.write(to: registryURL, options: .atomic)
+    }
+
+    /// Permanently deletes a Connection's history directory. Caller is
+    /// responsible for removing the registry entry separately.
+    public static func deleteHistoryDirectory(for id: UUID) {
+        let dir = supportDir.appendingPathComponent("connections", isDirectory: true)
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+    }
+}

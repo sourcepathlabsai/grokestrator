@@ -95,10 +95,10 @@ public actor GrokBuildManager {
             throw GrokBuildError.instanceManagementError("Failed to obtain client for instance \(instanceID)")
         }
 
-        let convosDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Grokestrator", isDirectory: true)
-            .appendingPathComponent("conversations", isDirectory: true)
-        let historyURL = convosDir.appendingPathComponent("\(instanceID.uuidString).json")
+        // New layout (memory: `connection-semantics`):
+        //   …/Grokestrator/connections/<id>/history.json
+        // ConnectionStore.historyURL migrates the legacy file if present.
+        let historyURL = ConnectionStore.historyURL(for: instanceID)
 
         let convo = GrokBuildConversation(
             instanceID: instanceID,

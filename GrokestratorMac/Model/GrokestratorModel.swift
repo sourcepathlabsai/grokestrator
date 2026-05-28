@@ -48,6 +48,12 @@ final class GrokestratorModel {
     var instances: [InstanceItem]
     var selectedInstanceID: InstanceItem.ID?
 
+    /// Persistent registry of every local Connection — active *and* archived.
+    /// Source of truth for the local Mac (GKSS); the `instances` array is the
+    /// UI projection of the non-archived entries here. Loaded from
+    /// `connections.json` on boot, saved on every mutation.
+    var connections: [ManagedConnection]
+
     /// The local Grok Build black box (drives instances running on *this* Mac).
     let manager = GrokBuildManager()
 
@@ -76,12 +82,13 @@ final class GrokestratorModel {
         }
     }
 
-    init(instances: [InstanceItem]) {
+    init(instances: [InstanceItem] = [], connections: [ManagedConnection] = []) {
         self.instances = instances
+        self.connections = connections
         self.selectedInstanceID = instances.first?.id
         self.server = MacGrokestratorServer(manager: manager)
-        let configs = RemoteServerStore.load()
-        self.remoteLinks = configs.map { RemoteServerLink(config: $0) }
+        let remoteConfigs = RemoteServerStore.load()
+        self.remoteLinks = remoteConfigs.map { RemoteServerLink(config: $0) }
         self.serverEnabled = UserDefaults.standard.bool(forKey: Self.serverEnabledKey)
         let storedPort = UserDefaults.standard.integer(forKey: Self.serverPortKey)
         self.serverPort = storedPort == 0 ? 7847 : UInt16(storedPort)
@@ -91,15 +98,56 @@ final class GrokestratorModel {
         for link in remoteLinks { Task { await self.connectAndAttach(link) } }
     }
 
-    /// Default app state with one mock connection so first run isn't empty.
+    /// Default app state: load the persisted Connection registry and seed a
+    /// mock Connection on first run (so the UI isn't empty for someone who
+    /// hasn't created any). Non-archived entries become UI items; entries
+    /// with `autoRestart == true` are launched in the background.
     convenience init() {
-        self.init(instances: [
-            InstanceItem(
+        let stored = ConnectionStore.load()
+        let firstRun = stored.isEmpty
+        var registry = stored
+
+        // First-run mock seed — added to the registry so it persists.
+        if firstRun {
+            registry = [ManagedConnection(
                 name: "Mock Grok (offline)",
-                status: .running,
-                driver: MockConversationDriver(label: "mock")
-            ),
-        ])
+                command: "/mock/grok",
+                arguments: [],
+                workingDirectory: nil,
+                autoRestart: false,
+                shared: false
+            )]
+            ConnectionStore.save(registry)
+        }
+
+        // UI items for every non-archived Connection.
+        var seededInstances: [InstanceItem] = []
+        for conn in registry where !conn.archived {
+            // The mock seed gets a MockConversationDriver; everything else gets a Live driver.
+            // We can't distinguish without convention — use the special command path "/mock/grok".
+            let driver: ConversationDriver = conn.command == "/mock/grok"
+                ? MockConversationDriver(label: conn.name)
+                : LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id)   // replaced below
+            seededInstances.append(InstanceItem(id: conn.id, name: conn.name, status: .stopped, driver: driver))
+        }
+        self.init(instances: seededInstances, connections: registry)
+
+        // Re-bind LiveConversationDrivers to the actual manager (the temp ones
+        // created above used a throwaway manager because `self` wasn't ready).
+        for (idx, item) in instances.enumerated() {
+            if let conn = registry.first(where: { $0.id == item.id }), conn.command != "/mock/grok" {
+                instances[idx] = InstanceItem(
+                    id: conn.id, name: conn.name, status: .stopped,
+                    driver: LiveConversationDriver(manager: manager, instanceID: conn.id)
+                )
+            }
+        }
+        if selectedInstanceID == nil { selectedInstanceID = instances.first?.id }
+
+        // Auto-launch every non-archived Connection with autoRestart == true.
+        for conn in registry where !conn.archived && conn.autoRestart && conn.command != "/mock/grok" {
+            Task { [weak self] in await self?.launchConnection(conn) }
+        }
     }
 
     var selectedInstance: InstanceItem? {
@@ -137,14 +185,19 @@ final class GrokestratorModel {
         selectedInstanceID = item.id
     }
 
-    func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?) {
-        let config = ManagedInstance(
+    func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
+                           autoRestart: Bool = true, shared: Bool = true) {
+        let config = ManagedConnection(
             name: name,
             command: command,
             arguments: arguments,
             workingDirectory: workingDirectory,
-            status: .stopped
+            autoRestart: autoRestart,
+            shared: shared
         )
+        connections.append(config)
+        ConnectionStore.save(connections)
+
         let item = InstanceItem(
             id: config.id,
             name: name,
@@ -154,16 +207,22 @@ final class GrokestratorModel {
         instances.append(item)
         selectedInstanceID = item.id
 
-        let server = self.server
-        Task {
-            do {
-                let updated = try await manager.startInstance(config)
-                item.status = updated.status
-                await server.broadcastInstancesIfChanged()
-            } catch {
-                item.status = .errored
-                item.conversation.appendSystem("Failed to launch: \(error.localizedDescription)", isError: true)
-            }
+        Task { [weak self] in await self?.launchConnection(config, startingItem: item) }
+    }
+
+    /// Launches a Connection's grok process and reflects status on its UI item.
+    /// Shared launch path used both by `addRealConnection` and the boot-time
+    /// auto-restart pass.
+    private func launchConnection(_ config: ManagedConnection, startingItem: InstanceItem? = nil) async {
+        let item = startingItem ?? instances.first(where: { $0.id == config.id })
+        item?.status = .starting
+        do {
+            let updated = try await manager.startInstance(config)
+            item?.status = updated.status
+            await server.broadcastInstancesIfChanged()
+        } catch {
+            item?.status = .errored
+            item?.conversation.appendSystem("Failed to launch: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -180,6 +239,53 @@ final class GrokestratorModel {
             }
             item.status = .stopped
         }
+    }
+
+    // MARK: - Archive / Restore / Delete Permanently
+
+    /// Connections currently in the archived state (hidden from sidebar + remote).
+    var archivedConnections: [ManagedConnection] {
+        connections.filter { $0.archived }
+    }
+
+    /// Archive a local Connection: stop its process if running, hide it from the
+    /// main sidebar and from every remote GKSC. Reversible via `restore`.
+    func archive(_ item: InstanceItem) {
+        guard let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
+        // Stop the grok process if running. (No-op for mock.)
+        if connections[idx].command != "/mock/grok" {
+            Task { [server] in
+                await manager.stopInstance(id: item.id)
+                await server.broadcastInstancesIfChanged()
+            }
+        }
+        connections[idx].archived = true
+        ConnectionStore.save(connections)
+        instances.removeAll { $0.id == item.id }
+        if selectedInstanceID == item.id { selectedInstanceID = instances.first?.id }
+    }
+
+    /// Restore an archived Connection — bring it back into the main sidebar in a
+    /// stopped state. We do NOT auto-launch even if `autoRestart` is true;
+    /// the user launches manually, or the next GKSS boot honors the flag.
+    func restore(_ connection: ManagedConnection) {
+        guard let idx = connections.firstIndex(where: { $0.id == connection.id }) else { return }
+        connections[idx].archived = false
+        ConnectionStore.save(connections)
+
+        let driver: ConversationDriver = connection.command == "/mock/grok"
+            ? MockConversationDriver(label: connection.name)
+            : LiveConversationDriver(manager: manager, instanceID: connection.id)
+        let item = InstanceItem(id: connection.id, name: connection.name, status: .stopped, driver: driver)
+        instances.append(item)
+    }
+
+    /// Permanently delete an archived Connection — drops config and history dir.
+    /// Caller (the UI) is responsible for the destructive confirmation.
+    func deletePermanently(_ connection: ManagedConnection) {
+        connections.removeAll { $0.id == connection.id }
+        ConnectionStore.save(connections)
+        ConnectionStore.deleteHistoryDirectory(for: connection.id)
     }
 
     // MARK: - Remote servers

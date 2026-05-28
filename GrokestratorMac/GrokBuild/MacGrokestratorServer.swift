@@ -67,6 +67,7 @@ public actor MacGrokestratorServer {
         case .listInstances:
             instanceListSubscribers.append(clientID)
             let list = await manager.currentInstances()
+                .filter { $0.shared && !$0.archived }    // privacy + archive boundary
             lastBroadcastInstances = list
             await outbox.toClient(.instancesUpdated(list), clientID)
 
@@ -130,6 +131,7 @@ public actor MacGrokestratorServer {
     public func broadcastInstancesIfChanged() async {
         guard listener != nil else { return }
         let list = await manager.currentInstances()
+            .filter { $0.shared && !$0.archived }
         guard list != lastBroadcastInstances else { return }
         lastBroadcastInstances = list
         await listener?.broadcast(.instancesUpdated(list))
