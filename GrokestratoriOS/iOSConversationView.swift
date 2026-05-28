@@ -14,6 +14,7 @@ struct iOSConversationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            iOSConnectingBanner(conversation: conversation)
             transcript
                 .overlay(alignment: .bottom) {
                     if let perm = conversation.pendingPermission {
@@ -312,3 +313,40 @@ struct iOSSlashCommandPopup: View {
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
     }
 }
+
+/// "Connecting to grok…" banner shown at the top of the conversation while
+/// capabilities load. 750 ms grace before reveal so fast inits don't flicker.
+struct iOSConnectingBanner: View {
+    let conversation: ConversationViewModel
+    @State private var visible = false
+
+    var body: some View {
+        Group {
+            if visible {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).tint(Theme.accent)
+                    Text("Connecting to grok…")
+                        .font(Theme.body(12)).foregroundStyle(Theme.textMuted)
+                    Text("(MCP servers can take a moment)")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface)
+                .overlay(Rectangle().frame(height: 1).foregroundStyle(Theme.border), alignment: .bottom)
+                .transition(.opacity)
+            }
+        }
+        .animation(.snappy, value: visible)
+        .task(id: conversation.sessionReady) {
+            if conversation.sessionReady { visible = false; return }
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            if !conversation.sessionReady { visible = true }
+        }
+        .onChange(of: conversation.sessionReady) { _, ready in
+            if ready { visible = false }
+        }
+    }
+}
+

@@ -16,6 +16,7 @@ struct ConversationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ConnectingBanner(conversation: conversation)
             transcript
                 .overlay(alignment: .bottom) {
                     if let perm = conversation.pendingPermission {
@@ -395,3 +396,43 @@ private struct SlashCommandPopup: View {
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
     }
 }
+
+/// "Connecting to grok…" banner shown at the top of the conversation while
+/// `loadCapabilities` is still polling — i.e. before grok answered
+/// `initialize`. A small delay before showing avoids flicker on fast inits.
+/// Disappears the moment capabilities arrive.
+private struct ConnectingBanner: View {
+    let conversation: ConversationViewModel
+    @State private var visible = false
+
+    var body: some View {
+        Group {
+            if visible {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).tint(Theme.accent)
+                    Text("Connecting to grok…")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                    Text("(MCP servers can take a moment on first launch)")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface)
+                .overlay(Rectangle().frame(height: 1).foregroundStyle(Theme.border), alignment: .bottom)
+                .transition(.opacity)
+            }
+        }
+        .animation(.snappy, value: visible)
+        .task(id: conversation.sessionReady) {
+            // If already ready, never show. If not, wait briefly then reveal —
+            // a 750ms grace prevents the banner from flashing on fast inits.
+            if conversation.sessionReady { visible = false; return }
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            if !conversation.sessionReady { visible = true }
+        }
+        .onChange(of: conversation.sessionReady) { _, ready in
+            if ready { visible = false }
+        }
+    }
+}
+
