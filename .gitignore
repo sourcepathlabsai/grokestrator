@@ -29,6 +29,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+scripts/release.env
 
 # Logs
 *.log
