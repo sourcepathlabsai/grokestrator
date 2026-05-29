@@ -24,6 +24,8 @@ struct GrokestratorMacApp: App {
         .commands {
             // Replace the stock about panel with our branded window.
             CommandGroup(replacing: .appInfo) { AboutMenuButton() }
+            // Replace the default (empty) help book item with our own.
+            CommandGroup(replacing: .help) { HelpMenuButton() }
         }
 
         // Branded About window, opened from the app menu above.
@@ -36,6 +38,15 @@ struct GrokestratorMacApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
 
+        // Branded Help window, opened from the Help menu above.
+        Window("Grokestrator Help", id: Self.helpWindowID) {
+            HelpView()
+                .tint(Theme.accent)
+                .preferredColorScheme(.dark)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Settings {
             SettingsView(model: model)
                 .tint(Theme.accent)
@@ -44,6 +55,7 @@ struct GrokestratorMacApp: App {
     }
 
     static let aboutWindowID = "about-grokestrator"
+    static let helpWindowID = "help-grokestrator"
 }
 
 /// The "About Grokestrator" menu item. A tiny view so it can read
@@ -54,5 +66,16 @@ private struct AboutMenuButton: View {
         Button("About Grokestrator") {
             openWindow(id: GrokestratorMacApp.aboutWindowID)
         }
+    }
+}
+
+/// The "Grokestrator Help" menu item — opens the branded `HelpView`.
+private struct HelpMenuButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Grokestrator Help") {
+            openWindow(id: GrokestratorMacApp.helpWindowID)
+        }
+        .keyboardShortcut("?", modifiers: .command)
     }
 }
