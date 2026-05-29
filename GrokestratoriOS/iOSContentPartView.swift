@@ -31,13 +31,29 @@ struct iOSAssistantContentView: View {
                 .foregroundStyle(Theme.textBody)
                 .textSelection(.enabled)
         case .image(let source, let mimeType):
-            iOSImagePartView(source: source, mimeType: mimeType)
+            if case .serverFile(let path) = source {
+                iOSRemoteImagePartView(path: path, mimeType: mimeType)
+            } else {
+                iOSImagePartView(source: source, mimeType: mimeType)
+            }
         case .audio(let source, let mimeType, let name):
-            iOSAudioPartView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                iOSRemoteMediaCard(path: path, mimeType: mimeType, name: name, kind: .audio)
+            } else {
+                iOSAudioPartView(source: source, mimeType: mimeType, name: name)
+            }
         case .video(let source, let mimeType, let name):
-            iOSVideoPartView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                iOSRemoteVideoPartView(path: path, mimeType: mimeType, name: name)
+            } else {
+                iOSVideoPartView(source: source, mimeType: mimeType, name: name)
+            }
         case .file(let source, let mimeType, let name):
-            iOSFilePartView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                iOSRemoteMediaCard(path: path, mimeType: mimeType, name: name, kind: .file)
+            } else {
+                iOSFilePartView(source: source, mimeType: mimeType, name: name)
+            }
         }
     }
 }
@@ -81,6 +97,7 @@ struct iOSImagePartView: View {
         case .inline(let data): return UIImage(data: data)
         case .localFile(let url): return UIImage(contentsOfFile: url.path)
         case .remote: return nil   // remote-image rendering: see fullScreenCover
+        case .serverFile: return nil   // handled by iOSRemoteImagePartView
         }
     }
 
@@ -368,6 +385,195 @@ private struct iOSActivityView: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_: UIActivityViewController, context _: Context) {}
+}
+
+// MARK: - Remote media (`.serverFile`) — fetched from the host via MediaLoader
+
+/// Remote image: shows a downscaled thumbnail immediately, tap loads the full
+/// image and opens the zoomable fullscreen viewer.
+struct iOSRemoteImagePartView: View {
+    let path: String
+    let mimeType: String
+    @Environment(\.mediaLoader) private var loader
+    @State private var thumb: UIImage?
+    @State private var fullData: Data?
+    @State private var showFull = false
+    @State private var state: LoadState = .loading
+
+    private let maxHeight: CGFloat = 260
+
+    var body: some View {
+        Group {
+            if let thumb {
+                Button { Task { await loadFull() } } label: {
+                    Image(uiImage: thumb)
+                        .resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: maxHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+                }
+                .buttonStyle(.plain)
+            } else if state == .failed {
+                iOSMediaPlaceholder(icon: "photo", text: "Image unavailable")
+            } else {
+                iOSMediaPlaceholder(icon: "photo", text: "Loading image…", spinner: true)
+            }
+        }
+        .task { await loadThumb() }
+        .fullScreenCover(isPresented: $showFull) {
+            iOSImageFullscreenView(image: fullData.flatMap(UIImage.init) ?? thumb,
+                                   source: .inline(fullData ?? Data()), mimeType: mimeType)
+        }
+    }
+
+    private func loadThumb() async {
+        guard thumb == nil else { return }
+        guard let loader else { state = .failed; return }
+        if let data = await loader.thumbnail(path: path, maxDimension: 800), let img = UIImage(data: data) {
+            thumb = img; state = .loaded
+        } else { state = .failed }
+    }
+
+    private func loadFull() async {
+        if fullData == nil, let loader {
+            fullData = await loader.full(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        }
+        showFull = true
+    }
+}
+
+/// Remote video: shows a poster frame immediately, tap fetches the full file
+/// and plays it fullscreen.
+struct iOSRemoteVideoPartView: View {
+    let path: String
+    let mimeType: String
+    let name: String
+    @Environment(\.mediaLoader) private var loader
+    @State private var poster: UIImage?
+    @State private var playURL: URL?
+    @State private var loadingFull = false
+    @State private var showPlayer = false
+
+    var body: some View {
+        Button { Task { await play() } } label: {
+            ZStack {
+                if let poster {
+                    Image(uiImage: poster).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    Rectangle().fill(Theme.surfaceSoft).aspectRatio(16.0/9.0, contentMode: .fit)
+                }
+                if loadingFull {
+                    ProgressView().controlSize(.large).tint(.white)
+                } else {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .task { await loadPoster() }
+        .fullScreenCover(isPresented: $showPlayer) {
+            if let playURL { iOSVideoFullscreen(url: playURL) }
+        }
+    }
+
+    private func loadPoster() async {
+        guard poster == nil, let loader else { return }
+        if let data = await loader.thumbnail(path: path, maxDimension: 800) { poster = UIImage(data: data) }
+    }
+
+    private func play() async {
+        guard let loader else { return }
+        if playURL == nil {
+            loadingFull = true
+            playURL = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+            loadingFull = false
+        }
+        if playURL != nil { showPlayer = true }
+    }
+}
+
+/// Remote audio/file card: tap fetches the full file and previews it via
+/// QuickLook (which natively handles PDFs, audio, docs, …).
+struct iOSRemoteMediaCard: View {
+    enum Kind { case audio, file }
+    let path: String
+    let mimeType: String
+    let name: String
+    let kind: Kind
+    @Environment(\.mediaLoader) private var loader
+    @State private var url: URL?
+    @State private var loading = false
+    @State private var showPreview = false
+
+    var body: some View {
+        Button { Task { await activate() } } label: {
+            HStack(spacing: 10) {
+                Image(systemName: loading ? "arrow.down.circle" : (kind == .audio ? "waveform" : "doc"))
+                    .font(.title3).foregroundStyle(Theme.accent).frame(width: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(Theme.body(13, .medium)).foregroundStyle(Theme.textBody).lineLimit(1)
+                    Text(loading ? "Fetching…" : "Tap to open").font(Theme.body(10)).foregroundStyle(Theme.textFaint)
+                }
+                Spacer()
+                if loading { ProgressView().controlSize(.small) }
+                else { Image(systemName: "eye").font(.caption).foregroundStyle(Theme.textFaint) }
+            }
+            .padding(10)
+            .background(Theme.surfaceSoft, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showPreview) { if let url { QuickLookPreview(url: url) } }
+    }
+
+    private func activate() async {
+        guard !loading, let loader else { return }
+        if url == nil {
+            loading = true
+            url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+            loading = false
+        }
+        if url != nil { showPreview = true }
+    }
+}
+
+private enum LoadState: Equatable { case loading, loaded, failed }
+
+/// Fullscreen video player with a Done button (used by remote video).
+private struct iOSVideoFullscreen: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            VideoPlayerWrapper(url: url).ignoresSafeArea()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.85))
+            }
+            .padding()
+        }
+    }
+}
+
+/// Small inline placeholder card for loading / unavailable remote media.
+private struct iOSMediaPlaceholder: View {
+    let icon: String
+    let text: String
+    var spinner: Bool = false
+    var body: some View {
+        HStack(spacing: 8) {
+            if spinner { ProgressView().controlSize(.small) }
+            else { Image(systemName: icon).foregroundStyle(Theme.textFaint) }
+            Text(text).font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceSoft, in: RoundedRectangle(cornerRadius: 8))
+    }
 }
 
 // MARK: - Helpers

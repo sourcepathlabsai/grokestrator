@@ -51,4 +51,11 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
     public func clearHistory() async {
         try? await session.clearHistory()
     }
+
+    // Remote host: artifacts live on the other machine; fetch them over the wire.
+    public var resolvesMediaRemotely: Bool { true }
+
+    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
+        await session.fetchMedia(path: path, maxDimension: maxDimension)
+    }
 }

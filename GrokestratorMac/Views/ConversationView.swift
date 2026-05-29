@@ -40,6 +40,7 @@ struct ConversationView: View {
         }
         .navigationTitle(instance.name)
         .navigationSubtitle(instance.status.rawValue)
+        .environment(\.mediaLoader, conversation.mediaLoader)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

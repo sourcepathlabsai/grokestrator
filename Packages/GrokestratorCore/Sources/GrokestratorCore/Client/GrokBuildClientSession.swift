@@ -38,6 +38,10 @@ public actor GrokBuildClientSession {
     private var capContinuation: CheckedContinuation<AgentCapabilities, Never>?
     private var usageContinuation: CheckedContinuation<SessionUsage, Never>?
 
+    /// In-flight media fetches, keyed by requestID. Resolved by the matching
+    /// `mediaData` event or by a per-request timeout (both resolve, never throw).
+    private var mediaContinuations: [UUID: CheckedContinuation<(data: Data, mimeType: String)?, Never>] = [:]
+
     // MARK: - Initialization
 
     /// Optional callback used to register active prompts with the parent client
@@ -209,6 +213,38 @@ public actor GrokBuildClientSession {
         return result
     }
 
+    /// Fetches a media artifact's bytes from the host. `maxDimension != nil`
+    /// requests a thumbnail/poster bounded to that pixel size; `nil` requests
+    /// the full file. Returns `nil` on missing file, size-cap, or timeout — the
+    /// UI shows a placeholder rather than hanging. Timeout is generous for full
+    /// fetches (large videos over Tailscale) and short for thumbnails.
+    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
+        guard isValid else { return nil }
+        let requestID = UUID()
+        do {
+            try await sendRequest(.grokBuild(.fetchMedia(
+                instanceID: instanceID, path: path, maxDimension: maxDimension, requestID: requestID
+            )))
+        } catch { return nil }
+
+        let timeout: Double = maxDimension == nil ? 120 : 20
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            await self?.resolveMedia(requestID, with: nil)
+        }
+        let result = await withCheckedContinuation { (cont: CheckedContinuation<(data: Data, mimeType: String)?, Never>) in
+            self.mediaContinuations[requestID] = cont
+        }
+        watchdog.cancel()
+        return result
+    }
+
+    private func resolveMedia(_ requestID: UUID, with value: (data: Data, mimeType: String)?) {
+        if let cont = mediaContinuations.removeValue(forKey: requestID) {
+            cont.resume(returning: value)
+        }
+    }
+
     private func resolveCapabilitiesWithCache() {
         if let cont = capContinuation {
             capContinuation = nil
@@ -271,6 +307,14 @@ public actor GrokBuildClientSession {
                 cont.resume(returning: usage)
             }
 
+        case .mediaData(let instID, let requestID, let data, let mime):
+            guard instID == instanceID else { return }
+            if let data, let mime {
+                resolveMedia(requestID, with: (data: data, mimeType: mime))
+            } else {
+                resolveMedia(requestID, with: nil)
+            }
+
         case .error(let instID, _, let message):
             // Surface server-side failures (e.g. a prompt the Mac couldn't
             // start) to the conversation so the UI shows them and clears the
@@ -303,6 +347,9 @@ public actor GrokBuildClientSession {
         broadcastSubscribers.removeAll()
         activePrompts.removeAll()
         pendingToolCallsByPrompt.removeAll()
+        // Fail any in-flight media fetches so their awaiters don't hang.
+        for (_, cont) in mediaContinuations { cont.resume(returning: nil) }
+        mediaContinuations.removeAll()
     }
 }
 
