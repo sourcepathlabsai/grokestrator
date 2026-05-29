@@ -276,6 +276,23 @@ final class GrokestratorModel {
         ConnectionStore.deleteHistoryDirectory(for: connection.id)
     }
 
+    /// One-step permanent delete of a *live* (non-archived) local Connection —
+    /// the destructive alternative to `archive`. Stops its process, removes it
+    /// from the sidebar, fixes selection, and drops its config + history dir.
+    /// Caller (the UI) owns the destructive confirmation. (Archived entries use
+    /// `deletePermanently` directly from the Archived sheet.)
+    func delete(_ item: InstanceItem) {
+        guard let connection = connections.first(where: { $0.id == item.id }) else { return }
+        let server = self.server
+        Task {
+            await manager.stopInstance(id: item.id)
+            await server.broadcastInstancesIfChanged()
+        }
+        instances.removeAll { $0.id == item.id }
+        if selectedInstanceID == item.id { selectedInstanceID = instances.first?.id }
+        deletePermanently(connection)
+    }
+
     // MARK: - Remote servers
 
     /// Saves a new remote server, connects to it, and adds any returned

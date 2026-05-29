@@ -146,6 +146,14 @@ public actor MacGrokestratorServer {
             // pressed the button).
             await manager.cancelPrompt(for: instanceID)
 
+        case .clearHistory(let instanceID):
+            // A client (this Mac or a remote iPad) asked to wipe the transcript.
+            // The manager clears the persisted history and broadcasts an empty
+            // snapshot, which the subscribe forwarder above relays to every
+            // connected device as a `historySnapshot([])` — so all transcripts
+            // reset together.
+            await manager.clearHistory(for: instanceID)
+
         case .sendToolResult, .getPromptState:
             // Not exercised by the MVP client; safe to ignore.
             break

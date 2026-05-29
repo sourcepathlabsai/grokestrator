@@ -11,6 +11,9 @@ struct ConversationView: View {
     /// Owned by the view so we can programmatically focus the field when the
     /// inspector inserts a command via double-click.
     @FocusState private var composerFocused: Bool
+    /// Drives the "clear chat history" confirmation — wiping is destructive and
+    /// hits every connected device, so we always confirm first.
+    @State private var confirmingClear = false
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -37,6 +40,27 @@ struct ConversationView: View {
         }
         .navigationTitle(instance.name)
         .navigationSubtitle(instance.status.rawValue)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    confirmingClear = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Clear this conversation's chat history")
+                .disabled(conversation.entries.isEmpty)
+            }
+        }
+        .confirmationDialog(
+            "Clear chat history?",
+            isPresented: $confirmingClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) { conversation.clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently erases the transcript for “\(instance.name)” on every connected device. The grok process keeps running.")
+        }
         .task {
             conversation.loadCapabilities()
             conversation.refreshUsage()

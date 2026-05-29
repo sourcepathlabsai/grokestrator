@@ -33,6 +33,10 @@ public protocol ConversationDriver: Sendable {
 
     /// Token / context usage for the session (inspector).
     func usage() async -> SessionUsage?
+
+    /// Wipe the Connection's chat history. The cleared state arrives back as an
+    /// empty `.snapshot` over `subscribe()`, so every connected device resets.
+    func clearHistory() async
 }
 
 #if os(macOS)
@@ -93,6 +97,10 @@ public struct LiveConversationDriver: ConversationDriver {
 
     public func usage() async -> SessionUsage? {
         await manager.usage(for: instanceID)
+    }
+
+    public func clearHistory() async {
+        await manager.clearHistory(for: instanceID)
     }
 }
 #endif

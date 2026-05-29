@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import GrokestratorCore
 
 /// Sheet for adding a local Connection — a `grok agent stdio` instance the
@@ -47,8 +48,29 @@ struct AddConnectionView: View {
                     .font(.system(.body, design: .monospaced))
                 TextField("Arguments", text: $argumentsText)
                     .font(.system(.body, design: .monospaced))
-                TextField("Working directory (optional)", text: $workingDirectory)
-                    .font(.system(.body, design: .monospaced))
+                LabeledContent("Working directory (optional)") {
+                    HStack(spacing: 4) {
+                        TextField("", text: $workingDirectory, prompt: Text("optional"))
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(workingDirectoryIsValid ? Color.primary : Color.red)
+                        Button {
+                            selectWorkingDirectory()
+                        } label: {
+                            Image(systemName: "folder")
+                                .font(.system(size: 13))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("Choose a directory")
+                    }
+                }
+                if !workingDirectoryIsValid {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        Text("No such directory — grok can't launch here. Pick or fix the path.")
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                }
                 Text("`grok agent stdio` runs the agent over stdio — the mode this app talks to.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -105,7 +127,28 @@ struct AddConnectionView: View {
     private var isAddDisabled: Bool {
         if command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
         if activeCollision != nil { return true }
+        if !workingDirectoryIsValid { return true }
         return false
+    }
+
+    /// Trimmed, tilde-expanded working directory, or `nil` when the field is
+    /// blank (cwd is optional). Used both for validation and for the value
+    /// actually handed to the launcher, so a typed `~/foo` resolves the same
+    /// way the directory picker would write it.
+    private var resolvedWorkingDirectory: String? {
+        let trimmed = workingDirectory.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
+    /// `true` when the field is blank or names an existing directory. A
+    /// non-empty value that isn't a real directory is invalid — grok would
+    /// fail to spawn there — so we turn the field red and block Add rather
+    /// than let the launch fail after the fact.
+    private var workingDirectoryIsValid: Bool {
+        guard let path = resolvedWorkingDirectory else { return true }
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
     }
 
     private var archivedConfirmBinding: Binding<Bool> {
@@ -143,9 +186,8 @@ struct AddConnectionView: View {
 
     private func performAdd() {
         let args = argumentsText.split(separator: " ").map(String.init)
-        let cwd = workingDirectory.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workingDirectory
         model.addRealConnection(name: finalName, command: command, arguments: args,
-                                workingDirectory: cwd, autoRestart: autoRestart, shared: shared)
+                                workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared)
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not
@@ -155,5 +197,36 @@ struct AddConnectionView: View {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".grok/bin/grok")
             .path
+    }
+
+    // MARK: - Directory picker
+
+    private func selectWorkingDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select the working directory for this connection."
+
+        // Seed the panel location from the current field value if valid.
+        let trimmed = workingDirectory.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            let expanded = (trimmed as NSString).expandingTildeInPath
+            let url = URL(fileURLWithPath: expanded)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                panel.directoryURL = url
+            } else {
+                panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+            }
+        } else {
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            workingDirectory = url.path
+        }
     }
 }

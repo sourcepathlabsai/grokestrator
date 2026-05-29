@@ -38,6 +38,15 @@ public actor AgentConversationHistory {
         try data.write(to: url, options: .atomic)
     }
 
+    /// Wipes all stored history — both finalized turns and any in-progress turn.
+    /// Used by the "clear chat history" action; callers persist the empty state
+    /// via `save()` afterward.
+    public func clearHistory() {
+        turns = []
+        currentTurnMessages = []
+        currentPrompt = nil
+    }
+
     /// Call when the user sends a new prompt.
     public func startNewTurn(prompt: String) {
         if !currentTurnMessages.isEmpty || currentPrompt != nil {
@@ -54,8 +63,12 @@ public actor AgentConversationHistory {
             let role: AgentMessage.Role = (m.role == "user") ? .user : .assistant
             currentTurnMessages.append(AgentMessage(role: role, content: m.content, metadata: m.metadata))
 
-        case .thought(let t):
-            currentTurnMessages.append(AgentMessage(role: .assistant, content: "[thought] \(t.content)", metadata: t.metadata))
+        case .thought:
+            // Thoughts are ephemeral: shown live while the agent is working, then
+            // erased once the final answer lands (see ConversationViewModel's
+            // turnComplete handling). We deliberately do NOT persist them, so a
+            // reloaded transcript stays clean — only prompts and answers survive.
+            break
 
         case .toolCall(let t):
             let content = "Tool call: \(t.toolName) \(t.arguments ?? [:])"

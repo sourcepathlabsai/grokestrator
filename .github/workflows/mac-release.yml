@@ -1,0 +1,71 @@
+name: Mac Unsigned Release
+
+# Builds a distributable (un-notarized) macOS DMG and publishes it.
+#
+#   • Push a tag like  v0.1.0       → builds + attaches the DMG to a GitHub Release.
+#   • Run manually (workflow_dispatch) → builds + uploads the DMG as a workflow
+#     artifact you can download, without cutting a release.
+#
+# No signing secrets are required — this is the ad-hoc/unsigned path, so it
+# works the moment the repo exists. Recipients clear Gatekeeper once (the DMG
+# ships with "How to open Grokestrator.txt"). When the paid Apple Developer
+# account is ready, add APPLE_TEAM_ID + a notary profile and the existing
+# scripts/build-mac-release.sh switches to the signed+notarized path.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Marketing version (optional; overrides project.yml)'
+        required: false
+
+permissions:
+  contents: write   # create releases + upload assets
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install build tools
+        # xcbeautify keeps the archive from being run twice (the script falls
+        # back to a second plain xcodebuild if the pretty-printer is absent).
+        run: brew install xcodegen xcbeautify
+
+      - name: Build unsigned DMG
+        run: |
+          ARGS=(--unsigned --clean)
+          if [[ -n "${{ github.event.inputs.version }}" ]]; then
+            ARGS+=(--version "${{ github.event.inputs.version }}")
+          fi
+          scripts/build-mac-release.sh "${ARGS[@]}"
+
+      - name: Locate DMG
+        id: dmg
+        run: |
+          path=$(ls build/mac-release/Grokestrator-*-unsigned.dmg | head -1)
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$path")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dmg.outputs.name }}
+          path: ${{ steps.dmg.outputs.path }}
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES=$'Unsigned macOS build (not yet notarized).\n\nFirst launch needs a one-time Gatekeeper override — see **How to open Grokestrator.txt** inside the DMG, or run:\n\n```\nxattr -dr com.apple.quarantine /Applications/Grokestrator.app\n```'
+          gh release create "${{ github.ref_name }}" "${{ steps.dmg.outputs.path }}" \
+            --title "Grokestrator ${{ github.ref_name }}" \
+            --notes "$NOTES" \
+          || gh release upload "${{ github.ref_name }}" "${{ steps.dmg.outputs.path }}" --clobber

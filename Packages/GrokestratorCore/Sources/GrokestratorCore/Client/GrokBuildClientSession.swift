@@ -138,6 +138,14 @@ public actor GrokBuildClientSession {
         try? await sendRequest(.grokBuild(.cancelPrompt(instanceID: instanceID, promptID: promptID)))
     }
 
+    /// Asks the server to wipe this Connection's chat history. Best-effort and
+    /// fire-and-forget: the server clears the transcript and pushes an empty
+    /// `historySnapshot`, which arrives via `subscribe()` and resets the UI.
+    public func clearHistory() async throws {
+        guard isValid else { throw GrokestratorError.sessionInvalidated }
+        try? await sendRequest(.grokBuild(.clearHistory(instanceID: instanceID)))
+    }
+
     /// Returns the currently known pending tool calls for a given prompt (best-effort).
     public func pendingToolCalls(for promptID: UUID) -> [ToolCallInfo] {
         pendingToolCallsByPrompt[promptID] ?? []

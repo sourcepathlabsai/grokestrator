@@ -219,6 +219,16 @@ final class ConversationViewModel {
         Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
     }
 
+    /// Clears the Connection's chat history. Fire-and-forget: the driver wipes
+    /// the stored transcript and the cleared state arrives back as an empty
+    /// `.snapshot` over the active subscription (`replay([])`), so this view and
+    /// every other connected device reset together. We don't mutate `entries`
+    /// directly here — letting the snapshot drive it keeps all clients in sync.
+    func clearHistory() {
+        let driver = self.driver
+        Task { await driver.clearHistory() }
+    }
+
     /// Soft-cancel: clears local streaming state. The subscription itself is
     /// owned by the view's `.task(id:)` and is auto-cancelled when the view
     /// goes away, dropping the server-side broadcaster registration cleanly.
@@ -265,6 +275,11 @@ final class ConversationViewModel {
         case .turnComplete:
             endStreaming()
             isStreaming = false
+            // Ephemeral thoughts: the final answer has landed, so erase the
+            // turn's thinking — it was shown live while the agent worked, but
+            // it's noise once the answer is here. (History never persisted it,
+            // so a reload is already clean; this clears the live transcript.)
+            entries.removeAll { if case .thought = $0.kind { return true } else { return false } }
             appendEntry(.update(update))
             refreshUsage()
         default:

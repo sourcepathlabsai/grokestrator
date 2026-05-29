@@ -8,6 +8,8 @@ struct SidebarView: View {
     @State private var showingAdd = false
     @State private var showingAddRemote = false
     @State private var showingArchived = false
+    /// Live Connection awaiting a permanent-delete confirmation (nil ⇒ none).
+    @State private var pendingDelete: InstanceItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,10 +30,12 @@ struct SidebarView: View {
                                         if instance.status == .running || instance.status == .starting {
                                             Button("Stop") { model.stop(instance) }
                                         }
-                                        // Archive is only meaningful for local Connections — remote
-                                        // instances are managed by their owning server.
+                                        // Archive + permanent delete are only meaningful for local
+                                        // Connections — remote instances are managed by their server.
                                         if instance.serverID == nil {
                                             Button("Archive") { model.archive(instance) }
+                                            Divider()
+                                            Button("Delete…", role: .destructive) { pendingDelete = instance }
                                         }
                                     }
                             }
@@ -65,6 +69,20 @@ struct SidebarView: View {
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
+        .confirmationDialog(
+            "Delete “\(pendingDelete?.name ?? "")” permanently?",
+            isPresented: Binding(get: { pendingDelete != nil },
+                                 set: { if !$0 { pendingDelete = nil } }),
+            presenting: pendingDelete
+        ) { item in
+            Button("Delete Permanently", role: .destructive) {
+                model.delete(item)
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("This stops the connection and erases its config and entire chat history. This can't be undone. To keep it recoverable, Archive instead.")
+        }
     }
 
     /// Footer button revealing the archived Connections sheet. Hidden when nothing

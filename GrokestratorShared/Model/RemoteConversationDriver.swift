@@ -47,4 +47,8 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
     public func usage() async -> SessionUsage? {
         await session.getUsage()
     }
+
+    public func clearHistory() async {
+        try? await session.clearHistory()
+    }
 }
