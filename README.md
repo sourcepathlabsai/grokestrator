@@ -119,4 +119,4 @@ Early access. The model is solid; rough edges remain. File issues for anything t
 
 ## License
 
-To be decided before signed binaries ship. The repository is currently provided for evaluation and contribution; no warranty.
+[MIT](LICENSE) © 2026 SourcePath Labs. Provided as-is, without warranty.
