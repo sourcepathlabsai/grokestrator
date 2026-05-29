@@ -11,12 +11,13 @@
 #      ticket. The output DMG is fully Gatekeeper-acceptable and can be
 #      handed to end users.
 #
-#   2. DRY-RUN (no cert yet): If the env vars are not set, the script
-#      ad-hoc-signs the .app (the same Debug-build signing Xcode uses
-#      locally), skips notarization, and labels the DMG
-#      "Grokestrator-X.Y.Z-DRY-RUN.dmg". This proves the whole pipeline
-#      works (archive, export, DMG packaging) without requiring a cert.
-#      The resulting DMG will NOT pass Gatekeeper on other Macs.
+#   2. UNSIGNED (no cert yet): If the env vars are not set (or --unsigned is
+#      passed), the script ad-hoc-signs the .app and packages a real,
+#      distributable "Grokestrator-X.Y.Z-unsigned.dmg" with first-launch
+#      install instructions bundled inside. This is a genuine Mac-to-Mac
+#      release — recipients just clear Gatekeeper once (see the bundled
+#      "How to open Grokestrator.txt"). It is NOT notarized, so the first
+#      launch shows a Gatekeeper warning that must be overridden manually.
 #
 # Configuration: copy scripts/release.env.example to scripts/release.env
 # and fill in the values for the SIGNED mode. release.env is gitignored.
@@ -24,6 +25,7 @@
 # Usage:
 #   scripts/build-mac-release.sh                    # release.env-driven
 #   scripts/build-mac-release.sh --version 0.2.0    # override version
+#   scripts/build-mac-release.sh --unsigned         # force unsigned even if creds set
 #   scripts/build-mac-release.sh --clean            # nuke build/ first
 
 set -euo pipefail
@@ -46,6 +48,7 @@ PROJECT="Grokestrator.xcodeproj"
 
 CLEAN=0
 VERSION_OVERRIDE=""
+FORCE_UNSIGNED=0
 
 # Pull credentials/team from release.env if present. Anything already set in
 # the shell env wins (CI override).
@@ -61,6 +64,7 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version)   VERSION_OVERRIDE="$2"; shift 2 ;;
+    --unsigned)  FORCE_UNSIGNED=1; shift ;;
     --clean)     CLEAN=1; shift ;;
     -h|--help)
       sed -n '2,30p' "$0"; exit 0 ;;
@@ -95,9 +99,10 @@ require_cmd hdiutil
 require_cmd codesign
 require_cmd plutil
 
-# Decide mode.
+# Decide mode. Signing creds trigger SIGNED; --unsigned forces UNSIGNED even
+# when creds are present (handy for a quick public build before notarization).
 SIGNED_MODE=0
-if [[ -n "${APPLE_TEAM_ID:-}" && -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+if [[ -n "${APPLE_TEAM_ID:-}" && -n "${NOTARY_KEYCHAIN_PROFILE:-}" && "$FORCE_UNSIGNED" -eq 0 ]]; then
   SIGNED_MODE=1
 fi
 
@@ -115,9 +120,10 @@ if [[ "$SIGNED_MODE" -eq 1 ]]; then
   DMG_NAME="Grokestrator-$VERSION.dmg"
   log "Build mode: SIGNED + NOTARIZED  (team=$APPLE_TEAM_ID, version=$VERSION)"
 else
-  DMG_NAME="Grokestrator-$VERSION-DRY-RUN.dmg"
-  warn "Build mode: DRY-RUN  (no APPLE_TEAM_ID / NOTARY_KEYCHAIN_PROFILE set)"
-  warn "Output DMG will NOT pass Gatekeeper on other Macs."
+  DMG_NAME="Grokestrator-$VERSION-unsigned.dmg"
+  warn "Build mode: UNSIGNED  (no Developer ID / notarization)"
+  warn "Distributable Mac-to-Mac, but the first launch needs a one-time"
+  warn "Gatekeeper override — install steps are bundled in the DMG."
 fi
 
 # ---------------------------------------------------------------------------
@@ -233,6 +239,45 @@ mkdir -p "$DMG_STAGE_DIR"
 cp -R "$APP_PATH" "$DMG_STAGE_DIR/"
 ln -s /Applications "$DMG_STAGE_DIR/Applications"
 
+# Unsigned builds: bundle first-launch instructions so recipients aren't
+# stranded at the Gatekeeper warning. (Signed+notarized builds open cleanly,
+# so no note is needed there.)
+if [[ "$SIGNED_MODE" -ne 1 ]]; then
+  cat > "$DMG_STAGE_DIR/How to open Grokestrator.txt" <<'EOF'
+Opening Grokestrator — first launch only
+=========================================
+
+Grokestrator isn't notarized by Apple yet, so macOS Gatekeeper blocks the
+very first launch with a scary-looking warning. This is expected for a
+direct (non–App Store) download. You only have to do this once.
+
+Step 1 — Install
+  Drag Grokestrator onto the Applications folder in this window.
+
+Step 2 — Open it once via Settings (macOS 13–15)
+  1. Double-click Grokestrator in Applications. macOS will refuse and say it
+     "cannot be opened because Apple cannot check it for malicious software."
+     Click "Done."
+  2. Open  System Settings → Privacy & Security.
+  3. Scroll down. You'll see: "Grokestrator was blocked to protect your Mac."
+     Click  "Open Anyway."
+  4. Confirm with Touch ID / your password, then click "Open" in the dialog.
+  Grokestrator now launches normally every time.
+
+Faster, if you're comfortable in Terminal
+  Run this once, then open the app normally:
+     xattr -dr com.apple.quarantine /Applications/Grokestrator.app
+
+Why the warning?
+  It just means the app hasn't been through Apple's paid notarization
+  service yet — not that anything is wrong. A notarized build (no warning,
+  one-click open) is coming.
+
+— SourcePath Labs
+EOF
+  ok "Bundled first-launch instructions into the DMG"
+fi
+
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 rm -f "$DMG_PATH"
 hdiutil create \
@@ -275,6 +320,8 @@ echo
 if [[ "$SIGNED_MODE" -eq 1 ]]; then
   echo "Distribute via:  upload to GitHub Releases, sourcepathlabs.ai, etc."
 else
-  echo "DRY-RUN mode — DMG is not Gatekeeper-acceptable. Set APPLE_TEAM_ID and"
-  echo "NOTARY_KEYCHAIN_PROFILE in $ENV_FILE to produce a real release."
+  echo "UNSIGNED release — ready to share Mac-to-Mac (GitHub Releases, direct link)."
+  echo "Recipients clear Gatekeeper once; steps are in the DMG's"
+  echo "\"How to open Grokestrator.txt\". For a one-click, no-warning install,"
+  echo "set APPLE_TEAM_ID + NOTARY_KEYCHAIN_PROFILE in $ENV_FILE to notarize."
 fi
