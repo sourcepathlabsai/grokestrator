@@ -400,6 +400,7 @@ public actor GrokBuildClientSession {
 
         case .mediaData(let instID, let requestID, let chunk):
             guard instID == instanceID else { return }
+            mediaLog.info("rx mediaData seq=\(chunk?.sequence ?? -1) final=\(chunk?.isFinal ?? false) known=\(self.transfers[requestID] != nil)")
             // Ignore late chunks for a transfer we already finished/abandoned —
             // and tell the server to stop streaming it (saves wasted upload).
             guard transfers[requestID] != nil else {
