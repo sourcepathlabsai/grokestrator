@@ -287,10 +287,20 @@ struct iOSVideoPartView: View {
 
 private struct VideoPlayerWrapper: UIViewControllerRepresentable {
     let url: URL
+    /// Auto-play on present (fullscreen remote video). Inline previews can leave
+    /// it false so they don't start playing unbidden.
+    var autoplay: Bool = false
     func makeUIViewController(context _: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
-        vc.player = AVPlayer(url: url)
+        let player = AVPlayer(url: url)
+        vc.player = player
         vc.allowsPictureInPicturePlayback = true
+        if autoplay {
+            // Make sure audio plays even if the device is on silent.
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player.play()
+        }
         return vc
     }
     func updateUIViewController(_: AVPlayerViewController, context _: Context) {}
@@ -444,30 +454,27 @@ struct iOSRemoteImagePartView: View {
 
 /// Remote video: shows a poster frame immediately, tap fetches the full file
 /// and plays it fullscreen.
+private struct VideoItem: Identifiable { let id = UUID(); let url: URL }
+
 struct iOSRemoteVideoPartView: View {
     let path: String
     let mimeType: String
     let name: String
     @Environment(\.mediaLoader) private var loader
     @State private var poster: UIImage?
-    @State private var playURL: URL?
-    @State private var loadingFull = false
-    @State private var showPlayer = false
+    @State private var playItem: VideoItem?
+    @State private var failed = false
 
     var body: some View {
-        Button { Task { await play() } } label: {
+        Button { play() } label: {
             ZStack {
                 if let poster {
                     Image(uiImage: poster).resizable().aspectRatio(contentMode: .fit)
                 } else {
                     Rectangle().fill(Theme.surfaceSoft).aspectRatio(16.0/9.0, contentMode: .fit)
                 }
-                if loadingFull {
-                    ProgressView().controlSize(.large).tint(.white)
-                } else {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
-                }
+                Image(systemName: failed ? "exclamationmark.triangle.fill" : "play.circle.fill")
+                    .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
             }
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -475,9 +482,8 @@ struct iOSRemoteVideoPartView: View {
         }
         .buttonStyle(.plain)
         .task { await loadPoster() }
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let playURL { iOSVideoFullscreen(url: playURL) }
-        }
+        // Item-driven so the player presents reliably (no isPresented/if-let race).
+        .fullScreenCover(item: $playItem) { item in iOSVideoFullscreen(url: item.url) }
     }
 
     private func loadPoster() async {
@@ -485,14 +491,12 @@ struct iOSRemoteVideoPartView: View {
         if let data = await loader.thumbnail(path: path, maxDimension: 800) { poster = UIImage(data: data) }
     }
 
-    private func play() async {
-        guard let loader else { return }
-        if playURL == nil {
-            loadingFull = true
-            playURL = await loader.fullFileURL(path: path)
-            loadingFull = false
-        }
-        if playURL != nil { showPlayer = true }
+    private func play() {
+        // Stream over HTTP: hand AVPlayer the host's media-server URL and let it
+        // buffer/seek natively. No chunked transfer (which deadlocked + stalled).
+        guard let url = loader?.streamURL(path: path) else { failed = true; return }
+        failed = false
+        playItem = VideoItem(url: url)
     }
 }
 
@@ -550,7 +554,7 @@ private struct iOSVideoFullscreen: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            VideoPlayerWrapper(url: url).ignoresSafeArea()
+            VideoPlayerWrapper(url: url, autoplay: true).ignoresSafeArea()
             Button { dismiss() } label: {
                 Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.85))
             }

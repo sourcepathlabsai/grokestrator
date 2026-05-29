@@ -1,5 +1,8 @@
 import Foundation
 import Network
+import os
+
+private let netLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "net")
 
 /// Server-side counterpart of `NetworkGrokestratorTransport`. Accepts inbound
 /// TCP connections on a configurable port, parses incoming `GrokestratorMessage`
@@ -163,7 +166,10 @@ private actor ClientConnection {
 
     func send(_ frame: Data) async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            connection.send(content: frame, completion: .contentProcessed { _ in cont.resume() })
+            connection.send(content: frame, completion: .contentProcessed { error in
+                if let error { netLog.error("client.send FAILED \(frame.count)B: \(String(describing: error), privacy: .public)") }
+                cont.resume()
+            })
         }
     }
 

@@ -80,6 +80,9 @@ public final class RemoteServerLink: Identifiable {
     public private(set) var instances: [ManagedInstance] = []
     /// Which address actually connected ("LAN" or "Tailscale"), for the UI.
     public private(set) var activePath: String?
+    /// The actual host (IP/MagicDNS) that connected — used to address the
+    /// host's media HTTP server.
+    public private(set) var activeHostName: String?
 
     private let client: GrokestratorClient
     private var transport: NetworkGrokestratorTransport?
@@ -121,6 +124,7 @@ public final class RemoteServerLink: Identifiable {
 
             transport = t
             activePath = cand.label
+            activeHostName = cand.host
             let address = ServerAddress(name: config.name, tailscaleAddress: cand.host, port: Int(config.port))
             let session = await client.addServer(address, displayName: config.name, transport: t)
             serverSession = session
@@ -140,6 +144,7 @@ public final class RemoteServerLink: Identifiable {
         await transport?.disconnect()
         transport = nil
         activePath = nil
+        activeHostName = nil
         state = .disconnected
         instances = []
     }
@@ -150,7 +155,10 @@ public final class RemoteServerLink: Identifiable {
     public func driver(for instanceID: UUID) async -> RemoteConversationDriver? {
         guard let session = serverSession else { return nil }
         let buildSession = await client.grokBuildSession(for: instanceID, on: session)
-        return RemoteConversationDriver(session: buildSession)
+        // Media HTTP server runs on control port + 1, on whichever host connected.
+        let host = activeHostName ?? config.host
+        let mediaBase = URL(string: "http://\(host):\(config.port &+ 1)")
+        return RemoteConversationDriver(session: buildSession, mediaBaseURL: mediaBase)
     }
 
     // MARK: - Private

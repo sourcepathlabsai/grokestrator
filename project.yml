@@ -78,16 +78,24 @@ targets:
         DEVELOPMENT_TEAM: GS8DPK5RPN
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        # iOS treats Tailscale (100.64.0.0/10 + MagicDNS) as local network,
-        # so the system shows a one-time permission dialog the first time
-        # we try to reach the host Mac. Without a usage description, the
-        # dialog has no explanation and users tend to deny.
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Grokestrator connects to your Mac over Tailscale to drive grok sessions remotely."
-        # Same crypto + category posture as the Mac target.
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
+    # Explicit Info.plist (not GENERATE_INFOPLIST_FILE) so we can declare the
+    # nested NSAppTransportSecurity dict — needed because media now streams from
+    # the Mac's media server over plain HTTP (AVPlayer), which ATS blocks by
+    # default. The Tailscale/LAN tunnel is the trust boundary.
+    info:
+      path: GrokestratoriOS/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: "Grokestrator connects to your Mac over Tailscale to drive grok sessions remotely."
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

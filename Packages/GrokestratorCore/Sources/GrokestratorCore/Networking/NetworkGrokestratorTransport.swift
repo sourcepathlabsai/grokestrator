@@ -15,8 +15,10 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
     private let serverID: UUID
     private var connection: NWConnection?
     private var eventHandler: (@Sendable (GrokestratorEvent, UUID) async -> Void)?
-    private var buffer = LineFrameBuffer()
     private var readerTask: Task<Void, Never>?
+    /// Frames are pushed here by the socket reader and consumed by a separate
+    /// task, so decoding/dispatch never backpressures (or stalls) socket reads.
+    private var framesContinuation: AsyncStream<Data>.Continuation?
 
     /// Creates a transport bound to a single remote server. `serverID` is the
     /// `MultiServerSession.id` the parent `GrokestratorClient` uses for routing.
@@ -58,6 +60,8 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
     public func disconnect() async {
         readerTask?.cancel()
         readerTask = nil
+        framesContinuation?.finish()
+        framesContinuation = nil
         connection?.cancel()
         connection = nil
     }
@@ -79,44 +83,83 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
 
     // MARK: - Receive loop
 
-    /// Schedules repeated receives on the connection, feeding bytes into the
-    /// frame buffer and dispatching decoded events to the handler.
+    /// Two decoupled tasks: a **reader** that drains the socket as fast as bytes
+    /// arrive (only ever buffering + emitting frames — never awaiting downstream
+    /// work), and a **consumer** that decodes + dispatches frames at its own
+    /// pace. Decoupling matters for bulk transfers (e.g. streamed media): if
+    /// decode/dispatch is even slightly slower than the network, an inline loop
+    /// backpressures the socket and the sender stalls — which is exactly why a
+    /// large file used to die after the first chunk.
     private func startReceiveLoop(_ connection: NWConnection) {
-        readerTask = Task { [weak self, serverID] in
+        let (frameStream, cont) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        framesContinuation = cont
+        let serverID = self.serverID
+
+        // Consumer: decode + dispatch at its own pace (actor-isolated).
+        Task { [weak self] in
+            for await frame in frameStream {
+                await self?.dispatch(frame, serverID: serverID)
+            }
+        }
+
+        // Reader: a *pure* socket drain — a LOCAL frame buffer + the Sendable
+        // stream continuation, touching neither the actor nor downstream work.
+        // This is the crucial bit: an earlier version routed each chunk through
+        // an actor method, which serialized with the consumer and let the TCP
+        // window fill (sender stalled after ~1 chunk on a fast link). Reading on
+        // its own keeps the window open so bulk transfers stream at full speed.
+        readerTask = Task {
+            var buffer = LineFrameBuffer()
+            defer { cont.finish() }
             while !Task.isCancelled {
-                let chunk: Data
+                let result: (data: Data, done: Bool)
                 do {
-                    chunk = try await Self.receive(on: connection)
+                    result = try await Self.receive(on: connection)
                 } catch {
-                    await self?.eventHandler?(.error(.transportError(error.localizedDescription)), serverID)
-                    return
+                    cont.yield(Self.errorFrame(error))
+                    break
                 }
-                if chunk.isEmpty { return }   // EOF
-                await self?.handleBytes(chunk, serverID: serverID)
+                if !result.data.isEmpty {
+                    for frame in buffer.append(result.data) { cont.yield(frame) }
+                }
+                if result.done { break }   // genuine EOF (isComplete) — NOT a spurious empty read
             }
         }
     }
 
-    private func handleBytes(_ chunk: Data, serverID: UUID) async {
-        let frames = buffer.append(chunk)
-        for frame in frames {
-            guard let message = try? LineFramedJSONCodec.decode(frame) else { continue }
-            if case .event(let event) = message.payload {
-                await eventHandler?(event, serverID)
-            }
-            // Responses are not delivered through this transport's event handler;
-            // the current protocol uses events for streaming + caps/usage delivery.
-        }
+    /// Sentinel frame the reader emits on a transport error, decoded by the
+    /// consumer into a `.serverError` event (so the reader never has to await
+    /// the actor).
+    private static let errorFramePrefix = "\u{0}GKERR\u{0}"
+    private static func errorFrame(_ error: Error) -> Data {
+        Data((errorFramePrefix + error.localizedDescription).utf8)
     }
 
-    /// One-shot bridge from NWConnection's callback API to async.
-    private static func receive(on connection: NWConnection) async throws -> Data {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+    /// Decode one frame and dispatch its event downstream.
+    private func dispatch(_ frame: Data, serverID: UUID) async {
+        // Reader-injected transport error sentinel.
+        let prefix = Data(Self.errorFramePrefix.utf8)
+        if frame.starts(with: prefix) {
+            let msg = String(decoding: frame.dropFirst(prefix.count), as: UTF8.self)
+            await eventHandler?(.error(.transportError(msg)), serverID)
+            return
+        }
+        guard let message = try? LineFramedJSONCodec.decode(frame) else { return }
+        if case .event(let event) = message.payload {
+            await eventHandler?(event, serverID)
+        }
+        // Responses aren't delivered via the event handler; the protocol uses
+        // events for streaming + caps/usage delivery.
+    }
+
+    /// One-shot bridge from NWConnection's callback API to async. Returns the
+    /// received bytes plus whether the stream is complete; only `done == true`
+    /// means EOF (a zero-byte, non-complete callback must NOT end the loop).
+    private static func receive(on connection: NWConnection) async throws -> (data: Data, done: Bool) {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(data: Data, done: Bool), Error>) in
             connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { data, _, isComplete, error in
                 if let error { cont.resume(throwing: error); return }
-                if let data, !data.isEmpty { cont.resume(returning: data); return }
-                if isComplete { cont.resume(returning: Data()); return }
-                cont.resume(returning: Data())
+                cont.resume(returning: (data ?? Data(), isComplete))
             }
         }
     }

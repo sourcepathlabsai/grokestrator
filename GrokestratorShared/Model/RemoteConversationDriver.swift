@@ -10,11 +10,15 @@ import GrokestratorCore
 /// makes "pick up iPad → see the same transcript as the Mac" work.
 public final class RemoteConversationDriver: ConversationDriver, @unchecked Sendable {
     private let session: GrokBuildClientSession
+    /// Base URL of the host's media HTTP server (e.g. http://192.168.1.212:7848),
+    /// used to build streamable URLs for video/audio. nil ⇒ media URLs unavailable.
+    private let mediaBaseURL: URL?
     /// Most recent prompt id, so `respondToPermission` can address its turn.
     private var lastPromptID: UUID?
 
-    public init(session: GrokBuildClientSession) {
+    public init(session: GrokBuildClientSession, mediaBaseURL: URL? = nil) {
         self.session = session
+        self.mediaBaseURL = mediaBaseURL
     }
 
     public func send(_ prompt: String) async throws {
@@ -61,5 +65,12 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
 
     public func fetchMediaFile(path: String) async -> (url: URL, mimeType: String)? {
         await session.fetchFullFile(path: path)
+    }
+
+    public func mediaURL(forHostPath path: String) -> URL? {
+        guard var c = mediaBaseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else { return nil }
+        c.path = "/media"
+        c.queryItems = [URLQueryItem(name: "path", value: path)]   // URLComponents percent-encodes the value
+        return c.url
     }
 }

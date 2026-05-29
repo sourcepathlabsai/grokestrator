@@ -10,6 +10,7 @@ import SwiftUI
 final class MediaLoader {
     private let thumbFetch: @Sendable (_ path: String, _ maxDimension: Int) async -> (data: Data, mimeType: String)?
     private let fileFetch: @Sendable (_ path: String) async -> (url: URL, mimeType: String)?
+    private let urlForPath: @Sendable (_ path: String) -> URL?
 
     private var thumbs: [String: Data] = [:]                 // "path|dim" → jpeg bytes
     private var files: [String: URL] = [:]                   // path → file url
@@ -17,10 +18,16 @@ final class MediaLoader {
     private var inFlightFile: [String: Task<URL?, Never>] = [:]
 
     init(thumbnail: @escaping @Sendable (_ path: String, _ maxDimension: Int) async -> (data: Data, mimeType: String)?,
-         file: @escaping @Sendable (_ path: String) async -> (url: URL, mimeType: String)?) {
+         file: @escaping @Sendable (_ path: String) async -> (url: URL, mimeType: String)?,
+         url: @escaping @Sendable (_ path: String) -> URL?) {
         self.thumbFetch = thumbnail
         self.fileFetch = file
+        self.urlForPath = url
     }
+
+    /// A directly streamable URL for a media artifact (http for remote, file for
+    /// local) — hand straight to `AVPlayer`, which streams it natively.
+    func streamURL(path: String) -> URL? { urlForPath(path) }
 
     /// A downscaled thumbnail / video poster (JPEG bytes), cached in memory.
     /// Concurrent requests for the same key share one fetch.
