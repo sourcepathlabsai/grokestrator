@@ -36,6 +36,27 @@ final class iOSAppModel {
         attachTasks[link.id] = Task { await attach(link) }
     }
 
+    /// Updates a remote server's connection details (name/host/localHost/port),
+    /// persists, and reconnects with the new config — the link is recreated
+    /// since its config is immutable.
+    func updateRemoteServer(_ updated: RemoteServerConfig) {
+        var saved = RemoteServerStore.load()
+        if let i = saved.firstIndex(where: { $0.id == updated.id }) { saved[i] = updated } else { saved.append(updated) }
+        RemoteServerStore.save(saved)
+
+        attachTasks[updated.id]?.cancel()
+        attachTasks[updated.id] = nil
+        if let old = remoteLinks.first(where: { $0.id == updated.id }) {
+            Task { await old.disconnect() }
+        }
+        instances.removeAll { $0.serverID == updated.id }
+
+        let link = RemoteServerLink(config: updated)
+        if let i = remoteLinks.firstIndex(where: { $0.id == updated.id }) { remoteLinks[i] = link }
+        else { remoteLinks.append(link) }
+        attachTasks[updated.id] = Task { await attach(link) }
+    }
+
     /// Drops a remote server — cancel its retry loop, disconnect, remove its
     /// instances, persist.
     func removeRemoteServer(_ link: RemoteServerLink) {

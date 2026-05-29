@@ -5,6 +5,8 @@ import SwiftUI
 /// peer's MagicDNS hostname (e.g. `neo`) or its 100.x.y.z address + port.
 struct AddRemoteServerView: View {
     @Bindable var model: GrokestratorModel
+    /// When set, edits this existing server instead of adding a new one.
+    var editing: RemoteServerConfig?
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""
@@ -14,7 +16,7 @@ struct AddRemoteServerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add Remote Server")
+            Text(editing == nil ? "Add Remote Server" : "Edit Server")
                 .font(Theme.display(18, .semibold))
                 .foregroundStyle(Theme.textPrimary)
 
@@ -44,11 +46,17 @@ struct AddRemoteServerView: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
-                Button("Add") {
+                Button(editing == nil ? "Add" : "Save") {
                     let port = UInt16(portText) ?? 7847
                     let display = name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name
                     let lan = localHost.trimmingCharacters(in: .whitespaces)
-                    model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
+                    if let editing {
+                        model.updateRemoteServer(RemoteServerConfig(
+                            id: editing.id, name: display, host: host,
+                            localHost: lan.isEmpty ? nil : lan, port: port))
+                    } else {
+                        model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -57,5 +65,10 @@ struct AddRemoteServerView: View {
         }
         .padding(20)
         .frame(minWidth: 460)
+        .onAppear {
+            if let e = editing {
+                name = e.name; host = e.host; localHost = e.localHost ?? ""; portText = String(e.port)
+            }
+        }
     }
 }

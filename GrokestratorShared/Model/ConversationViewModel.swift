@@ -94,18 +94,45 @@ final class ConversationViewModel {
     /// 10–30 s while `npx`/`uvx` spawn each server. The UI surfaces a
     /// "Connecting…" banner via `sessionReady == false` so a long wait reads
     /// as progress rather than a deadlocked spinner.
+    /// `true` while we're still polling for late-registering slash commands —
+    /// grok's MCP servers load asynchronously and stream their commands in via
+    /// `available_commands_update` over several seconds. Drives a "loading
+    /// commands…" hint in the slash popup.
+    private(set) var commandsSettling = false
+
     func loadCapabilities(force: Bool = false) {
         guard force || capabilities == nil else { return }
         let driver = self.driver
         Task { [weak self] in
+            // Poll fast until grok answers `initialize` with *something*, then
+            // keep watching at a slower cadence: MCP servers finish loading after
+            // the handshake and push more commands via `available_commands_update`.
+            // Stop once the command count holds steady (MCP load settled).
+            var lastCount = -1, stablePolls = 0
             while !Task.isCancelled {
-                if let caps = await driver.capabilities(), caps != .empty {
-                    self?.capabilities = caps
-                    self?.sessionReady = true
-                    return
+                let caps = await driver.capabilities()
+                guard let self else { return }
+                if let caps, caps != .empty {
+                    if caps != self.capabilities { self.capabilities = caps }
+                    self.sessionReady = true
+                    self.commandsSettling = true
+                    if caps.commands.count == lastCount { stablePolls += 1 }
+                    else { stablePolls = 0; lastCount = caps.commands.count }
+                    if stablePolls >= 4 { self.commandsSettling = false; return }   // ~8s steady
                 }
-                try? await Task.sleep(nanoseconds: 500_000_000)   // 500 ms
+                try? await Task.sleep(nanoseconds: self.sessionReady ? 2_000_000_000 : 500_000_000)
             }
+        }
+    }
+
+    /// Force an immediate capabilities re-read (e.g. when the user opens the `/`
+    /// popup) so the freshest command list — including MCP commands that have
+    /// registered since — shows right away.
+    func refreshCapabilities() {
+        let driver = self.driver
+        Task { [weak self] in
+            let caps = await driver.capabilities()
+            if let caps, caps != .empty { self?.capabilities = caps }
         }
     }
 

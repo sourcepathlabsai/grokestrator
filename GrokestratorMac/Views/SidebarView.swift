@@ -10,6 +10,8 @@ struct SidebarView: View {
     @State private var showingArchived = false
     /// Live Connection awaiting a permanent-delete confirmation (nil ⇒ none).
     @State private var pendingDelete: InstanceItem?
+    /// Remote server config being edited (nil ⇒ none).
+    @State private var editingServer: RemoteServerConfig?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,11 +43,18 @@ struct SidebarView: View {
                             }
                         }
                     } header: {
-                        SectionHeader(group: group, onRemove: group.isRemote ? {
-                            if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
-                                model.removeRemoteServer(link)
-                            }
-                        } : nil)
+                        SectionHeader(
+                            group: group,
+                            onEdit: group.isRemote ? {
+                                if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
+                                    editingServer = link.config
+                                }
+                            } : nil,
+                            onRemove: group.isRemote ? {
+                                if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
+                                    model.removeRemoteServer(link)
+                                }
+                            } : nil)
                     }
                 }
             }
@@ -68,6 +77,7 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
+        .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
         .confirmationDialog(
             "Delete “\(pendingDelete?.name ?? "")” permanently?",
@@ -111,6 +121,7 @@ struct SidebarView: View {
 /// context-menu "Remove" for remote groups.
 private struct SectionHeader: View {
     let group: SidebarServerGroup
+    let onEdit: (() -> Void)?
     let onRemove: (() -> Void)?
 
     var body: some View {
@@ -126,6 +137,9 @@ private struct SectionHeader: View {
                 .textCase(.uppercase)
         }
         .contextMenu {
+            if let onEdit {
+                Button(action: onEdit) { Label("Edit Server…", systemImage: "pencil") }
+            }
             if let onRemove {
                 Button(role: .destructive, action: onRemove) {
                     Label("Remove Server", systemImage: "trash")

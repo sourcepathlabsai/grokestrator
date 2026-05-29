@@ -5,6 +5,8 @@ import SwiftUI
 /// transport encryption + tailnet ACLs (no app-level auth — per memory).
 struct iOSAddRemoteServerView: View {
     @Bindable var model: iOSAppModel
+    /// When set, the form edits this existing server instead of adding a new one.
+    var editing: RemoteServerConfig?
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
@@ -41,21 +43,32 @@ struct iOSAddRemoteServerView: View {
                     Text("When you're on the same Wi-Fi as the Mac, this direct connection is far faster — important for video and other large media. Grokestrator tries it first and falls back to Tailscale automatically when you're away.")
                 }
             }
-            .navigationTitle("Add Remote Server")
+            .navigationTitle(editing == nil ? "Add Remote Server" : "Edit Server")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add") {
+                    Button(editing == nil ? "Add" : "Save") {
                         let port = UInt16(portText) ?? 7847
                         let display = name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name
                         let lan = localHost.trimmingCharacters(in: .whitespaces)
-                        model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
+                        if let editing {
+                            model.updateRemoteServer(RemoteServerConfig(
+                                id: editing.id, name: display, host: host,
+                                localHost: lan.isEmpty ? nil : lan, port: port))
+                        } else {
+                            model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
+                        }
                         dismiss()
                     }
                     .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    name = e.name; host = e.host; localHost = e.localHost ?? ""; portText = String(e.port)
                 }
             }
         }
