@@ -9,6 +9,7 @@ struct AddRemoteServerView: View {
 
     @State private var name: String = ""
     @State private var host: String = ""
+    @State private var localHost: String = ""
     @State private var portText: String = "7847"
 
     var body: some View {
@@ -25,13 +26,20 @@ struct AddRemoteServerView: View {
                 LabeledContent("Name") {
                     TextField("e.g. Mac Mini", text: $name).textFieldStyle(.roundedBorder)
                 }
-                LabeledContent("Host") {
+                LabeledContent("Tailscale host") {
                     TextField("MagicDNS name or 100.x.y.z", text: $host).textFieldStyle(.roundedBorder)
+                }
+                LabeledContent("Local IP") {
+                    TextField("optional, e.g. 192.168.1.212", text: $localHost).textFieldStyle(.roundedBorder)
                 }
                 LabeledContent("Port") {
                     TextField("7847", text: $portText).textFieldStyle(.roundedBorder).frame(maxWidth: 90)
                 }
             }
+
+            Text("Local IP is used when you're on the same network as the Mac — a direct, full-speed link (best for video/large media). Grokestrator tries it first and falls back to Tailscale when you're away.")
+                .font(Theme.body(11))
+                .foregroundStyle(Theme.textMuted)
 
             HStack {
                 Spacer()
@@ -39,7 +47,8 @@ struct AddRemoteServerView: View {
                 Button("Add") {
                     let port = UInt16(portText) ?? 7847
                     let display = name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name
-                    model.addRemoteServer(name: display, host: host, port: port)
+                    let lan = localHost.trimmingCharacters(in: .whitespaces)
+                    model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)

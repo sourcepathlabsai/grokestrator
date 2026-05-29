@@ -56,26 +56,20 @@ enum MediaVendor {
         let exists = FileManager.default.fileExists(atPath: url.path)
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int
         guard exists, let size, size <= maxFullBytes, let handle = try? FileHandle(forReadingFrom: url) else {
-            print("[media] streamFull NIL exists=\(exists) size=\(size.map(String.init) ?? "nil") cap=\(maxFullBytes) path=\(path)")
             await send(nil); return
         }
         defer { try? handle.close() }
 
         let mime = mimeType(for: url)
-        print("[media] streamFull start size=\(size) mime=\(mime) chunks≈\(size / chunkSize + 1)")
         if size == 0 {
             await send(MediaChunk(sequence: 0, isFinal: true, mimeType: mime, data: Data()))
             return
         }
         var offset = 0, seq = 0
         while offset < size {
-            if Task.isCancelled {
-                print("[media] streamFull CANCELLED at seq=\(seq)/\(size / chunkSize + 1)")
-                return
-            }
+            if Task.isCancelled { return }
             let len = min(chunkSize, size - offset)
             guard let data = try? handle.read(upToCount: len), !data.isEmpty else {
-                print("[media] streamFull READ ENDED EARLY at offset=\(offset)/\(size) seq=\(seq) — sending final")
                 await send(MediaChunk(sequence: seq, isFinal: true, mimeType: mime, data: Data()))
                 return
             }
@@ -83,7 +77,6 @@ enum MediaVendor {
             await send(MediaChunk(sequence: seq, isFinal: offset >= size, mimeType: mime, data: data))
             seq += 1
         }
-        print("[media] streamFull done sent=\(seq) chunks offset=\(offset)")
     }
 
     // MARK: - Thumbnails

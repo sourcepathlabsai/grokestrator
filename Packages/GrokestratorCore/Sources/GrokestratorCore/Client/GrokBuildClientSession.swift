@@ -255,10 +255,9 @@ public actor GrokBuildClientSession {
         let id = UUID()
         let ext = (path as NSString).pathExtension
         transfers[id] = MediaTransfer(mode: .file(ext: ext.isEmpty ? "bin" : ext))
-        print("[media] fetchFullFile \(id) path=\(path)")
         do {
             try await sendRequest(.grokBuild(.fetchMedia(instanceID: instanceID, path: path, maxDimension: nil, requestID: id)))
-        } catch { print("[media] send FAILED \(id): \(error)"); transfers[id] = nil; return nil }
+        } catch { transfers[id] = nil; return nil }
         armMediaWatchdog(id, inactivity: 60)
         return await withCheckedContinuation { fileConts[id] = $0 }
     }
@@ -274,7 +273,7 @@ public actor GrokBuildClientSession {
     /// Appends a chunk to its transfer (memory append or file write), opening
     /// the temp file lazily on the first chunk of a file transfer.
     private func appendChunk(_ chunk: MediaChunk, to id: UUID) {
-        guard let t = transfers[id] else { print("[media] chunk for unknown transfer \(id)"); return }
+        guard let t = transfers[id] else { return }
         if t.mime == nil { t.mime = chunk.mimeType }
         t.chunks += 1
         t.bytes += chunk.data.count
@@ -288,11 +287,10 @@ public actor GrokBuildClientSession {
                 FileManager.default.createFile(atPath: url.path, contents: nil)
                 t.url = url
                 t.handle = try? FileHandle(forWritingTo: url)
-                if t.handle == nil { print("[media] temp-open FAILED \(url.path)"); failTransfer(id); return }
-                print("[media] file transfer open \(url.lastPathComponent)")
+                if t.handle == nil { failTransfer(id); return }
             }
             do { try t.handle?.write(contentsOf: chunk.data) }
-            catch { print("[media] write FAILED chunk \(chunk.sequence): \(error)"); failTransfer(id); return }
+            catch { failTransfer(id); return }
         }
     }
 
@@ -300,7 +298,6 @@ public actor GrokBuildClientSession {
         mediaWatchdogs.removeValue(forKey: id)?.cancel()
         guard let t = transfers.removeValue(forKey: id) else { return }
         let mime = t.mime ?? "application/octet-stream"
-        print("[media] finish \(id) chunks=\(t.chunks) bytes=\(t.bytes) mime=\(mime)")
         switch t.mode {
         case .memory:
             dataConts.removeValue(forKey: id)?.resume(returning: (data: t.data, mimeType: mime))
@@ -309,7 +306,6 @@ public actor GrokBuildClientSession {
             if let url = t.url {
                 fileConts.removeValue(forKey: id)?.resume(returning: (url: url, mimeType: mime))
             } else {
-                print("[media] finish but NO url (no chunks written?)")
                 fileConts.removeValue(forKey: id)?.resume(returning: nil)
             }
         }
@@ -317,7 +313,7 @@ public actor GrokBuildClientSession {
 
     private func failTransfer(_ id: UUID, reason: String = "?") {
         let t = transfers.removeValue(forKey: id)
-        print("[media] FAIL \(id) reason=\(reason) chunks=\(t?.chunks ?? 0) bytes=\(t?.bytes ?? 0)")
+        _ = reason
         mediaWatchdogs.removeValue(forKey: id)?.cancel()
         if let t, case .file = t.mode {
             try? t.handle?.close()

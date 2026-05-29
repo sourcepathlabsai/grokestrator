@@ -25,8 +25,8 @@ final class iOSAppModel {
     }
 
     /// Saves a new remote server and connects to it.
-    func addRemoteServer(name: String, host: String, port: UInt16) {
-        let config = RemoteServerConfig(name: name, host: host, port: port)
+    func addRemoteServer(name: String, host: String, localHost: String? = nil, port: UInt16) {
+        let config = RemoteServerConfig(name: name, host: host, localHost: localHost, port: port)
         var saved = RemoteServerStore.load()
         saved.append(config)
         RemoteServerStore.save(saved)

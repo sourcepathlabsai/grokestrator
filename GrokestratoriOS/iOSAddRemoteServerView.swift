@@ -9,6 +9,7 @@ struct iOSAddRemoteServerView: View {
 
     @State private var name = ""
     @State private var host = ""
+    @State private var localHost = ""
     @State private var portText = "7847"
 
     var body: some View {
@@ -24,9 +25,20 @@ struct iOSAddRemoteServerView: View {
                     TextField("Port", text: $portText)
                         .keyboardType(.numberPad)
                 } header: {
-                    Text("Server")
+                    Text("Tailscale (works anywhere)")
                 } footer: {
-                    Text("The other device must have its Grokestrator server enabled (Settings → Run server). Default port is 7847.")
+                    Text("The Mac must have its Grokestrator server enabled (Settings → Run server). Default port is 7847.")
+                }
+
+                Section {
+                    TextField("e.g. 192.168.1.212", text: $localHost)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Local IP (optional, same Wi-Fi)")
+                } footer: {
+                    Text("When you're on the same Wi-Fi as the Mac, this direct connection is far faster — important for video and other large media. Grokestrator tries it first and falls back to Tailscale automatically when you're away.")
                 }
             }
             .navigationTitle("Add Remote Server")
@@ -39,7 +51,8 @@ struct iOSAddRemoteServerView: View {
                     Button("Add") {
                         let port = UInt16(portText) ?? 7847
                         let display = name.trimmingCharacters(in: .whitespaces).isEmpty ? host : name
-                        model.addRemoteServer(name: display, host: host, port: port)
+                        let lan = localHost.trimmingCharacters(in: .whitespaces)
+                        model.addRemoteServer(name: display, host: host, localHost: lan.isEmpty ? nil : lan, port: port)
                         dismiss()
                     }
                     .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty)
