@@ -46,6 +46,12 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Skips the export compliance form on every TestFlight / App Store
+        # submission — we ship no first-party crypto and rely only on Apple
+        # platform TLS (via Tailscale).
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # Mac App Store category. Harmless under Developer ID too.
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
 
@@ -71,3 +77,11 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        # iOS treats Tailscale (100.64.0.0/10 + MagicDNS) as local network,
+        # so the system shows a one-time permission dialog the first time
+        # we try to reach the host Mac. Without a usage description, the
+        # dialog has no explanation and users tend to deny.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Grokestrator connects to your Mac over Tailscale to drive grok sessions remotely."
+        # Same crypto + category posture as the Mac target.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"

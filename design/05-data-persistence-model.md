@@ -47,7 +47,7 @@ The persistence layer must support:
 
 ### Option B: SQLite
 
-**Approach**: Embedded SQLite database (via `rusqlite` or similar in the Rust backend).
+**Approach**: Embedded SQLite database (e.g. via the GRDB Swift package, or Apple's `SQLite3` C interop).
 
 **Pros**:
 - Strong querying and full-text search (FTS5) out of the box
@@ -101,8 +101,7 @@ We should consider SQLite if any of the following become real requirements in th
 
 - `00-vision-and-north-star.md`: Emphasizes conversation history as a first-class strength.
 - `04-conversation-model.md`: Defines the hybrid ownership model that this persistence layer must support.
-- `01-architecture-and-components.md`: The Rust backend will own the persistence implementation.
-- `03-technology-and-build-strategy.md`: Tauri + Rust makes both file-based and SQLite approaches straightforward.
+- `06-project-structure.md`: Where the persistence implementation lives in the codebase.
 
 ---
 

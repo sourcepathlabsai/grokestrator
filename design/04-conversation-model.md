@@ -116,8 +116,8 @@ Strong state restoration is considered a core part of delivering a comfortable, 
 
 - `00-vision-and-north-star.md`: Establishes the overall vision and local-first phasing.
 - `02-ui-navigation-and-interaction.md`: Defines the sidebar hierarchy (Connections > Conversations) and right panel behavior.
-- `03-technology-and-build-strategy.md`: Outlines the technical approach (Tauri + Rust backend) that will need to support the model defined here.
-- This document (`04-conversation-model.md`): Provides the conceptual model for conversations and their relationship to instances.
+- `05-data-persistence-model.md`: How conversation history is stored on disk.
+- `06-project-structure.md`: Where the conversation/history model code lives in the repo.
 
 ---
 

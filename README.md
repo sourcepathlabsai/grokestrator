@@ -84,9 +84,7 @@ To let your iPad (or another Mac) drive grok running on your home Mac:
 For deeper dives into the design:
 
 - **[Vision & North Star](design/00-vision-and-north-star.md)** — what this is for.
-- **[Architecture & Components](design/01-architecture-and-components.md)** — the moving pieces.
 - **[UI Navigation & Interaction](design/02-ui-navigation-and-interaction.md)** — sidebar, Instance Inspector, capability discovery.
-- **[Technology & Build Strategy](design/03-technology-and-build-strategy.md)** — why native Swift; build choices.
 - **[Conversation Model](design/04-conversation-model.md)** — turns, messages, structured history.
 - **[Data & Persistence Model](design/05-data-persistence-model.md)** — what's on disk and where.
 - **[Project Structure](design/06-project-structure.md)** — module layout.
