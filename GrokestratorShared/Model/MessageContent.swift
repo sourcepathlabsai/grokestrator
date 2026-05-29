@@ -3,15 +3,18 @@ import Foundation
 /// Where a media part's bytes live. The UI resolves a source to displayable /
 /// playable / downloadable bytes; it doesn't care which case it is.
 public enum MediaSource: Sendable {
-    case inline(Data)        // base64 carried inline (e.g. a data: URI)
-    case localFile(URL)      // a path on this machine
-    case remote(URL)         // an http(s) URL
+    case inline(Data)         // base64 carried inline (e.g. a data: URI)
+    case localFile(URL)       // a path on this machine
+    case remote(URL)          // an http(s) URL
+    case serverFile(path: String)  // a path on the *host* — fetch via the driver
 
     /// A URL usable by AVPlayer / Quick Look. Inline data is written to a temp file.
+    /// `.serverFile` returns nil here — it must be fetched first (see `MediaLoader`).
     func resolvedURL(preferredExtension ext: String) -> URL? {
         switch self {
         case .localFile(let url): return url
         case .remote(let url): return url
+        case .serverFile: return nil
         case .inline(let data):
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("grokestrator-\(UUID().uuidString).\(ext)")
@@ -37,7 +40,11 @@ public enum ContentPart: Sendable {
 enum ContentParser {
     private enum Category { case image, audio, video, file }
 
-    static func parse(_ text: String) -> [ContentPart] {
+    /// `remote == true` ⇒ media artifacts live on a *host* we can't read locally
+    /// (a remote client): emit `.serverFile(path)` sources and skip the local
+    /// existence check, so the renderer can fetch them over the wire. `false`
+    /// (local host) keeps the original `.localFile` + existence-filter behavior.
+    static func parse(_ text: String, remote: Bool = false) -> [ContentPart] {
         var parts: [ContentPart] = []
         var seenMedia = Set<String>()
 
@@ -48,12 +55,13 @@ enum ContentParser {
             if seenMedia.insert(key).inserted { parts.append(part) }
         }
 
-        for segment in splitMarkdownMedia(text) {
+        for segment in splitMarkdownMedia(text, remote: remote) {
             guard case .text(let t) = segment else { addMedia(segment); continue }
             // Keep the text; append any bare media paths found in it (artifacts to view/play).
             parts.append(.text(t))
             for path in bareMediaPaths(in: t) {
-                if let part = part(forPath: path, source: .localFile(URL(fileURLWithPath: path))) {
+                let source: MediaSource = remote ? .serverFile(path: path) : .localFile(URL(fileURLWithPath: path))
+                if let part = part(forPath: path, source: source, remote: remote) {
                     addMedia(part)
                 }
             }
@@ -63,7 +71,10 @@ enum ContentParser {
 
     /// True unless `source` is a local file that doesn't exist or is empty.
     /// Drops phantom references (e.g. a `~/copy.mp4` mangled into `/copy.mp4`).
-    private static func renderable(_ source: MediaSource) -> Bool {
+    /// Remote sources can't be checked here — assume present and let the fetch
+    /// decide (a missing host file just renders as "unavailable").
+    private static func renderable(_ source: MediaSource, remote: Bool) -> Bool {
+        if remote { return true }
         guard case .localFile(let url) = source else { return true }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
         return (size ?? 0) > 0
@@ -82,13 +93,14 @@ enum ContentParser {
         switch source {
         case .localFile(let u): return "f:" + u.standardizedFileURL.path
         case .remote(let u): return "r:" + u.absoluteString
+        case .serverFile(let p): return "s:" + p
         case .inline(let d): return "i:\(d.count)"
         }
     }
 
     /// Splices classifiable markdown media (`![](src)` images and `[label](src)`
     /// media/file links) inline; unclassifiable matches stay as text.
-    private static func splitMarkdownMedia(_ text: String) -> [ContentPart] {
+    private static func splitMarkdownMedia(_ text: String, remote: Bool) -> [ContentPart] {
         let pattern = #"(!?)\[([^\]]*)\]\(([^)\s]+)\)"#
         guard let re = try? NSRegularExpression(pattern: pattern) else { return [.text(text)] }
         let ns = text as NSString
@@ -101,7 +113,7 @@ enum ContentParser {
             let isImage = ns.substring(with: m.range(at: 1)) == "!"
             let label = ns.substring(with: m.range(at: 2))
             let src = ns.substring(with: m.range(at: 3))
-            let part: ContentPart? = isImage ? imagePart(from: src) : linkPart(from: src, label: label)
+            let part: ContentPart? = isImage ? imagePart(from: src, remote: remote) : linkPart(from: src, label: label, remote: remote)
             guard let part else { continue } // not media → leave in text
             if m.range.location > cursor {
                 parts.append(.text(ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))))
@@ -127,7 +139,7 @@ enum ContentParser {
         return paths
     }
 
-    private static func imagePart(from src: String) -> ContentPart? {
+    private static func imagePart(from src: String, remote: Bool) -> ContentPart? {
         if src.hasPrefix("data:") {
             guard let comma = src.firstIndex(of: ","),
                   case let header = String(src[src.index(src.startIndex, offsetBy: 5)..<comma]),
@@ -136,18 +148,18 @@ enum ContentParser {
             else { return nil }
             return .image(.inline(data), mimeType: header.split(separator: ";").first.map(String.init) ?? "image/png")
         }
-        guard category(forPath: src)?.0 == .image, let source = mediaSource(from: src), renderable(source) else { return nil }
+        guard category(forPath: src)?.0 == .image, let source = mediaSource(from: src, remote: remote), renderable(source, remote: remote) else { return nil }
         return .image(source, mimeType: category(forPath: src)!.1)
     }
 
-    private static func linkPart(from src: String, label: String) -> ContentPart? {
-        guard let source = mediaSource(from: src) else { return nil }
+    private static func linkPart(from src: String, label: String, remote: Bool) -> ContentPart? {
+        guard let source = mediaSource(from: src, remote: remote) else { return nil }
         let name = label.isEmpty ? (src as NSString).lastPathComponent : label
-        return part(forPath: src, source: source, name: name)
+        return part(forPath: src, source: source, name: name, remote: remote)
     }
 
-    private static func part(forPath path: String, source: MediaSource, name: String? = nil) -> ContentPart? {
-        guard let (category, mime) = category(forPath: path), renderable(source) else { return nil }
+    private static func part(forPath path: String, source: MediaSource, name: String? = nil, remote: Bool) -> ContentPart? {
+        guard let (category, mime) = category(forPath: path), renderable(source, remote: remote) else { return nil }
         let display = name ?? (path as NSString).lastPathComponent
         switch category {
         case .image: return .image(source, mimeType: mime)
@@ -157,10 +169,16 @@ enum ContentParser {
         }
     }
 
-    private static func mediaSource(from src: String) -> MediaSource? {
+    /// http(s) → `.remote`. A host path → `.serverFile` when `remote` (fetch via
+    /// the driver) or `.localFile` otherwise (readable directly).
+    private static func mediaSource(from src: String, remote: Bool) -> MediaSource? {
         if src.hasPrefix("http://") || src.hasPrefix("https://"), let url = URL(string: src) { return .remote(url) }
-        if src.hasPrefix("file://"), let url = URL(string: src) { return .localFile(url) }
-        if src.hasPrefix("/") { return .localFile(URL(fileURLWithPath: src)) }
+        if src.hasPrefix("file://"), let url = URL(string: src) {
+            return remote ? .serverFile(path: url.path) : .localFile(url)
+        }
+        if src.hasPrefix("/") {
+            return remote ? .serverFile(path: src) : .localFile(URL(fileURLWithPath: src))
+        }
         return nil
     }
 

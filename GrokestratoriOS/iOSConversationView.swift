@@ -36,6 +36,7 @@ struct iOSConversationView: View {
             composer
         }
         .background(Theme.bg.ignoresSafeArea())
+        .environment(\.mediaLoader, conversation.mediaLoader)
         .navigationTitle(instance.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

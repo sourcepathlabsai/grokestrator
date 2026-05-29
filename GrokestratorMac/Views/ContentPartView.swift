@@ -23,13 +23,29 @@ struct AssistantContentView: View {
                 Text(text).textSelection(.enabled)
             }
         case .image(let source, let mimeType):
-            ImagePartView(source: source, mimeType: mimeType)
+            if case .serverFile(let path) = source {
+                RemoteImagePartView(path: path, mimeType: mimeType)
+            } else {
+                ImagePartView(source: source, mimeType: mimeType)
+            }
         case .audio(let source, let mimeType, let name):
-            AudioPlayerView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                RemoteFileCardView(path: path, mimeType: mimeType, name: name, systemImage: "waveform")
+            } else {
+                AudioPlayerView(source: source, mimeType: mimeType, name: name)
+            }
         case .video(let source, let mimeType, let name):
-            VideoPlayerView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                RemoteVideoPartView(path: path, mimeType: mimeType, name: name)
+            } else {
+                VideoPlayerView(source: source, mimeType: mimeType, name: name)
+            }
         case .file(let source, let mimeType, let name):
-            FilePartView(source: source, mimeType: mimeType, name: name)
+            if case .serverFile(let path) = source {
+                RemoteFileCardView(path: path, mimeType: mimeType, name: name, systemImage: "doc")
+            } else {
+                FilePartView(source: source, mimeType: mimeType, name: name)
+            }
         }
     }
 }
@@ -79,6 +95,8 @@ struct ImagePartView: View {
                 else if phase.error != nil { unavailable }
                 else { ProgressView() }
             }
+        case .serverFile:
+            unavailable   // handled by RemoteImagePartView; unreachable here
         }
     }
 
@@ -114,6 +132,8 @@ enum MediaOpener {
                     NSWorkspace.shared.open(url)
                 }
             }
+        case .serverFile:
+            NSSound.beep()   // remote files open via Remote*PartView's own fetch
         }
     }
 
@@ -143,6 +163,8 @@ enum MediaDownloader {
                 let data = try? await URLSession.shared.data(from: url).0
                 present(data, mimeType: mimeType, suggestedName: url.lastPathComponent)
             }
+        case .serverFile:
+            NSSound.beep()   // remote downloads go through Remote*PartView
         }
     }
 
@@ -371,6 +393,144 @@ struct FilePartView: View {
         case "application/json", "text/plain": return "doc.text"
         default: return "doc"
         }
+    }
+}
+
+// MARK: - Remote media (`.serverFile`) — Mac-as-remote-client
+
+/// Remote image thumbnail (fetched from the host). Click → fetch full + open in
+/// the default app.
+struct RemoteImagePartView: View {
+    let path: String
+    let mimeType: String
+    @Environment(\.mediaLoader) private var loader
+    @State private var thumb: NSImage?
+    @State private var failed = false
+    private let thumbSize: CGFloat = 140
+
+    var body: some View {
+        Button { Task { await openFull() } } label: {
+            Group {
+                if let thumb {
+                    Image(nsImage: thumb).resizable().aspectRatio(contentMode: .fill)
+                } else if failed {
+                    Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(.quaternary)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(.quaternary)
+                }
+            }
+            .frame(width: thumbSize, height: thumbSize)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        }
+        .buttonStyle(.plain)
+        .help("Open full image")
+        .task { await loadThumb() }
+    }
+
+    private func loadThumb() async {
+        guard thumb == nil, let loader else { failed = (loader == nil); return }
+        if let data = await loader.thumbnail(path: path, maxDimension: 600), let img = NSImage(data: data) {
+            thumb = img
+        } else { failed = true }
+    }
+
+    private func openFull() async {
+        guard let loader,
+              let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        else { NSSound.beep(); return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+/// Remote video: poster frame + click to fetch and play inline.
+struct RemoteVideoPartView: View {
+    let path: String
+    let mimeType: String
+    let name: String
+    @Environment(\.mediaLoader) private var loader
+    @State private var poster: NSImage?
+    @State private var player: AVPlayer?
+    @State private var loadingFull = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if let player {
+                    PlayerView(player: player)
+                } else {
+                    Button { Task { await play() } } label: {
+                        ZStack {
+                            if let poster {
+                                Image(nsImage: poster).resizable().aspectRatio(contentMode: .fit)
+                            } else {
+                                Color.black.opacity(0.3)
+                            }
+                            if loadingFull { ProgressView() }
+                            else { Image(systemName: "play.circle.fill").font(.largeTitle).foregroundStyle(.white) }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(width: 380, height: 230)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .task { await loadPoster() }
+        .onDisappear { player?.pause() }
+    }
+
+    private func loadPoster() async {
+        guard poster == nil, let loader else { return }
+        if let data = await loader.thumbnail(path: path, maxDimension: 600) { poster = NSImage(data: data) }
+    }
+
+    private func play() async {
+        guard let loader else { return }
+        loadingFull = true
+        let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        loadingFull = false
+        if let url { player = AVPlayer(url: url); player?.play() }
+    }
+}
+
+/// Remote audio/file card: click to fetch and open in the default app.
+struct RemoteFileCardView: View {
+    let path: String
+    let mimeType: String
+    let name: String
+    let systemImage: String
+    @Environment(\.mediaLoader) private var loader
+    @State private var loading = false
+
+    var body: some View {
+        Button { Task { await open() } } label: {
+            HStack(spacing: 10) {
+                Image(systemName: loading ? "arrow.down.circle" : systemImage)
+                    .font(.title2).foregroundStyle(.secondary).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.callout).lineLimit(1)
+                    Text(loading ? "Fetching…" : mimeType).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if loading { ProgressView().controlSize(.small) }
+                else { Image(systemName: "arrow.up.forward.app").foregroundStyle(.secondary) }
+            }
+            .padding(10)
+            .frame(maxWidth: 380)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func open() async {
+        guard !loading, let loader else { return }
+        loading = true
+        let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        loading = false
+        if let url { NSWorkspace.shared.open(url) } else { NSSound.beep() }
     }
 }
 

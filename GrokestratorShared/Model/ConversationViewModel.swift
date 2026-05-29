@@ -69,6 +69,11 @@ final class ConversationViewModel {
 
     private let driver: ConversationDriver
 
+    /// Loads + caches media artifacts (images/video/files) for this
+    /// conversation. Injected into the transcript via `\.mediaLoader` so media
+    /// part views can fetch `.serverFile` artifacts from the host on demand.
+    let mediaLoader: MediaLoader
+
     // Tracks the bubble currently being streamed into.
     private enum StreamKind { case message, thought }
     private var streamingID: UUID?
@@ -76,6 +81,9 @@ final class ConversationViewModel {
 
     init(driver: ConversationDriver) {
         self.driver = driver
+        self.mediaLoader = MediaLoader(fetch: { [driver] path, dim in
+            await driver.fetchMedia(path: path, maxDimension: dim)
+        })
     }
 
     /// Loads instance capabilities. **Patient**: polls forever until grok's
@@ -343,7 +351,7 @@ final class ConversationViewModel {
     /// and history replay, so a re-opened transcript renders identically to
     /// the original live stream.
     private func kind(forMessageContent text: String) -> TranscriptEntry.Kind {
-        let parts = ContentParser.parse(text)
+        let parts = ContentParser.parse(text, remote: driver.resolvesMediaRemotely)
         let hasMedia = parts.contains { if case .text = $0 { return false } else { return true } }
         return hasMedia ? .assistantContent(parts) : .assistantMessage(text)
     }
