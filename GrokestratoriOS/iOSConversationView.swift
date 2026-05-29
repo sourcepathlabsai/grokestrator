@@ -9,6 +9,9 @@ struct iOSConversationView: View {
     @Bindable var instance: InstanceItem
     @FocusState private var composerFocused: Bool
     @State private var showInspector = false
+    /// Drives the "clear chat history" confirmation — destructive and synced to
+    /// every connected device, so we always confirm first.
+    @State private var confirmingClear = false
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -41,6 +44,22 @@ struct iOSConversationView: View {
                     Label("Inspector", systemImage: "sidebar.right")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) { confirmingClear = true } label: {
+                    Label("Clear History", systemImage: "trash")
+                }
+                .disabled(conversation.entries.isEmpty)
+            }
+        }
+        .confirmationDialog(
+            "Clear chat history?",
+            isPresented: $confirmingClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear History", role: .destructive) { conversation.clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently erases the transcript for “\(instance.name)” on every connected device. The grok process keeps running.")
         }
         .inspector(isPresented: $showInspector) {
             // On iPad: trailing column. On iPhone: system collapses to a sheet.

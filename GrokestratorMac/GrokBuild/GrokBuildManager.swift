@@ -175,6 +175,14 @@ public actor GrokBuildManager {
         await activeConversations[instanceID]?.getHistory()
     }
 
+    /// Clears a Connection's chat history. The conversation broadcasts an empty
+    /// snapshot to every subscriber, so all connected devices reset together.
+    /// No-op if no conversation exists yet for the instance.
+    public func clearHistory(for instanceID: UUID) async {
+        guard let convo = activeConversations[instanceID] else { return }
+        await convo.clearHistory()
+    }
+
     /// Capabilities (model, MCP servers, slash commands) for an instance — for the
     /// Instance Inspector and the composer's slash-command popup.
     public func capabilities(for instanceID: UUID) async throws -> AgentCapabilities {

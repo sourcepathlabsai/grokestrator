@@ -106,6 +106,12 @@ public enum GrokBuildRequest: Codable, Sendable {
 
     /// Stop receiving broadcast events for a Connection (drops the subscription).
     case unsubscribeFromConnection(instanceID: UUID)
+
+    /// Wipe a Connection's stored chat history. The server clears the persisted
+    /// transcript and broadcasts an empty `historySnapshot` to every subscriber,
+    /// so all connected devices reset their transcript together. No dedicated
+    /// response — the empty snapshot is the acknowledgement.
+    case clearHistory(instanceID: UUID)
 }
 
 /// Responses from the server for GrokBuildRequest messages.

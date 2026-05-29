@@ -101,6 +101,20 @@ public actor GrokBuildConversation {
         subscribers.removeValue(forKey: token)
     }
 
+    /// Wipes this Connection's chat history and tells every subscriber to reset.
+    /// Reuses the broadcast `.snapshot` channel: a fresh empty snapshot flows to
+    /// the local Mac UI and every remote GKSC (via the server's snapshot
+    /// forwarder), so each replays an empty transcript — the same path used on
+    /// subscribe. The cleared state is persisted so it survives restarts.
+    public func clearHistory() async {
+        await history.clearHistory()
+        try? await history.save()
+        lastFinalAnswer = nil
+        pendingToolCalls.removeAll()
+        pendingPermissions.removeAll()
+        for (_, cont) in subscribers { cont.yield(.snapshot([])) }
+    }
+
     /// Fans an update out to every broadcast subscriber. The `.turnComplete`
     /// signal that used to terminate per-prompt streams now just rides through
     /// — subscriptions are open-ended and survive turn boundaries.
