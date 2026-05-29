@@ -22,6 +22,13 @@ public actor MacGrokestratorServer {
     private let manager: GrokBuildManager
     private var instanceListSubscribers: [GrokestratorListener.ClientID] = []
     private var lastBroadcastInstances: [ManagedInstance] = []
+    /// In-flight full-media stream tasks, keyed by requestID, so `cancelMedia`
+    /// can stop one a client has given up on.
+    private var mediaStreamTasks: [UUID: Task<Void, Never>] = [:]
+
+    private func clearMediaStream(_ requestID: UUID) {
+        mediaStreamTasks.removeValue(forKey: requestID)
+    }
 
     public init(manager: GrokBuildManager) {
         self.manager = manager
@@ -149,18 +156,26 @@ public actor MacGrokestratorServer {
         case .fetchMedia(let instanceID, let path, let maxDimension, let requestID):
             // Off the actor so a large file / AVFoundation work doesn't block
             // other requests. Thumbnails reply in one chunk; full files stream
-            // in 512KB chunks read from disk, correlated by requestID.
-            Task.detached {
-                if let maxDimension {
+            // in chunks read from disk, correlated by requestID. The streaming
+            // task is tracked so `cancelMedia` can stop it mid-flight.
+            if let maxDimension {
+                Task.detached {
                     let thumb = await MediaVendor.thumbnail(path: path, maxDimension: maxDimension)
                     let chunk = thumb.map { MediaChunk(sequence: 0, isFinal: true, mimeType: $0.mime, data: $0.data) }
                     await outbox.toClient(.grokBuild(.mediaData(instanceID: instanceID, requestID: requestID, chunk: chunk)), clientID)
-                } else {
+                }
+            } else {
+                let task = Task.detached { [weak self] in
                     await MediaVendor.streamFull(path: path) { chunk in
                         await outbox.toClient(.grokBuild(.mediaData(instanceID: instanceID, requestID: requestID, chunk: chunk)), clientID)
                     }
+                    await self?.clearMediaStream(requestID)
                 }
+                mediaStreamTasks[requestID] = task
             }
+
+        case .cancelMedia(_, let requestID):
+            mediaStreamTasks.removeValue(forKey: requestID)?.cancel()
 
         case .clearHistory(let instanceID):
             // A client (this Mac or a remote iPad) asked to wipe the transcript.
