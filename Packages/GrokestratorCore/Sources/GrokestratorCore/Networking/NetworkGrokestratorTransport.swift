@@ -15,7 +15,6 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
     private let serverID: UUID
     private var connection: NWConnection?
     private var eventHandler: (@Sendable (GrokestratorEvent, UUID) async -> Void)?
-    private var buffer = LineFrameBuffer()
     private var readerTask: Task<Void, Never>?
     /// Frames are pushed here by the socket reader and consumed by a separate
     /// task, so decoding/dispatch never backpressures (or stalls) socket reads.
@@ -96,40 +95,55 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
         framesContinuation = cont
         let serverID = self.serverID
 
-        // Consumer.
+        // Consumer: decode + dispatch at its own pace (actor-isolated).
         Task { [weak self] in
             for await frame in frameStream {
                 await self?.dispatch(frame, serverID: serverID)
             }
         }
 
-        // Reader.
-        readerTask = Task { [weak self] in
+        // Reader: a *pure* socket drain — a LOCAL frame buffer + the Sendable
+        // stream continuation, touching neither the actor nor downstream work.
+        // This is the crucial bit: an earlier version routed each chunk through
+        // an actor method, which serialized with the consumer and let the TCP
+        // window fill (sender stalled after ~1 chunk on a fast link). Reading on
+        // its own keeps the window open so bulk transfers stream at full speed.
+        readerTask = Task {
+            var buffer = LineFrameBuffer()
+            defer { cont.finish() }
             while !Task.isCancelled {
                 let result: (data: Data, done: Bool)
                 do {
                     result = try await Self.receive(on: connection)
                 } catch {
-                    await self?.eventHandler?(.error(.transportError(error.localizedDescription)), serverID)
+                    cont.yield(Self.errorFrame(error))
                     break
                 }
-                if !result.data.isEmpty { await self?.ingest(result.data) }
+                if !result.data.isEmpty {
+                    for frame in buffer.append(result.data) { cont.yield(frame) }
+                }
                 if result.done { break }   // genuine EOF (isComplete) — NOT a spurious empty read
             }
-            await self?.finishFrames()
         }
     }
 
-    /// Buffer incoming bytes and emit any complete frames to the consumer. Fast
-    /// + non-blocking so the reader keeps the socket drained.
-    private func ingest(_ data: Data) {
-        for frame in buffer.append(data) { framesContinuation?.yield(frame) }
+    /// Sentinel frame the reader emits on a transport error, decoded by the
+    /// consumer into a `.serverError` event (so the reader never has to await
+    /// the actor).
+    private static let errorFramePrefix = "\u{0}GKERR\u{0}"
+    private static func errorFrame(_ error: Error) -> Data {
+        Data((errorFramePrefix + error.localizedDescription).utf8)
     }
-
-    private func finishFrames() { framesContinuation?.finish() }
 
     /// Decode one frame and dispatch its event downstream.
     private func dispatch(_ frame: Data, serverID: UUID) async {
+        // Reader-injected transport error sentinel.
+        let prefix = Data(Self.errorFramePrefix.utf8)
+        if frame.starts(with: prefix) {
+            let msg = String(decoding: frame.dropFirst(prefix.count), as: UTF8.self)
+            await eventHandler?(.error(.transportError(msg)), serverID)
+            return
+        }
         guard let message = try? LineFramedJSONCodec.decode(frame) else { return }
         if case .event(let event) = message.payload {
             await eventHandler?(event, serverID)
