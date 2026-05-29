@@ -290,10 +290,20 @@ struct iOSVideoPartView: View {
 
 private struct VideoPlayerWrapper: UIViewControllerRepresentable {
     let url: URL
+    /// Auto-play on present (fullscreen remote video). Inline previews can leave
+    /// it false so they don't start playing unbidden.
+    var autoplay: Bool = false
     func makeUIViewController(context _: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
-        vc.player = AVPlayer(url: url)
+        let player = AVPlayer(url: url)
+        vc.player = player
         vc.allowsPictureInPicturePlayback = true
+        if autoplay {
+            // Make sure audio plays even if the device is on silent.
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player.play()
+        }
         return vc
     }
     func updateUIViewController(_: AVPlayerViewController, context _: Context) {}
@@ -558,7 +568,7 @@ private struct iOSVideoFullscreen: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            VideoPlayerWrapper(url: url).ignoresSafeArea()
+            VideoPlayerWrapper(url: url, autoplay: true).ignoresSafeArea()
             Button { dismiss() } label: {
                 Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.85))
             }
