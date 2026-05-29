@@ -42,7 +42,7 @@ struct SettingsView: View {
                 Text("Listener").font(Theme.display(12, .semibold))
             }
         }
-        .padding(20)
+        .formStyle(.grouped)
     }
 
     private var statusText: String {

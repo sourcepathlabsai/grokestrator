@@ -14,12 +14,14 @@ final class iOSAppModel {
     var instances: [InstanceItem] = []
     var selectedInstanceID: UUID?
     private(set) var remoteLinks: [RemoteServerLink]
+    /// One retry-loop task per link, so `removeRemoteServer` can cancel it.
+    private var attachTasks: [UUID: Task<Void, Never>] = [:]
 
     init() {
         let configs = RemoteServerStore.load()
         self.remoteLinks = configs.map { RemoteServerLink(config: $0) }
         // Auto-connect on launch so the user opens the app to a populated sidebar.
-        for link in remoteLinks { Task { await self.attach(link) } }
+        for link in remoteLinks { attachTasks[link.id] = Task { await self.attach(link) } }
     }
 
     /// Saves a new remote server and connects to it.
@@ -31,11 +33,14 @@ final class iOSAppModel {
 
         let link = RemoteServerLink(config: config)
         remoteLinks.append(link)
-        Task { await attach(link) }
+        attachTasks[link.id] = Task { await attach(link) }
     }
 
-    /// Drops a remote server — disconnect, remove its instances, persist.
+    /// Drops a remote server — cancel its retry loop, disconnect, remove its
+    /// instances, persist.
     func removeRemoteServer(_ link: RemoteServerLink) {
+        attachTasks[link.id]?.cancel()
+        attachTasks[link.id] = nil
         Task { await link.disconnect() }
         instances.removeAll { $0.serverID == link.id }
         remoteLinks.removeAll { $0.id == link.id }
@@ -51,10 +56,19 @@ final class iOSAppModel {
     /// periodic refresh (matching the Mac behavior — small follow-up to replace
     /// with an AsyncStream from the link).
     private func attach(_ link: RemoteServerLink) async {
-        await link.connect()
-        while !Task.isCancelled, link.state == .connected || link.state == .connecting {
-            reconcile(link: link)
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        // Retry loop: keep (re)connecting until this link is removed (task
+        // cancelled). Without the outer loop, a link that failed once — e.g.
+        // added while the Mac's server was still off — would strand forever on
+        // "Failed"/"Connecting" even after the server came up.
+        while !Task.isCancelled {
+            await link.connect()
+            while !Task.isCancelled, link.state == .connected || link.state == .connecting {
+                reconcile(link: link)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            if Task.isCancelled { break }
+            // Dropped or failed — back off, then try again.
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
         }
     }
 
