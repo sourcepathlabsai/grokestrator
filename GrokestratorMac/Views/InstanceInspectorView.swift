@@ -41,7 +41,7 @@ struct InstanceInspectorView: View {
                 if let caps {
                     if let model = caps.currentModel { modelSection(model) }
                     if let usage, usage.hasData { usageSection(usage) }
-                    mcpSection(caps.mcpServers)
+                    mcpSection(caps)
                     commandsSection(caps.commands, instance: instance)
                 } else {
                     HStack(spacing: 8) {
@@ -164,12 +164,20 @@ struct InstanceInspectorView: View {
     }
 
     @ViewBuilder
-    private func mcpSection(_ servers: [MCPServerInfo]) -> some View {
+    private func mcpSection(_ caps: AgentCapabilities) -> some View {
+        let servers = caps.mcpServers
+        let ready = caps.mcpTotal.map { (caps.mcpConnected ?? 0) >= $0 } ?? (caps.mcpToolCount != nil)
         section("MCP Servers", systemImage: "server.rack", count: servers.count) {
-            if servers.isEmpty {
-                emptyRow("No MCP servers configured")
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 6) {
+                if let status = caps.mcpStatusLabel {
+                    HStack(spacing: 6) {
+                        Circle().fill(ready ? Color.green : Color.yellow).frame(width: 5, height: 5)
+                        Text(status).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                    }
+                }
+                if servers.isEmpty {
+                    emptyRow("No MCP servers configured")
+                } else {
                     ForEach(servers) { server in
                         HStack(spacing: 8) {
                             Circle().fill(Theme.accent).frame(width: 5, height: 5)

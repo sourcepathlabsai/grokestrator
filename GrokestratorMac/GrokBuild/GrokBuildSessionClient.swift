@@ -231,9 +231,28 @@ public actor GrokBuildSessionClient {
     }
 
     private func handleNotification(method: String, line: Data) {
+        // grok's vendor MCP lifecycle notifications → live aggregate MCP status
+        // for the Instance Inspector (servers come up async after the handshake).
+        switch method {
+        case "_x.ai/mcp/init_progress":
+            if let p = try? JSONDecoder().decode(RPCParams<MCPInitProgress>.self, from: line).params {
+                capabilities.mcpTotal = p.total ?? capabilities.mcpTotal
+                capabilities.mcpConnected = p.connected ?? capabilities.mcpConnected
+            }
+            return
+        case "_x.ai/mcp_initialized":
+            if let p = try? JSONDecoder().decode(RPCParams<MCPInitialized>.self, from: line).params {
+                capabilities.mcpToolCount = p.mcpToolCount
+                if let total = capabilities.mcpTotal { capabilities.mcpConnected = total }
+            }
+            return
+        default:
+            break
+        }
+
         guard method == "session/update",
               let p = try? JSONDecoder().decode(RPCParams<SessionUpdateParams>.self, from: line).params
-        else { return } // ignore vendor _x.ai/* and other notifications for now
+        else { return } // ignore other vendor _x.ai/* notifications for now
 
         noteActivity()   // the turn is alive — refresh the idle watchdog
         if let t = p.meta?.totalTokens { usage.totalTokens = t }   // running context usage
@@ -505,6 +524,11 @@ private extension GrokBuildSessionClient {
         }
     }
 }
+
+/// `_x.ai/mcp/init_progress` params — servers connecting (`connected` of `total`).
+private struct MCPInitProgress: Decodable { let total: Int?; let connected: Int? }
+/// `_x.ai/mcp_initialized` params — MCP load finished; total tools across servers.
+private struct MCPInitialized: Decodable { let mcpToolCount: Int?; let elapsedMs: Int? }
 
 /// Decode of the `initialize` result `_meta` — cwd plus the capability data the
 /// inspector / slash popup surface (model, MCP servers, slash commands).
