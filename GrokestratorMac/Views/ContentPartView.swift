@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
-import QuickLookThumbnailing
+@preconcurrency import QuickLookThumbnailing
 
 /// Renders an assistant message that contains a mix of text and inline media.
 struct AssistantContentView: View {
