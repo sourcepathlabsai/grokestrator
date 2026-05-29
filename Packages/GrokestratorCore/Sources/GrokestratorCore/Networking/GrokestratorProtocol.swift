@@ -166,7 +166,27 @@ public enum GrokBuildEvent: Codable, Sendable {
     /// `conversationUpdate` events. Clients replay this to populate their view.
     case historySnapshot(instanceID: UUID, turns: [AgentTurn])
 
-    /// Reply to `GrokBuildRequest.fetchMedia`, correlated by `requestID`.
-    /// `data == nil` ⇒ the file was missing/unreadable or exceeded the size cap.
-    case mediaData(instanceID: UUID, requestID: UUID, data: Data?, mimeType: String?)
+    /// Reply to `GrokBuildRequest.fetchMedia`, correlated by `requestID`, as a
+    /// stream of chunks. `chunk == nil` ⇒ the file was missing/unreadable. The
+    /// client accumulates chunks until one with `isFinal == true`. Thumbnails
+    /// arrive as a single final chunk; full files stream in order.
+    case mediaData(instanceID: UUID, requestID: UUID, chunk: MediaChunk?)
+}
+
+/// One slice of a streamed media transfer (see `GrokBuildEvent.mediaData`).
+/// Chunking keeps each wire frame small for large files instead of one giant
+/// base64 message. Chunks for a given requestID arrive in `sequence` order over
+/// the single connection.
+public struct MediaChunk: Codable, Sendable {
+    public let sequence: Int
+    public let isFinal: Bool
+    public let mimeType: String
+    public let data: Data
+
+    public init(sequence: Int, isFinal: Bool, mimeType: String, data: Data) {
+        self.sequence = sequence
+        self.isFinal = isFinal
+        self.mimeType = mimeType
+        self.data = data
+    }
 }

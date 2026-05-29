@@ -38,9 +38,14 @@ public actor GrokBuildClientSession {
     private var capContinuation: CheckedContinuation<AgentCapabilities, Never>?
     private var usageContinuation: CheckedContinuation<SessionUsage, Never>?
 
-    /// In-flight media fetches, keyed by requestID. Resolved by the matching
-    /// `mediaData` event or by a per-request timeout (both resolve, never throw).
+    /// In-flight media fetches, keyed by requestID. Resolved when the final
+    /// chunk arrives or an inactivity watchdog fires (both resolve, never throw).
     private var mediaContinuations: [UUID: CheckedContinuation<(data: Data, mimeType: String)?, Never>] = [:]
+    /// Accumulated chunks per in-flight fetch (mime + concatenated bytes).
+    private var mediaBuffers: [UUID: (mime: String, data: Data)] = [:]
+    /// Per-fetch inactivity watchdog — re-armed on each chunk so a slow but
+    /// progressing large transfer isn't killed, only a truly stalled one.
+    private var mediaWatchdogs: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Initialization
 
@@ -227,19 +232,25 @@ public actor GrokBuildClientSession {
             )))
         } catch { return nil }
 
-        let timeout: Double = maxDimension == nil ? 120 : 20
-        let watchdog = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-            await self?.resolveMedia(requestID, with: nil)
-        }
-        let result = await withCheckedContinuation { (cont: CheckedContinuation<(data: Data, mimeType: String)?, Never>) in
+        // Inactivity timeout: re-armed on every chunk, so a large file that's
+        // still flowing won't be cut off — only a genuinely stalled fetch is.
+        armMediaWatchdog(requestID, inactivity: maxDimension == nil ? 45 : 20)
+        return await withCheckedContinuation { (cont: CheckedContinuation<(data: Data, mimeType: String)?, Never>) in
             self.mediaContinuations[requestID] = cont
         }
-        watchdog.cancel()
-        return result
+    }
+
+    private func armMediaWatchdog(_ requestID: UUID, inactivity: Double) {
+        mediaWatchdogs[requestID]?.cancel()
+        mediaWatchdogs[requestID] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(inactivity * 1_000_000_000))
+            await self?.resolveMedia(requestID, with: nil)
+        }
     }
 
     private func resolveMedia(_ requestID: UUID, with value: (data: Data, mimeType: String)?) {
+        mediaWatchdogs.removeValue(forKey: requestID)?.cancel()
+        mediaBuffers.removeValue(forKey: requestID)
         if let cont = mediaContinuations.removeValue(forKey: requestID) {
             cont.resume(returning: value)
         }
@@ -307,12 +318,16 @@ public actor GrokBuildClientSession {
                 cont.resume(returning: usage)
             }
 
-        case .mediaData(let instID, let requestID, let data, let mime):
+        case .mediaData(let instID, let requestID, let chunk):
             guard instID == instanceID else { return }
-            if let data, let mime {
-                resolveMedia(requestID, with: (data: data, mimeType: mime))
+            guard let chunk else { resolveMedia(requestID, with: nil); return }
+            var buf = mediaBuffers[requestID] ?? (mime: chunk.mimeType, data: Data())
+            buf.data.append(chunk.data)
+            mediaBuffers[requestID] = buf
+            if chunk.isFinal {
+                resolveMedia(requestID, with: (data: buf.data, mimeType: buf.mime))
             } else {
-                resolveMedia(requestID, with: nil)
+                armMediaWatchdog(requestID, inactivity: 45)   // progress → reset timer
             }
 
         case .error(let instID, _, let message):
@@ -348,6 +363,9 @@ public actor GrokBuildClientSession {
         activePrompts.removeAll()
         pendingToolCallsByPrompt.removeAll()
         // Fail any in-flight media fetches so their awaiters don't hang.
+        for (_, task) in mediaWatchdogs { task.cancel() }
+        mediaWatchdogs.removeAll()
+        mediaBuffers.removeAll()
         for (_, cont) in mediaContinuations { cont.resume(returning: nil) }
         mediaContinuations.removeAll()
     }

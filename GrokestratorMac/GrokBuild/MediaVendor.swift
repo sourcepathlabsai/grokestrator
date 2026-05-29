@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
+import GrokestratorCore
 
 /// Serves grok-generated media artifacts to remote clients. The transcript only
 /// carries the Mac-local file path; a remote iPad/Mac can't read it, so it asks
@@ -12,20 +13,22 @@ import UniformTypeIdentifiers
 /// All work is nonisolated + async so the server actor isn't blocked while a
 /// large file is read or a poster frame is rendered.
 enum MediaVendor {
-    /// Hard cap on a full (non-thumbnail) fetch. Bytes cross the wire base64'd in
-    /// one JSON message, so an unbounded video would wedge the framing. Large
-    /// files simply don't inline today — a follow-up can chunk them.
-    static let maxFullBytes = 64 * 1024 * 1024   // 64 MB
+    /// Sanity cap on a full fetch — generous now that bytes stream in chunks
+    /// rather than one giant message.
+    static let maxFullBytes = 1_024 * 1024 * 1024   // 1 GB
+    /// Per-chunk size for streamed full transfers. Small enough that each wire
+    /// frame's base64 stays modest; large enough to amortize per-message overhead.
+    static let chunkSize = 512 * 1024               // 512 KB
 
-    /// Returns `(data, mimeType)` for a media file, or `nil` if missing,
-    /// over the size cap, or not thumbnailable. `maxDimension != nil` ⇒ a
-    /// downscaled JPEG thumbnail (image) or poster frame (video).
+    /// In-process fetch (used by the local driver — no wire, no chunking).
+    /// `(data, mimeType)` for a media file, or `nil` if missing / over the cap /
+    /// not thumbnailable. `maxDimension != nil` ⇒ downscaled thumbnail / poster.
     static func load(path: String, maxDimension: Int?) async -> (data: Data, mime: String)? {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
 
         if let maxDimension {
-            return await thumbnail(for: url, maxDimension: maxDimension)
+            return await renderThumbnail(for: url, maxDimension: maxDimension)
         }
 
         guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int,
@@ -34,9 +37,46 @@ enum MediaVendor {
         return (data, mimeType(for: url))
     }
 
+    /// Thumbnail/poster as a single small JPEG (for the server's thumbnail path).
+    static func thumbnail(path: String, maxDimension: Int) async -> (data: Data, mime: String)? {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return await renderThumbnail(for: url, maxDimension: maxDimension)
+    }
+
+    /// Streams a full file to `send` in `chunkSize` slices read straight from
+    /// disk — so a large video is never held wholly in memory server-side and
+    /// each wire frame stays small. Sends a single `nil` if missing / over the
+    /// cap. The last slice carries `isFinal == true`; an empty file yields one
+    /// empty final chunk.
+    static func streamFull(path: String, send: (MediaChunk?) async -> Void) async {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int,
+              size <= maxFullBytes,
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            await send(nil); return
+        }
+        defer { try? handle.close() }
+
+        let mime = mimeType(for: url)
+        if size == 0 {
+            await send(MediaChunk(sequence: 0, isFinal: true, mimeType: mime, data: Data()))
+            return
+        }
+        var offset = 0, seq = 0
+        while offset < size {
+            let len = min(chunkSize, size - offset)
+            guard let data = try? handle.read(upToCount: len), !data.isEmpty else { break }
+            offset += data.count
+            await send(MediaChunk(sequence: seq, isFinal: offset >= size, mimeType: mime, data: data))
+            seq += 1
+        }
+    }
+
     // MARK: - Thumbnails
 
-    private static func thumbnail(for url: URL, maxDimension: Int) async -> (data: Data, mime: String)? {
+    private static func renderThumbnail(for url: URL, maxDimension: Int) async -> (data: Data, mime: String)? {
         let ext = url.pathExtension.lowercased()
         if videoExts.contains(ext) { return await videoPoster(url: url, maxDimension: maxDimension) }
         if imageExts.contains(ext) { return imageThumbnail(url: url, maxDimension: maxDimension) }
