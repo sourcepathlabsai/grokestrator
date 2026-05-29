@@ -38,11 +38,21 @@ public actor GrokBuildClientSession {
     private var capContinuation: CheckedContinuation<AgentCapabilities, Never>?
     private var usageContinuation: CheckedContinuation<SessionUsage, Never>?
 
-    /// In-flight media fetches, keyed by requestID. Resolved when the final
-    /// chunk arrives or an inactivity watchdog fires (both resolve, never throw).
-    private var mediaContinuations: [UUID: CheckedContinuation<(data: Data, mimeType: String)?, Never>] = [:]
-    /// Accumulated chunks per in-flight fetch (mime + concatenated bytes).
-    private var mediaBuffers: [UUID: (mime: String, data: Data)] = [:]
+    /// State for one in-flight media transfer. Thumbnails accumulate in memory
+    /// (they're small); full files stream straight to a temp file on disk so a
+    /// large video is never held whole in memory client-side.
+    private final class MediaTransfer {
+        enum Mode { case memory; case file(ext: String) }
+        let mode: Mode
+        var mime: String?
+        var data = Data()          // .memory
+        var handle: FileHandle?    // .file
+        var url: URL?              // .file
+        init(mode: Mode) { self.mode = mode }
+    }
+    private var transfers: [UUID: MediaTransfer] = [:]
+    private var dataConts: [UUID: CheckedContinuation<(data: Data, mimeType: String)?, Never>] = [:]
+    private var fileConts: [UUID: CheckedContinuation<(url: URL, mimeType: String)?, Never>] = [:]
     /// Per-fetch inactivity watchdog — re-armed on each chunk so a slow but
     /// progressing large transfer isn't killed, only a truly stalled one.
     private var mediaWatchdogs: [UUID: Task<Void, Never>] = [:]
@@ -223,37 +233,87 @@ public actor GrokBuildClientSession {
     /// the full file. Returns `nil` on missing file, size-cap, or timeout — the
     /// UI shows a placeholder rather than hanging. Timeout is generous for full
     /// fetches (large videos over Tailscale) and short for thumbnails.
-    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
+    /// Fetch a small in-memory thumbnail / poster (downscaled JPEG).
+    public func fetchThumbnail(path: String, maxDimension: Int) async -> (data: Data, mimeType: String)? {
         guard isValid else { return nil }
-        let requestID = UUID()
+        let id = UUID()
+        transfers[id] = MediaTransfer(mode: .memory)
         do {
-            try await sendRequest(.grokBuild(.fetchMedia(
-                instanceID: instanceID, path: path, maxDimension: maxDimension, requestID: requestID
-            )))
-        } catch { return nil }
+            try await sendRequest(.grokBuild(.fetchMedia(instanceID: instanceID, path: path, maxDimension: maxDimension, requestID: id)))
+        } catch { transfers[id] = nil; return nil }
+        armMediaWatchdog(id, inactivity: 20)
+        return await withCheckedContinuation { dataConts[id] = $0 }
+    }
 
-        // Inactivity timeout: re-armed on every chunk, so a large file that's
-        // still flowing won't be cut off — only a genuinely stalled fetch is.
-        armMediaWatchdog(requestID, inactivity: maxDimension == nil ? 45 : 20)
-        return await withCheckedContinuation { (cont: CheckedContinuation<(data: Data, mimeType: String)?, Never>) in
-            self.mediaContinuations[requestID] = cont
-        }
+    /// Fetch the full file, streamed chunk-by-chunk to a temp file on disk.
+    /// Returns its URL (for AVPlayer / QuickLook) — the bytes never live wholly
+    /// in memory client-side.
+    public func fetchFullFile(path: String) async -> (url: URL, mimeType: String)? {
+        guard isValid else { return nil }
+        let id = UUID()
+        let ext = (path as NSString).pathExtension
+        transfers[id] = MediaTransfer(mode: .file(ext: ext.isEmpty ? "bin" : ext))
+        do {
+            try await sendRequest(.grokBuild(.fetchMedia(instanceID: instanceID, path: path, maxDimension: nil, requestID: id)))
+        } catch { transfers[id] = nil; return nil }
+        armMediaWatchdog(id, inactivity: 45)
+        return await withCheckedContinuation { fileConts[id] = $0 }
     }
 
     private func armMediaWatchdog(_ requestID: UUID, inactivity: Double) {
         mediaWatchdogs[requestID]?.cancel()
         mediaWatchdogs[requestID] = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(inactivity * 1_000_000_000))
-            await self?.resolveMedia(requestID, with: nil)
+            await self?.failTransfer(requestID)
         }
     }
 
-    private func resolveMedia(_ requestID: UUID, with value: (data: Data, mimeType: String)?) {
-        mediaWatchdogs.removeValue(forKey: requestID)?.cancel()
-        mediaBuffers.removeValue(forKey: requestID)
-        if let cont = mediaContinuations.removeValue(forKey: requestID) {
-            cont.resume(returning: value)
+    /// Appends a chunk to its transfer (memory append or file write), opening
+    /// the temp file lazily on the first chunk of a file transfer.
+    private func appendChunk(_ chunk: MediaChunk, to id: UUID) {
+        guard let t = transfers[id] else { return }
+        if t.mime == nil { t.mime = chunk.mimeType }
+        switch t.mode {
+        case .memory:
+            t.data.append(chunk.data)
+        case .file(let ext):
+            if t.handle == nil {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("gk-media-\(id.uuidString).\(ext)")
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+                t.url = url
+                t.handle = try? FileHandle(forWritingTo: url)
+                if t.handle == nil { failTransfer(id); return }
+            }
+            try? t.handle?.write(contentsOf: chunk.data)
         }
+    }
+
+    private func finishTransfer(_ id: UUID) {
+        mediaWatchdogs.removeValue(forKey: id)?.cancel()
+        guard let t = transfers.removeValue(forKey: id) else { return }
+        let mime = t.mime ?? "application/octet-stream"
+        switch t.mode {
+        case .memory:
+            dataConts.removeValue(forKey: id)?.resume(returning: (data: t.data, mimeType: mime))
+        case .file:
+            try? t.handle?.close()
+            if let url = t.url {
+                fileConts.removeValue(forKey: id)?.resume(returning: (url: url, mimeType: mime))
+            } else {
+                fileConts.removeValue(forKey: id)?.resume(returning: nil)
+            }
+        }
+    }
+
+    private func failTransfer(_ id: UUID) {
+        mediaWatchdogs.removeValue(forKey: id)?.cancel()
+        if let t = transfers.removeValue(forKey: id), case .file = t.mode {
+            try? t.handle?.close()
+            if let url = t.url { try? FileManager.default.removeItem(at: url) }
+        }
+        dataConts.removeValue(forKey: id)?.resume(returning: nil)
+        fileConts.removeValue(forKey: id)?.resume(returning: nil)
     }
 
     private func resolveCapabilitiesWithCache() {
@@ -320,12 +380,10 @@ public actor GrokBuildClientSession {
 
         case .mediaData(let instID, let requestID, let chunk):
             guard instID == instanceID else { return }
-            guard let chunk else { resolveMedia(requestID, with: nil); return }
-            var buf = mediaBuffers[requestID] ?? (mime: chunk.mimeType, data: Data())
-            buf.data.append(chunk.data)
-            mediaBuffers[requestID] = buf
+            guard let chunk else { failTransfer(requestID); return }
+            appendChunk(chunk, to: requestID)
             if chunk.isFinal {
-                resolveMedia(requestID, with: (data: buf.data, mimeType: buf.mime))
+                finishTransfer(requestID)
             } else {
                 armMediaWatchdog(requestID, inactivity: 45)   // progress → reset timer
             }
@@ -365,9 +423,15 @@ public actor GrokBuildClientSession {
         // Fail any in-flight media fetches so their awaiters don't hang.
         for (_, task) in mediaWatchdogs { task.cancel() }
         mediaWatchdogs.removeAll()
-        mediaBuffers.removeAll()
-        for (_, cont) in mediaContinuations { cont.resume(returning: nil) }
-        mediaContinuations.removeAll()
+        for (_, t) in transfers where t.handle != nil {
+            try? t.handle?.close()
+            if let url = t.url { try? FileManager.default.removeItem(at: url) }
+        }
+        transfers.removeAll()
+        for (_, cont) in dataConts { cont.resume(returning: nil) }
+        for (_, cont) in fileConts { cont.resume(returning: nil) }
+        dataConts.removeAll()
+        fileConts.removeAll()
     }
 }
 

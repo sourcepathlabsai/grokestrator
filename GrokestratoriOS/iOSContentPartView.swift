@@ -436,7 +436,7 @@ struct iOSRemoteImagePartView: View {
 
     private func loadFull() async {
         if fullData == nil, let loader {
-            fullData = await loader.full(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+            fullData = await loader.full(path: path)
         }
         showFull = true
     }
@@ -489,7 +489,7 @@ struct iOSRemoteVideoPartView: View {
         guard let loader else { return }
         if playURL == nil {
             loadingFull = true
-            playURL = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+            playURL = await loader.fullFileURL(path: path)
             loadingFull = false
         }
         if playURL != nil { showPlayer = true }
@@ -534,7 +534,7 @@ struct iOSRemoteMediaCard: View {
         guard !loading, let loader else { return }
         if url == nil {
             loading = true
-            url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+            url = await loader.fullFileURL(path: path)
             loading = false
         }
         if url != nil { showPreview = true }

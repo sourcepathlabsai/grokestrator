@@ -438,7 +438,7 @@ struct RemoteImagePartView: View {
 
     private func openFull() async {
         guard let loader,
-              let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+              let url = await loader.fullFileURL(path: path)
         else { NSSound.beep(); return }
         NSWorkspace.shared.open(url)
     }
@@ -490,7 +490,7 @@ struct RemoteVideoPartView: View {
     private func play() async {
         guard let loader else { return }
         loadingFull = true
-        let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        let url = await loader.fullFileURL(path: path)
         loadingFull = false
         if let url { player = AVPlayer(url: url); player?.play() }
     }
@@ -528,7 +528,7 @@ struct RemoteFileCardView: View {
     private func open() async {
         guard !loading, let loader else { return }
         loading = true
-        let url = await loader.fullFileURL(path: path, preferredExtension: mediaFileExtension(for: mimeType))
+        let url = await loader.fullFileURL(path: path)
         loading = false
         if let url { NSWorkspace.shared.open(url) } else { NSSound.beep() }
     }

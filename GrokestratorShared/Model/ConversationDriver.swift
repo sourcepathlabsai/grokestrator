@@ -1,5 +1,6 @@
 import Foundation
 import GrokestratorCore
+import UniformTypeIdentifiers
 
 /// Single seam between the UI and the actual conversation source — local
 /// in-process (`LiveConversationDriver`) or over the wire to a remote GKSS
@@ -39,15 +40,18 @@ public protocol ConversationDriver: Sendable {
     func clearHistory() async
 
     /// `true` when media artifacts live on a *remote* host and must be fetched
-    /// via `fetchMedia` (a remote client). `false` for a local driver, where the
-    /// transcript's file paths are directly readable and render without a fetch.
+    /// (a remote client). `false` for a local driver, where the transcript's
+    /// file paths are directly readable and render without a fetch.
     var resolvesMediaRemotely: Bool { get }
 
-    /// Fetch a media artifact's bytes by its (host-side) path. `maxDimension !=
-    /// nil` requests a downscaled thumbnail / video poster bounded to that pixel
-    /// size; `nil` requests the full file. Returns `nil` on missing/oversized/
-    /// timed-out fetches.
-    func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)?
+    /// A small in-memory thumbnail / video poster (downscaled JPEG bytes),
+    /// bounded to `maxDimension` pixels. `nil` on missing / timed-out fetch.
+    func fetchMediaThumbnail(path: String, maxDimension: Int) async -> (data: Data, mimeType: String)?
+
+    /// The full media file as a local file URL. Remote drivers stream it to a
+    /// temp file (never holding it whole in memory); local drivers return the
+    /// on-disk path directly. `nil` on missing / timed-out fetch.
+    func fetchMediaFile(path: String) async -> (url: URL, mimeType: String)?
 }
 
 #if os(macOS)
@@ -115,13 +119,19 @@ public struct LiveConversationDriver: ConversationDriver {
     }
 
     // Local host: the transcript's paths are readable directly, so media never
-    // needs fetching for display. We still implement `fetchMedia` (via the same
-    // vendor the server uses) for completeness / parity.
+    // needs fetching for display. We still implement these for completeness.
     public var resolvesMediaRemotely: Bool { false }
 
-    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
+    public func fetchMediaThumbnail(path: String, maxDimension: Int) async -> (data: Data, mimeType: String)? {
         guard let r = await MediaVendor.load(path: path, maxDimension: maxDimension) else { return nil }
         return (data: r.data, mimeType: r.mime)
+    }
+
+    public func fetchMediaFile(path: String) async -> (url: URL, mimeType: String)? {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        return (url: url, mimeType: mime)
     }
 }
 #endif

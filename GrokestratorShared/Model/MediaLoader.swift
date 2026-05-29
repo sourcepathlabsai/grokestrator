@@ -8,15 +8,18 @@ import SwiftUI
 /// `\.mediaLoader` environment value.
 @MainActor
 final class MediaLoader {
-    private let fetch: @Sendable (_ path: String, _ maxDimension: Int?) async -> (data: Data, mimeType: String)?
+    private let thumbFetch: @Sendable (_ path: String, _ maxDimension: Int) async -> (data: Data, mimeType: String)?
+    private let fileFetch: @Sendable (_ path: String) async -> (url: URL, mimeType: String)?
 
     private var thumbs: [String: Data] = [:]                 // "path|dim" → jpeg bytes
-    private var fullURLs: [String: URL] = [:]                // path → temp file
+    private var files: [String: URL] = [:]                   // path → file url
     private var inFlightThumb: [String: Task<Data?, Never>] = [:]
-    private var inFlightFull: [String: Task<URL?, Never>] = [:]
+    private var inFlightFile: [String: Task<URL?, Never>] = [:]
 
-    init(fetch: @escaping @Sendable (_ path: String, _ maxDimension: Int?) async -> (data: Data, mimeType: String)?) {
-        self.fetch = fetch
+    init(thumbnail: @escaping @Sendable (_ path: String, _ maxDimension: Int) async -> (data: Data, mimeType: String)?,
+         file: @escaping @Sendable (_ path: String) async -> (url: URL, mimeType: String)?) {
+        self.thumbFetch = thumbnail
+        self.fileFetch = file
     }
 
     /// A downscaled thumbnail / video poster (JPEG bytes), cached in memory.
@@ -25,7 +28,7 @@ final class MediaLoader {
         let key = "\(path)|\(maxDimension)"
         if let d = thumbs[key] { return d }
         if let t = inFlightThumb[key] { return await t.value }
-        let fetch = self.fetch
+        let fetch = thumbFetch
         let task = Task { await fetch(path, maxDimension)?.data }
         inFlightThumb[key] = task
         let data = await task.value
@@ -34,30 +37,26 @@ final class MediaLoader {
         return data
     }
 
-    /// The full file written to a temp URL (for AVPlayer / QuickLook), cached.
-    func fullFileURL(path: String, preferredExtension ext: String) async -> URL? {
-        if let u = fullURLs[path], FileManager.default.fileExists(atPath: u.path) { return u }
-        if let t = inFlightFull[path] { return await t.value }
-        let fetch = self.fetch
-        let task = Task { () -> URL? in
-            guard let r = await fetch(path, nil) else { return nil }
-            let base = (path as NSString).lastPathComponent
-            let name = base.isEmpty ? "file.\(ext)" : base
-            let tmp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("gk-media-\(UInt(bitPattern: path.hashValue))-\(name)")
-            return (try? r.data.write(to: tmp, options: .atomic)) != nil ? tmp : nil
-        }
-        inFlightFull[path] = task
+    /// The full file as a local URL (for AVPlayer / QuickLook). The driver
+    /// streams it to disk; we just cache the resulting URL. Concurrent requests
+    /// for the same path share one fetch.
+    func fullFileURL(path: String) async -> URL? {
+        if let u = files[path], FileManager.default.fileExists(atPath: u.path) { return u }
+        if let t = inFlightFile[path] { return await t.value }
+        let fetch = fileFetch
+        let task = Task { await fetch(path)?.url }
+        inFlightFile[path] = task
         let url = await task.value
-        inFlightFull[path] = nil
-        if let url { fullURLs[path] = url }
+        inFlightFile[path] = nil
+        if let url { files[path] = url }
         return url
     }
 
-    /// Full file bytes (reads the cached temp file). Handy for image fullscreen
-    /// / share where a `UIImage`/`NSImage` is wanted rather than a URL.
-    func full(path: String, preferredExtension ext: String) async -> Data? {
-        guard let url = await fullFileURL(path: path, preferredExtension: ext) else { return nil }
+    /// Full file bytes (reads the cached file). Handy for image fullscreen /
+    /// share where a `UIImage`/`NSImage` is wanted rather than a URL. Images are
+    /// small enough to hold in memory; large media should use `fullFileURL`.
+    func full(path: String) async -> Data? {
+        guard let url = await fullFileURL(path: path) else { return nil }
         return try? Data(contentsOf: url)
     }
 }
