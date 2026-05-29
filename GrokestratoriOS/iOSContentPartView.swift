@@ -465,24 +465,19 @@ struct iOSRemoteVideoPartView: View {
     let name: String
     @Environment(\.mediaLoader) private var loader
     @State private var poster: UIImage?
-    @State private var loadingFull = false
     @State private var playItem: VideoItem?
     @State private var failed = false
 
     var body: some View {
-        Button { Task { await play() } } label: {
+        Button { play() } label: {
             ZStack {
                 if let poster {
                     Image(uiImage: poster).resizable().aspectRatio(contentMode: .fit)
                 } else {
                     Rectangle().fill(Theme.surfaceSoft).aspectRatio(16.0/9.0, contentMode: .fit)
                 }
-                if loadingFull {
-                    ProgressView().controlSize(.large).tint(.white)
-                } else {
-                    Image(systemName: failed ? "exclamationmark.triangle.fill" : "play.circle.fill")
-                        .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
-                }
+                Image(systemName: failed ? "exclamationmark.triangle.fill" : "play.circle.fill")
+                    .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
             }
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -499,18 +494,12 @@ struct iOSRemoteVideoPartView: View {
         if let data = await loader.thumbnail(path: path, maxDimension: 800) { poster = UIImage(data: data) }
     }
 
-    private func play() async {
-        guard let loader else { return }
-        loadingFull = true
-        let url = await loader.fullFileURL(path: path)
-        loadingFull = false
-        mediaLog.info("video fetch \(path, privacy: .public) → \(url?.path ?? "nil", privacy: .public)")
-        if let url {
-            failed = false
-            playItem = VideoItem(url: url)
-        } else {
-            failed = true
-        }
+    private func play() {
+        // Stream over HTTP: hand AVPlayer the host's media-server URL and let it
+        // buffer/seek natively. No chunked transfer (which deadlocked + stalled).
+        guard let url = loader?.streamURL(path: path) else { failed = true; return }
+        failed = false
+        playItem = VideoItem(url: url)
     }
 }
 

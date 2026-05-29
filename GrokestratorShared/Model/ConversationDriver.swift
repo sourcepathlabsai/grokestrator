@@ -52,6 +52,13 @@ public protocol ConversationDriver: Sendable {
     /// temp file (never holding it whole in memory); local drivers return the
     /// on-disk path directly. `nil` on missing / timed-out fetch.
     func fetchMediaFile(path: String) async -> (url: URL, mimeType: String)?
+
+    /// A directly playable/streamable URL for a media artifact at host `path`.
+    /// Remote drivers return an `http://` URL served by the host's media server
+    /// (so `AVPlayer` streams it natively — progressive, seekable, no chunked
+    /// transfer); local drivers return the on-disk `file://` URL. `nil` when the
+    /// host isn't addressable yet.
+    func mediaURL(forHostPath path: String) -> URL?
 }
 
 #if os(macOS)
@@ -132,6 +139,11 @@ public struct LiveConversationDriver: ConversationDriver {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
         return (url: url, mimeType: mime)
+    }
+
+    public func mediaURL(forHostPath path: String) -> URL? {
+        let url = URL(fileURLWithPath: path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }
 #endif

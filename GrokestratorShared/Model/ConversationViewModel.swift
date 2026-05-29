@@ -83,7 +83,8 @@ final class ConversationViewModel {
         self.driver = driver
         self.mediaLoader = MediaLoader(
             thumbnail: { [driver] path, dim in await driver.fetchMediaThumbnail(path: path, maxDimension: dim) },
-            file: { [driver] path in await driver.fetchMediaFile(path: path) }
+            file: { [driver] path in await driver.fetchMediaFile(path: path) },
+            url: { [driver] path in driver.mediaURL(forHostPath: path) }
         )
     }
 

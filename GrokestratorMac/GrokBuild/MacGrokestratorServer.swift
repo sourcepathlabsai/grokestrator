@@ -19,6 +19,8 @@ public actor MacGrokestratorServer {
 
     public private(set) var state: State = .stopped
     private var listener: GrokestratorListener?
+    /// HTTP file server for streaming media artifacts (runs on control port + 1).
+    private let mediaServer = MediaHTTPServer()
     private let manager: GrokBuildManager
     private var instanceListSubscribers: [GrokestratorListener.ClientID] = []
     private var lastBroadcastInstances: [ManagedInstance] = []
@@ -54,12 +56,16 @@ public actor MacGrokestratorServer {
         self.listener = listener
         let bound = await listener.state
         if case .listening(let p) = bound { state = .listening(port: p) }
+
+        // Media HTTP server on control port + 1 — clients derive the same.
+        try? await mediaServer.start(port: port &+ 1)
     }
 
     /// Stops the listener; all connected clients disconnect.
     public func stop() async {
         await listener?.stop()
         listener = nil
+        await mediaServer.stop()
         instanceListSubscribers.removeAll()
         state = .stopped
     }
