@@ -17,6 +17,12 @@ public struct AgentCapabilities: Sendable, Equatable, Codable {
     public var models: [AgentModel]
     public var mcpServers: [MCPServerInfo]
     public var commands: [SlashCommand]
+    /// Live MCP load state from grok's `_x.ai/mcp/*` notifications: how many of
+    /// `mcpTotal` servers have connected, and the total tool count once done.
+    /// nil ⇒ not yet reported.
+    public var mcpConnected: Int?
+    public var mcpTotal: Int?
+    public var mcpToolCount: Int?
 
     public init(
         agentVersion: String? = nil,
@@ -24,7 +30,10 @@ public struct AgentCapabilities: Sendable, Equatable, Codable {
         currentModelId: String? = nil,
         models: [AgentModel] = [],
         mcpServers: [MCPServerInfo] = [],
-        commands: [SlashCommand] = []
+        commands: [SlashCommand] = [],
+        mcpConnected: Int? = nil,
+        mcpTotal: Int? = nil,
+        mcpToolCount: Int? = nil
     ) {
         self.agentVersion = agentVersion
         self.workingDirectory = workingDirectory
@@ -32,6 +41,20 @@ public struct AgentCapabilities: Sendable, Equatable, Codable {
         self.models = models
         self.mcpServers = mcpServers
         self.commands = commands
+        self.mcpConnected = mcpConnected
+        self.mcpTotal = mcpTotal
+        self.mcpToolCount = mcpToolCount
+    }
+
+    /// Short human label for the MCP load state, or nil if unreported.
+    public var mcpStatusLabel: String? {
+        guard let total = mcpTotal else {
+            return mcpToolCount.map { "\($0) tools" }
+        }
+        let connected = mcpConnected ?? 0
+        if connected < total { return "connecting \(connected)/\(total)…" }
+        if let tools = mcpToolCount { return "\(total) connected · \(tools) tools" }
+        return "\(total) connected"
     }
 
     public static let empty = AgentCapabilities()

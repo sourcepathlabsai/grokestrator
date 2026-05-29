@@ -151,6 +151,21 @@ final class ConversationViewModel {
         }
     }
 
+    /// While a turn is streaming, poll usage so the inspector's context meter
+    /// ticks up live (grok reports a running `totalTokens` mid-turn) instead of
+    /// only jumping at turn end. Self-terminates when streaming stops.
+    private var usagePollTask: Task<Void, Never>?
+    private func startUsagePolling() {
+        usagePollTask?.cancel()
+        let driver = self.driver
+        usagePollTask = Task { [weak self] in
+            while !Task.isCancelled, self?.isStreaming == true {
+                if let u = await driver.usage() { self?.usage = u }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
     /// Opens (or re-opens) the Connection's broadcast subscription and pumps
     /// `.snapshot` + `.update` events into `entries`. Call once per view
     /// appear, with the matching `id:` so a Connection switch re-subscribes
@@ -193,6 +208,7 @@ final class ConversationViewModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
         quickReplies = []
         isStreaming = true
+        startUsagePolling()                 // live context meter during the turn
         appendEntry(.userPrompt(trimmed))   // optimistic echo
         let driver = self.driver
         Task { [weak self] in
