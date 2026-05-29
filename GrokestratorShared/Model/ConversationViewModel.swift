@@ -81,9 +81,10 @@ final class ConversationViewModel {
 
     init(driver: ConversationDriver) {
         self.driver = driver
-        self.mediaLoader = MediaLoader(fetch: { [driver] path, dim in
-            await driver.fetchMedia(path: path, maxDimension: dim)
-        })
+        self.mediaLoader = MediaLoader(
+            thumbnail: { [driver] path, dim in await driver.fetchMediaThumbnail(path: path, maxDimension: dim) },
+            file: { [driver] path in await driver.fetchMediaFile(path: path) }
+        )
     }
 
     /// Loads instance capabilities. **Patient**: polls forever until grok's

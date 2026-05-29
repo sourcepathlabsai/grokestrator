@@ -55,7 +55,11 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
     // Remote host: artifacts live on the other machine; fetch them over the wire.
     public var resolvesMediaRemotely: Bool { true }
 
-    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
-        await session.fetchMedia(path: path, maxDimension: maxDimension)
+    public func fetchMediaThumbnail(path: String, maxDimension: Int) async -> (data: Data, mimeType: String)? {
+        await session.fetchThumbnail(path: path, maxDimension: maxDimension)
+    }
+
+    public func fetchMediaFile(path: String) async -> (url: URL, mimeType: String)? {
+        await session.fetchFullFile(path: path)
     }
 }
