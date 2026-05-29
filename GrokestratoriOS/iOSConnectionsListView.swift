@@ -7,6 +7,8 @@ import GrokestratorCore
 struct iOSConnectionsListView: View {
     @Bindable var model: iOSAppModel
     @State private var showingAddServer = false
+    /// Server awaiting a remove confirmation (nil ⇒ none).
+    @State private var pendingRemoval: RemoteServerLink?
 
     var body: some View {
         List(selection: $model.selectedInstanceID) {
@@ -32,14 +34,32 @@ struct iOSConnectionsListView: View {
                             .font(Theme.display(11, .semibold))
                             .foregroundStyle(Theme.textFaint)
                             .textCase(.uppercase)
-                    }
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) { model.removeRemoteServer(link) } label: {
-                        Label("Remove", systemImage: "trash")
+                        Spacer()
+                        // Always-visible remove control. (Swipe-to-delete can't be
+                        // used here: the rows are Connections under the server, and
+                        // a never-connected server has none to swipe.)
+                        Button(role: .destructive) { pendingRemoval = link } label: {
+                            Image(systemName: "trash").font(.system(size: 12))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.textFaint)
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Remove “\(pendingRemoval?.config.name ?? "")”?",
+            isPresented: Binding(get: { pendingRemoval != nil },
+                                 set: { if !$0 { pendingRemoval = nil } }),
+            presenting: pendingRemoval
+        ) { link in
+            Button("Remove Server", role: .destructive) {
+                model.removeRemoteServer(link)
+                pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: { _ in
+            Text("Removes this server from this device. The Mac and its grok sessions are unaffected.")
         }
         .scrollContentBackground(.hidden)
         .background(Theme.bgDeep)
