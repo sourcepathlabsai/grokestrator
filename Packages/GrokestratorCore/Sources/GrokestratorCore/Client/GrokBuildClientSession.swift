@@ -48,6 +48,8 @@ public actor GrokBuildClientSession {
         var data = Data()          // .memory
         var handle: FileHandle?    // .file
         var url: URL?              // .file
+        var chunks = 0
+        var bytes = 0
         init(mode: Mode) { self.mode = mode }
     }
     private var transfers: [UUID: MediaTransfer] = [:]
@@ -256,7 +258,7 @@ public actor GrokBuildClientSession {
         do {
             try await sendRequest(.grokBuild(.fetchMedia(instanceID: instanceID, path: path, maxDimension: nil, requestID: id)))
         } catch { transfers[id] = nil; return nil }
-        armMediaWatchdog(id, inactivity: 45)
+        armMediaWatchdog(id, inactivity: 60)
         return await withCheckedContinuation { fileConts[id] = $0 }
     }
 
@@ -264,7 +266,7 @@ public actor GrokBuildClientSession {
         mediaWatchdogs[requestID]?.cancel()
         mediaWatchdogs[requestID] = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(inactivity * 1_000_000_000))
-            await self?.failTransfer(requestID)
+            await self?.failTransfer(requestID, reason: "inactivity-timeout(\(inactivity)s)")
         }
     }
 
@@ -273,6 +275,8 @@ public actor GrokBuildClientSession {
     private func appendChunk(_ chunk: MediaChunk, to id: UUID) {
         guard let t = transfers[id] else { return }
         if t.mime == nil { t.mime = chunk.mimeType }
+        t.chunks += 1
+        t.bytes += chunk.data.count
         switch t.mode {
         case .memory:
             t.data.append(chunk.data)
@@ -285,7 +289,8 @@ public actor GrokBuildClientSession {
                 t.handle = try? FileHandle(forWritingTo: url)
                 if t.handle == nil { failTransfer(id); return }
             }
-            try? t.handle?.write(contentsOf: chunk.data)
+            do { try t.handle?.write(contentsOf: chunk.data) }
+            catch { failTransfer(id); return }
         }
     }
 
@@ -306,12 +311,17 @@ public actor GrokBuildClientSession {
         }
     }
 
-    private func failTransfer(_ id: UUID) {
+    private func failTransfer(_ id: UUID, reason: String = "?") {
+        let t = transfers.removeValue(forKey: id)
+        _ = reason
         mediaWatchdogs.removeValue(forKey: id)?.cancel()
-        if let t = transfers.removeValue(forKey: id), case .file = t.mode {
+        if let t, case .file = t.mode {
             try? t.handle?.close()
             if let url = t.url { try? FileManager.default.removeItem(at: url) }
         }
+        // Tell the host to stop streaming this (it doesn't know we gave up).
+        let inst = instanceID
+        Task { try? await self.sendRequest(.grokBuild(.cancelMedia(instanceID: inst, requestID: id))) }
         dataConts.removeValue(forKey: id)?.resume(returning: nil)
         fileConts.removeValue(forKey: id)?.resume(returning: nil)
     }
@@ -380,12 +390,18 @@ public actor GrokBuildClientSession {
 
         case .mediaData(let instID, let requestID, let chunk):
             guard instID == instanceID else { return }
-            guard let chunk else { failTransfer(requestID); return }
+            // Ignore late chunks for a transfer we already finished/abandoned —
+            // and tell the server to stop streaming it (saves wasted upload).
+            guard transfers[requestID] != nil else {
+                Task { try? await self.sendRequest(.grokBuild(.cancelMedia(instanceID: self.instanceID, requestID: requestID))) }
+                return
+            }
+            guard let chunk else { failTransfer(requestID, reason: "nil-chunk-from-server"); return }
             appendChunk(chunk, to: requestID)
             if chunk.isFinal {
                 finishTransfer(requestID)
             } else {
-                armMediaWatchdog(requestID, inactivity: 45)   // progress → reset timer
+                armMediaWatchdog(requestID, inactivity: 60)   // progress → reset timer
             }
 
         case .error(let instID, _, let message):

@@ -120,6 +120,11 @@ public enum GrokBuildRequest: Codable, Sendable {
     /// that pixel size; `nil` ⇒ the full original bytes. The reply is a
     /// `mediaData` event correlated by `requestID`.
     case fetchMedia(instanceID: UUID, path: String, maxDimension: Int?, requestID: UUID)
+
+    /// Abort an in-flight `fetchMedia` stream (client gave up / timed out) so the
+    /// host stops sending its remaining chunks — avoids wasting upload on a
+    /// transfer nobody is receiving anymore.
+    case cancelMedia(instanceID: UUID, requestID: UUID)
 }
 
 /// Responses from the server for GrokBuildRequest messages.

@@ -112,7 +112,7 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
     /// One-shot bridge from NWConnection's callback API to async.
     private static func receive(on connection: NWConnection) async throws -> Data {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { data, _, isComplete, error in
                 if let error { cont.resume(throwing: error); return }
                 if let data, !data.isEmpty { cont.resume(returning: data); return }
                 if isComplete { cont.resume(returning: Data()); return }

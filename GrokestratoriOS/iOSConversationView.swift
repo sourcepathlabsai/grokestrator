@@ -31,7 +31,7 @@ struct iOSConversationView: View {
                 .animation(.snappy, value: conversation.pendingPermission)
             Divider().overlay(Theme.border)
             if showSlashPopup {
-                iOSSlashCommandPopup(matches: slashMatches) { applyCommand($0) }
+                iOSSlashCommandPopup(matches: slashMatches, loading: conversation.commandsSettling) { applyCommand($0) }
             }
             composer
         }
@@ -95,9 +95,8 @@ struct iOSConversationView: View {
     }
 
     private var showSlashPopup: Bool {
-        !conversation.isStreaming
-            && conversation.pendingPermission == nil
-            && !slashMatches.isEmpty
+        guard !conversation.isStreaming, conversation.pendingPermission == nil else { return false }
+        return !slashMatches.isEmpty || (slashToken != nil && conversation.commandsSettling)
     }
 
     private func applyCommand(_ cmd: SlashCommand) {
@@ -148,6 +147,9 @@ struct iOSConversationView: View {
                 .focused($composerFocused)
                 .submitLabel(.send)
                 .onSubmit(send)
+                .onChange(of: slashToken) { _, new in
+                    if new != nil { conversation.refreshCapabilities() }
+                }
                 .padding(10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
@@ -297,11 +299,19 @@ private struct iOSPermissionOverlay: View {
 /// catalog (~30 commands) doesn't dominate the screen.
 struct iOSSlashCommandPopup: View {
     let matches: [SlashCommand]
+    var loading: Bool = false
     let onPick: (SlashCommand) -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if loading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading commands… (MCP servers)").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                }
                 ForEach(matches) { cmd in
                     Button { onPick(cmd) } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {

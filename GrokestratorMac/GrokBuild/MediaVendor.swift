@@ -16,9 +16,11 @@ enum MediaVendor {
     /// Sanity cap on a full fetch — generous now that bytes stream in chunks
     /// rather than one giant message.
     static let maxFullBytes = 1_024 * 1024 * 1024   // 1 GB
-    /// Per-chunk size for streamed full transfers. Small enough that each wire
-    /// frame's base64 stays modest; large enough to amortize per-message overhead.
-    static let chunkSize = 512 * 1024               // 512 KB
+    /// Per-chunk size for streamed full transfers. Kept small so a slow link
+    /// (e.g. a remote iPad over the internet) still shows steady per-chunk
+    /// progress — the client's inactivity watchdog sees frequent arrivals and
+    /// won't false-fail a working-but-slow transfer.
+    static let chunkSize = 64 * 1024                // 64 KB
 
     /// In-process fetch (used by the local driver — no wire, no chunking).
     /// `(data, mimeType)` for a media file, or `nil` if missing / over the cap /
@@ -51,10 +53,9 @@ enum MediaVendor {
     /// empty final chunk.
     static func streamFull(path: String, send: (MediaChunk?) async -> Void) async {
         let url = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: url.path),
-              let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int,
-              size <= maxFullBytes,
-              let handle = try? FileHandle(forReadingFrom: url) else {
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int
+        guard exists, let size, size <= maxFullBytes, let handle = try? FileHandle(forReadingFrom: url) else {
             await send(nil); return
         }
         defer { try? handle.close() }
@@ -66,8 +67,12 @@ enum MediaVendor {
         }
         var offset = 0, seq = 0
         while offset < size {
+            if Task.isCancelled { return }
             let len = min(chunkSize, size - offset)
-            guard let data = try? handle.read(upToCount: len), !data.isEmpty else { break }
+            guard let data = try? handle.read(upToCount: len), !data.isEmpty else {
+                await send(MediaChunk(sequence: seq, isFinal: true, mimeType: mime, data: Data()))
+                return
+            }
             offset += data.count
             await send(MediaChunk(sequence: seq, isFinal: offset >= size, mimeType: mime, data: data))
             seq += 1

@@ -7,14 +7,37 @@ import GrokestratorCore
 public struct RemoteServerConfig: Identifiable, Codable, Sendable, Equatable {
     public let id: UUID
     public var name: String
+    /// Tailscale name/IP — reachable from anywhere, but lower throughput
+    /// (WireGuard + ~1280 MTU).
     public var host: String
+    /// Optional LAN IP (e.g. 192.168.x.x). Tried first when set: a direct
+    /// same-Wi-Fi connection is much faster (full MTU, no tunnel) — important
+    /// for large media. Falls back to `host` when unreachable (you're away).
+    public var localHost: String?
     public var port: UInt16
 
-    public init(id: UUID = UUID(), name: String, host: String, port: UInt16) {
+    public init(id: UUID = UUID(), name: String, host: String, localHost: String? = nil, port: UInt16) {
         self.id = id
         self.name = name
         self.host = host
+        self.localHost = localHost
         self.port = port
+    }
+}
+
+struct ConnectTimeoutError: Error {}
+
+/// Runs `op`, throwing `ConnectTimeoutError` if it doesn't finish in `seconds`.
+func withConnectTimeout<T: Sendable>(seconds: Double, _ op: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await op() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw ConnectTimeoutError()
+        }
+        guard let result = try await group.next() else { throw ConnectTimeoutError() }
+        group.cancelAll()
+        return result
     }
 }
 
@@ -55,45 +78,63 @@ public final class RemoteServerLink: Identifiable {
     nonisolated public var id: UUID { config.id }
     public private(set) var state: LinkState = .disconnected
     public private(set) var instances: [ManagedInstance] = []
+    /// Which address actually connected ("LAN" or "Tailscale"), for the UI.
+    public private(set) var activePath: String?
 
     private let client: GrokestratorClient
-    private let transport: NetworkGrokestratorTransport
+    private var transport: NetworkGrokestratorTransport?
     private var serverSession: MultiServerSession?
     private var eventLoopTask: Task<Void, Never>?
 
     public init(config: RemoteServerConfig) {
         self.config = config
         self.client = GrokestratorClient()
-        self.transport = NetworkGrokestratorTransport(host: config.host, port: config.port, serverID: config.id)
     }
 
-    /// Opens the TCP connection, registers the transport, and asks for the
-    /// initial instance list.
+    /// Connects, preferring the LAN address (fast, full-MTU) and falling back to
+    /// Tailscale (works anywhere). Tries each candidate with a timeout so an
+    /// unreachable LAN IP fails over quickly instead of hanging.
     public func connect() async {
         guard state != .connected, state != .connecting else { return }
         state = .connecting
-        let address = ServerAddress(name: config.name, tailscaleAddress: config.host, port: Int(config.port))
-        let session = await client.addServer(address, displayName: config.name, transport: transport)
-        serverSession = session
 
-        do {
-            try await transport.connect()
-        } catch {
-            state = .failed(error.localizedDescription)
+        // (host, timeout, label) — LAN first if configured, then Tailscale.
+        var candidates: [(host: String, timeout: Double, label: String)] = []
+        if let lan = config.localHost?.trimmingCharacters(in: .whitespaces), !lan.isEmpty, lan != config.host {
+            candidates.append((lan, 3, "LAN"))
+        }
+        candidates.append((config.host, 12, "Tailscale"))
+
+        for cand in candidates {
+            let t = NetworkGrokestratorTransport(host: cand.host, port: config.port, serverID: config.id)
+            do {
+                try await withConnectTimeout(seconds: cand.timeout) { try await t.connect() }
+            } catch {
+                await t.disconnect()
+                continue   // try the next candidate
+            }
+
+            transport = t
+            activePath = cand.label
+            let address = ServerAddress(name: config.name, tailscaleAddress: cand.host, port: Int(config.port))
+            let session = await client.addServer(address, displayName: config.name, transport: t)
+            serverSession = session
+            await client.connect(to: session.id)
+            startEventLoop(transport: t)
+            state = .connected
+            try? await t.send(.listInstances, serverID: session.id)
             return
         }
 
-        await client.connect(to: session.id)
-        startEventLoop()
-        state = .connected
-        // Ask for the instance list right away so the sidebar can populate.
-        try? await transport.send(.listInstances, serverID: session.id)
+        state = .failed("Couldn't reach \(config.name) on the LAN or over Tailscale")
     }
 
     public func disconnect() async {
         eventLoopTask?.cancel()
         eventLoopTask = nil
-        await transport.disconnect()
+        await transport?.disconnect()
+        transport = nil
+        activePath = nil
         state = .disconnected
         instances = []
     }
@@ -114,12 +155,11 @@ public final class RemoteServerLink: Identifiable {
     /// route via the client's `handleIncoming` and listen for its own event
     /// stream too (for connection lifecycle). For inbound `instancesUpdated`
     /// we hook into the transport handler directly via `client.connect`'s wiring.
-    private func startEventLoop() {
+    private func startEventLoop(transport: NetworkGrokestratorTransport) {
         // Re-route the transport handler to also catch link-level events
         // (instancesUpdated, instanceStatusChanged, etc.). grokBuild events are
         // forwarded into the parent client so they reach the GrokBuildClientSession.
         let configID = config.id
-        let transport = self.transport
         let client = self.client
         eventLoopTask = Task {
             await transport.setEventHandler { [weak self] event, _ in

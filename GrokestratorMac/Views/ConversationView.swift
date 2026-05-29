@@ -34,7 +34,7 @@ struct ConversationView: View {
             Divider()
             quickReplyBar
             if showSlashPopup {
-                SlashCommandPopup(matches: slashMatches, highlight: slashHighlight) { applyCommand($0) }
+                SlashCommandPopup(matches: slashMatches, highlight: slashHighlight, loading: conversation.commandsSettling) { applyCommand($0) }
             }
             composer
         }
@@ -114,7 +114,12 @@ struct ConversationView: View {
                 .lineLimit(1...6)
                 .focused($composerFocused)
                 .onSubmit(send)
-                .onChange(of: slashToken) { slashHighlight = 0; slashDismissed = false }
+                .onChange(of: slashToken) { _, new in
+                    slashHighlight = 0; slashDismissed = false
+                    // Opening the `/` popup pulls the freshest command list,
+                    // including any MCP commands registered since launch.
+                    if new != nil { conversation.refreshCapabilities() }
+                }
                 .onKeyPress(action: handleComposerKey)
                 .padding(8)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
@@ -169,8 +174,10 @@ struct ConversationView: View {
     }
 
     private var showSlashPopup: Bool {
-        !slashDismissed && !conversation.isStreaming
-            && conversation.pendingPermission == nil && !slashMatches.isEmpty
+        guard !slashDismissed, !conversation.isStreaming, conversation.pendingPermission == nil else { return false }
+        // Show for matches, or for a bare/typing `/` while commands are still
+        // loading (so the "loading commands…" hint is visible).
+        return !slashMatches.isEmpty || (slashToken != nil && conversation.commandsSettling)
     }
 
     /// Inserts the chosen command, leaving the cursor ready to type any argument.
@@ -372,6 +379,7 @@ private struct PermissionOverlay: View {
 private struct SlashCommandPopup: View {
     let matches: [SlashCommand]
     let highlight: Int
+    var loading: Bool = false
     let onPick: (SlashCommand) -> Void
 
     var body: some View {
@@ -402,6 +410,13 @@ private struct SlashCommandPopup: View {
                         }
                         .buttonStyle(.plain)
                         .id(cmd.id)
+                    }
+                    if loading {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading commands… (MCP servers)").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 6)
                     }
                 }
             }

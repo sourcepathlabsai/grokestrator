@@ -297,14 +297,32 @@ final class GrokestratorModel {
 
     /// Saves a new remote server, connects to it, and adds any returned
     /// instances to the sidebar.
-    func addRemoteServer(name: String, host: String, port: UInt16) {
-        let config = RemoteServerConfig(name: name, host: host, port: port)
+    func addRemoteServer(name: String, host: String, localHost: String? = nil, port: UInt16) {
+        let config = RemoteServerConfig(name: name, host: host, localHost: localHost, port: port)
         var saved = RemoteServerStore.load()
         saved.append(config)
         RemoteServerStore.save(saved)
 
         let link = RemoteServerLink(config: config)
         remoteLinks.append(link)
+        Task { await connectAndAttach(link) }
+    }
+
+    /// Updates a remote server's connection details and reconnects with the new
+    /// config (the link's config is immutable, so the link is recreated).
+    func updateRemoteServer(_ updated: RemoteServerConfig) {
+        var saved = RemoteServerStore.load()
+        if let i = saved.firstIndex(where: { $0.id == updated.id }) { saved[i] = updated } else { saved.append(updated) }
+        RemoteServerStore.save(saved)
+
+        if let old = remoteLinks.first(where: { $0.id == updated.id }) {
+            Task { await old.disconnect() }
+        }
+        instances.removeAll { $0.serverID == updated.id }
+
+        let link = RemoteServerLink(config: updated)
+        if let i = remoteLinks.firstIndex(where: { $0.id == updated.id }) { remoteLinks[i] = link }
+        else { remoteLinks.append(link) }
         Task { await connectAndAttach(link) }
     }
 

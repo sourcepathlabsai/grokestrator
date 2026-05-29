@@ -9,6 +9,8 @@ struct iOSConnectionsListView: View {
     @State private var showingAddServer = false
     /// Server awaiting a remove confirmation (nil ⇒ none).
     @State private var pendingRemoval: RemoteServerLink?
+    /// Server config being edited (nil ⇒ none).
+    @State private var editingServer: RemoteServerConfig?
 
     var body: some View {
         List(selection: $model.selectedInstanceID) {
@@ -35,9 +37,14 @@ struct iOSConnectionsListView: View {
                             .foregroundStyle(Theme.textFaint)
                             .textCase(.uppercase)
                         Spacer()
-                        // Always-visible remove control. (Swipe-to-delete can't be
+                        // Always-visible edit + remove. (Swipe-to-delete can't be
                         // used here: the rows are Connections under the server, and
                         // a never-connected server has none to swipe.)
+                        Button { editingServer = link.config } label: {
+                            Image(systemName: "pencil").font(.system(size: 12))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.textFaint)
                         Button(role: .destructive) { pendingRemoval = link } label: {
                             Image(systemName: "trash").font(.system(size: 12))
                         }
@@ -74,6 +81,9 @@ struct iOSConnectionsListView: View {
         }
         .sheet(isPresented: $showingAddServer) {
             iOSAddRemoteServerView(model: model)
+        }
+        .sheet(item: $editingServer) { config in
+            iOSAddRemoteServerView(model: model, editing: config)
         }
         .overlay {
             if model.remoteLinks.isEmpty {
