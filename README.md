@@ -4,7 +4,7 @@
 
 Open Grokestrator on your home Mac, start a build session, walk away. Pick up your iPad on the couch — the full transcript is right there, live. Type a new prompt; it appears on the Mac too. Permission requests pop on whichever device you're looking at. Image and video results render inline on iPad. The grok process keeps running on the Mac the whole time.
 
-> Screenshots and a demo video coming this weekend.
+> Screenshots and a demo video coming soon.
 
 ---
 
