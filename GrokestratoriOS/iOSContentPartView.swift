@@ -2,7 +2,10 @@ import SwiftUI
 import UIKit
 import AVKit
 import QuickLook
+import os
 import GrokestratorCore
+
+private let mediaLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "media")
 
 /// iOS counterpart to the Mac `AssistantContentView` — interleaves text with
 /// inline media renderers (image / audio / video / file). Used in
@@ -444,15 +447,17 @@ struct iOSRemoteImagePartView: View {
 
 /// Remote video: shows a poster frame immediately, tap fetches the full file
 /// and plays it fullscreen.
+private struct VideoItem: Identifiable { let id = UUID(); let url: URL }
+
 struct iOSRemoteVideoPartView: View {
     let path: String
     let mimeType: String
     let name: String
     @Environment(\.mediaLoader) private var loader
     @State private var poster: UIImage?
-    @State private var playURL: URL?
     @State private var loadingFull = false
-    @State private var showPlayer = false
+    @State private var playItem: VideoItem?
+    @State private var failed = false
 
     var body: some View {
         Button { Task { await play() } } label: {
@@ -465,7 +470,7 @@ struct iOSRemoteVideoPartView: View {
                 if loadingFull {
                     ProgressView().controlSize(.large).tint(.white)
                 } else {
-                    Image(systemName: "play.circle.fill")
+                    Image(systemName: failed ? "exclamationmark.triangle.fill" : "play.circle.fill")
                         .font(.system(size: 46)).foregroundStyle(.white).shadow(radius: 8)
                 }
             }
@@ -475,9 +480,8 @@ struct iOSRemoteVideoPartView: View {
         }
         .buttonStyle(.plain)
         .task { await loadPoster() }
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let playURL { iOSVideoFullscreen(url: playURL) }
-        }
+        // Item-driven so the player presents reliably (no isPresented/if-let race).
+        .fullScreenCover(item: $playItem) { item in iOSVideoFullscreen(url: item.url) }
     }
 
     private func loadPoster() async {
@@ -487,12 +491,16 @@ struct iOSRemoteVideoPartView: View {
 
     private func play() async {
         guard let loader else { return }
-        if playURL == nil {
-            loadingFull = true
-            playURL = await loader.fullFileURL(path: path)
-            loadingFull = false
+        loadingFull = true
+        let url = await loader.fullFileURL(path: path)
+        loadingFull = false
+        mediaLog.info("video fetch \(path, privacy: .public) → \(url?.path ?? "nil", privacy: .public)")
+        if let url {
+            failed = false
+            playItem = VideoItem(url: url)
+        } else {
+            failed = true
         }
-        if playURL != nil { showPlayer = true }
     }
 }
 

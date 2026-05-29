@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let mediaLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "media")
 
 /// Higher-level client abstraction for driving a remote Grok Build instance.
 ///
@@ -304,8 +307,10 @@ public actor GrokBuildClientSession {
         case .file:
             try? t.handle?.close()
             if let url = t.url {
+                mediaLog.info("media finish file chunks=\(t.chunks) bytes=\(t.bytes) → \(url.lastPathComponent, privacy: .public)")
                 fileConts.removeValue(forKey: id)?.resume(returning: (url: url, mimeType: mime))
             } else {
+                mediaLog.error("media finish file but NO url (chunks=\(t.chunks))")
                 fileConts.removeValue(forKey: id)?.resume(returning: nil)
             }
         }
@@ -313,7 +318,7 @@ public actor GrokBuildClientSession {
 
     private func failTransfer(_ id: UUID, reason: String = "?") {
         let t = transfers.removeValue(forKey: id)
-        _ = reason
+        mediaLog.error("media FAIL reason=\(reason, privacy: .public) chunks=\(t?.chunks ?? 0) bytes=\(t?.bytes ?? 0)")
         mediaWatchdogs.removeValue(forKey: id)?.cancel()
         if let t, case .file = t.mode {
             try? t.handle?.close()
