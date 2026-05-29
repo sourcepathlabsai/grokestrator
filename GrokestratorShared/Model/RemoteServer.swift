@@ -98,6 +98,11 @@ public final class RemoteServerLink: Identifiable {
         guard state != .connected, state != .connecting else { return }
         state = .connecting
 
+        // Tear down any transport left over from a previous (dropped) connection
+        // before opening a new one — otherwise the old NWConnection lingers in
+        // CLOSE_WAIT and connections pile up across auto-reconnects.
+        if let old = transport { await old.disconnect(); transport = nil }
+
         // (host, timeout, label) — LAN first if configured, then Tailscale.
         var candidates: [(host: String, timeout: Double, label: String)] = []
         if let lan = config.localHost?.trimmingCharacters(in: .whitespaces), !lan.isEmpty, lan != config.host {
