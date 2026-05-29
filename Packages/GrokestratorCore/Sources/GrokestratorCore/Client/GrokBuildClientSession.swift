@@ -210,6 +210,10 @@ public actor GrokBuildClientSession {
             await self?.resolveCapabilitiesWithCache()
         }
         let result = await withCheckedContinuation { (cont: CheckedContinuation<AgentCapabilities, Never>) in
+            // A concurrent getCapabilities (e.g. poll + manual refresh) may have
+            // set a continuation while we awaited the send — resolve it from
+            // cache instead of leaking it, then take the slot.
+            if let prev = self.capContinuation { self.capContinuation = nil; prev.resume(returning: self.cachedCapabilities) }
             self.capContinuation = cont
         }
         watchdog.cancel()
@@ -227,6 +231,7 @@ public actor GrokBuildClientSession {
             await self?.resolveUsageWithCache()
         }
         let result = await withCheckedContinuation { (cont: CheckedContinuation<SessionUsage, Never>) in
+            if let prev = self.usageContinuation { self.usageContinuation = nil; prev.resume(returning: self.cachedUsage) }
             self.usageContinuation = cont
         }
         watchdog.cancel()

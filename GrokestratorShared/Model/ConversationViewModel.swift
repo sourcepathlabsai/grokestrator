@@ -108,17 +108,22 @@ final class ConversationViewModel {
             // keep watching at a slower cadence: MCP servers finish loading after
             // the handshake and push more commands via `available_commands_update`.
             // Stop once the command count holds steady (MCP load settled).
-            var lastCount = -1, stablePolls = 0
+            var lastCount = -1, stablePolls = 0, polls = 0
             while !Task.isCancelled {
                 let caps = await driver.capabilities()
                 guard let self else { return }
                 if let caps, caps != .empty {
                     if caps != self.capabilities { self.capabilities = caps }
                     self.sessionReady = true
-                    self.commandsSettling = true
                     if caps.commands.count == lastCount { stablePolls += 1 }
                     else { stablePolls = 0; lastCount = caps.commands.count }
-                    if stablePolls >= 4 { self.commandsSettling = false; return }   // ~8s steady
+                    // Settle once the command count holds steady, or give up
+                    // watching after a bounded window — we don't want a perpetual
+                    // poll loop competing with other traffic (e.g. media) on the
+                    // connection. `/`-open does a one-shot refresh anyway.
+                    polls += 1
+                    self.commandsSettling = stablePolls < 4 && polls < 15
+                    if !self.commandsSettling { return }
                 }
                 try? await Task.sleep(nanoseconds: self.sessionReady ? 2_000_000_000 : 500_000_000)
             }
