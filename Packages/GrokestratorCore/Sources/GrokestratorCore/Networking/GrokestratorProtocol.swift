@@ -112,6 +112,14 @@ public enum GrokBuildRequest: Codable, Sendable {
     /// so all connected devices reset their transcript together. No dedicated
     /// response — the empty snapshot is the acknowledgement.
     case clearHistory(instanceID: UUID)
+
+    /// Fetch the bytes of a media artifact that grok saved on the host Mac, so a
+    /// remote client can display it (the transcript only carries the Mac-local
+    /// path, which the client can't read). `maxDimension != nil` ⇒ the server
+    /// returns a downscaled thumbnail (image) or poster frame (video) bounded to
+    /// that pixel size; `nil` ⇒ the full original bytes. The reply is a
+    /// `mediaData` event correlated by `requestID`.
+    case fetchMedia(instanceID: UUID, path: String, maxDimension: Int?, requestID: UUID)
 }
 
 /// Responses from the server for GrokBuildRequest messages.
@@ -157,4 +165,8 @@ public enum GrokBuildEvent: Codable, Sendable {
     /// Sent immediately after `subscribeToConnection`, before any subsequent
     /// `conversationUpdate` events. Clients replay this to populate their view.
     case historySnapshot(instanceID: UUID, turns: [AgentTurn])
+
+    /// Reply to `GrokBuildRequest.fetchMedia`, correlated by `requestID`.
+    /// `data == nil` ⇒ the file was missing/unreadable or exceeded the size cap.
+    case mediaData(instanceID: UUID, requestID: UUID, data: Data?, mimeType: String?)
 }

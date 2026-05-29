@@ -146,6 +146,18 @@ public actor MacGrokestratorServer {
             // pressed the button).
             await manager.cancelPrompt(for: instanceID)
 
+        case .fetchMedia(let instanceID, let path, let maxDimension, let requestID):
+            // Read the artifact (or render a thumbnail/poster) off the actor so a
+            // large file or AVFoundation work doesn't block other requests, then
+            // reply with the bytes correlated by requestID.
+            Task.detached {
+                let media = await MediaVendor.load(path: path, maxDimension: maxDimension)
+                await outbox.toClient(.grokBuild(.mediaData(
+                    instanceID: instanceID, requestID: requestID,
+                    data: media?.data, mimeType: media?.mime
+                )), clientID)
+            }
+
         case .clearHistory(let instanceID):
             // A client (this Mac or a remote iPad) asked to wipe the transcript.
             // The manager clears the persisted history and broadcasts an empty

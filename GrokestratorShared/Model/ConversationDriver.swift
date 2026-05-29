@@ -37,6 +37,17 @@ public protocol ConversationDriver: Sendable {
     /// Wipe the Connection's chat history. The cleared state arrives back as an
     /// empty `.snapshot` over `subscribe()`, so every connected device resets.
     func clearHistory() async
+
+    /// `true` when media artifacts live on a *remote* host and must be fetched
+    /// via `fetchMedia` (a remote client). `false` for a local driver, where the
+    /// transcript's file paths are directly readable and render without a fetch.
+    var resolvesMediaRemotely: Bool { get }
+
+    /// Fetch a media artifact's bytes by its (host-side) path. `maxDimension !=
+    /// nil` requests a downscaled thumbnail / video poster bounded to that pixel
+    /// size; `nil` requests the full file. Returns `nil` on missing/oversized/
+    /// timed-out fetches.
+    func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)?
 }
 
 #if os(macOS)
@@ -101,6 +112,16 @@ public struct LiveConversationDriver: ConversationDriver {
 
     public func clearHistory() async {
         await manager.clearHistory(for: instanceID)
+    }
+
+    // Local host: the transcript's paths are readable directly, so media never
+    // needs fetching for display. We still implement `fetchMedia` (via the same
+    // vendor the server uses) for completeness / parity.
+    public var resolvesMediaRemotely: Bool { false }
+
+    public func fetchMedia(path: String, maxDimension: Int?) async -> (data: Data, mimeType: String)? {
+        guard let r = await MediaVendor.load(path: path, maxDimension: maxDimension) else { return nil }
+        return (data: r.data, mimeType: r.mime)
     }
 }
 #endif
