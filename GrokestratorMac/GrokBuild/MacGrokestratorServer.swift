@@ -147,15 +147,19 @@ public actor MacGrokestratorServer {
             await manager.cancelPrompt(for: instanceID)
 
         case .fetchMedia(let instanceID, let path, let maxDimension, let requestID):
-            // Read the artifact (or render a thumbnail/poster) off the actor so a
-            // large file or AVFoundation work doesn't block other requests, then
-            // reply with the bytes correlated by requestID.
+            // Off the actor so a large file / AVFoundation work doesn't block
+            // other requests. Thumbnails reply in one chunk; full files stream
+            // in 512KB chunks read from disk, correlated by requestID.
             Task.detached {
-                let media = await MediaVendor.load(path: path, maxDimension: maxDimension)
-                await outbox.toClient(.grokBuild(.mediaData(
-                    instanceID: instanceID, requestID: requestID,
-                    data: media?.data, mimeType: media?.mime
-                )), clientID)
+                if let maxDimension {
+                    let thumb = await MediaVendor.thumbnail(path: path, maxDimension: maxDimension)
+                    let chunk = thumb.map { MediaChunk(sequence: 0, isFinal: true, mimeType: $0.mime, data: $0.data) }
+                    await outbox.toClient(.grokBuild(.mediaData(instanceID: instanceID, requestID: requestID, chunk: chunk)), clientID)
+                } else {
+                    await MediaVendor.streamFull(path: path) { chunk in
+                        await outbox.toClient(.grokBuild(.mediaData(instanceID: instanceID, requestID: requestID, chunk: chunk)), clientID)
+                    }
+                }
             }
 
         case .clearHistory(let instanceID):
