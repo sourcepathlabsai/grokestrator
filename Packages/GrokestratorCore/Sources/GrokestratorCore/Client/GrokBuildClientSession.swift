@@ -1,7 +1,4 @@
 import Foundation
-import os
-
-private let mediaLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "media")
 
 /// Higher-level client abstraction for driving a remote Grok Build instance.
 ///
@@ -311,19 +308,13 @@ public actor GrokBuildClientSession {
             dataConts.removeValue(forKey: id)?.resume(returning: (data: t.data, mimeType: mime))
         case .file:
             try? t.handle?.close()
-            if let url = t.url {
-                mediaLog.info("media finish file chunks=\(t.chunks) bytes=\(t.bytes) → \(url.lastPathComponent, privacy: .public)")
-                fileConts.removeValue(forKey: id)?.resume(returning: (url: url, mimeType: mime))
-            } else {
-                mediaLog.error("media finish file but NO url (chunks=\(t.chunks))")
-                fileConts.removeValue(forKey: id)?.resume(returning: nil)
-            }
+            fileConts.removeValue(forKey: id)?.resume(returning: t.url.map { (url: $0, mimeType: mime) })
         }
     }
 
     private func failTransfer(_ id: UUID, reason: String = "?") {
         let t = transfers.removeValue(forKey: id)
-        mediaLog.error("media FAIL reason=\(reason, privacy: .public) chunks=\(t?.chunks ?? 0) bytes=\(t?.bytes ?? 0)")
+        _ = reason
         mediaWatchdogs.removeValue(forKey: id)?.cancel()
         if let t, case .file = t.mode {
             try? t.handle?.close()
@@ -400,7 +391,6 @@ public actor GrokBuildClientSession {
 
         case .mediaData(let instID, let requestID, let chunk):
             guard instID == instanceID else { return }
-            mediaLog.info("rx mediaData seq=\(chunk?.sequence ?? -1) final=\(chunk?.isFinal ?? false) known=\(self.transfers[requestID] != nil)")
             // Ignore late chunks for a transfer we already finished/abandoned —
             // and tell the server to stop streaming it (saves wasted upload).
             guard transfers[requestID] != nil else {

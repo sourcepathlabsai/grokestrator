@@ -3,10 +3,7 @@ import AppKit
 import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
-import os
 import GrokestratorCore
-
-private let mediaLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "media")
 
 /// Serves grok-generated media artifacts to remote clients. The transcript only
 /// carries the Mac-local file path; a remote iPad/Mac can't read it, so it asks
@@ -64,14 +61,13 @@ enum MediaVendor {
         defer { try? handle.close() }
 
         let mime = mimeType(for: url)
-        mediaLog.info("streamFull start size=\(size) chunks=\(size / chunkSize + 1)")
         if size == 0 {
             await send(MediaChunk(sequence: 0, isFinal: true, mimeType: mime, data: Data()))
             return
         }
         var offset = 0, seq = 0
         while offset < size {
-            if Task.isCancelled { mediaLog.info("streamFull CANCELLED at seq=\(seq)"); return }
+            if Task.isCancelled { return }
             let len = min(chunkSize, size - offset)
             guard let data = try? handle.read(upToCount: len), !data.isEmpty else {
                 await send(MediaChunk(sequence: seq, isFinal: true, mimeType: mime, data: Data()))
@@ -79,10 +75,8 @@ enum MediaVendor {
             }
             offset += data.count
             await send(MediaChunk(sequence: seq, isFinal: offset >= size, mimeType: mime, data: data))
-            if seq % 16 == 0 { mediaLog.info("streamFull sent seq=\(seq) offset=\(offset)/\(size)") }
             seq += 1
         }
-        mediaLog.info("streamFull DONE sent=\(seq) offset=\(offset)")
     }
 
     // MARK: - Thumbnails

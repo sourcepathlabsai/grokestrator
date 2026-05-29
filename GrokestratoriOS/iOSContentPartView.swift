@@ -2,10 +2,7 @@ import SwiftUI
 import UIKit
 import AVKit
 import QuickLook
-import os
 import GrokestratorCore
-
-private let mediaLog = Logger(subsystem: "ai.sourcepathlabs.grokestrator", category: "media")
 
 /// iOS counterpart to the Mac `AssistantContentView` — interleaves text with
 /// inline media renderers (image / audio / video / file). Used in
