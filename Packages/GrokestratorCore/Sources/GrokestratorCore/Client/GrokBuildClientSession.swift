@@ -271,6 +271,14 @@ public actor GrokBuildClientSession {
                 cont.resume(returning: usage)
             }
 
+        case .error(let instID, _, let message):
+            // Surface server-side failures (e.g. a prompt the Mac couldn't
+            // start) to the conversation so the UI shows them and clears the
+            // spinner. Without this, any backend error was a silent infinite
+            // "waiting". `instID == nil` ⇒ unscoped error, still relevant.
+            guard instID == nil || instID == instanceID else { return }
+            broadcastEvent(.update(.error(message)))
+
         default:
             break
         }

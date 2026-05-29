@@ -272,6 +272,13 @@ final class ConversationViewModel {
             // Surface over the thread (overlay), not as an inline row.
             endStreaming()
             pendingPermission = info
+        case .error:
+            // A failure ends the turn — clear the spinner (only `.turnComplete`
+            // did before, so an error left "waiting" spinning forever) and show
+            // the message inline.
+            endStreaming()
+            isStreaming = false
+            appendEntry(.update(update))
         case .turnComplete:
             endStreaming()
             isStreaming = false
