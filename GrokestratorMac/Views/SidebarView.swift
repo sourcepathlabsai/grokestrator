@@ -45,6 +45,7 @@ struct SidebarView: View {
                     } header: {
                         SectionHeader(
                             group: group,
+                            pathLabel: group.isRemote ? remotePathLabel(group.id) : nil,
                             onEdit: group.isRemote ? {
                                 if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
                                     editingServer = link.config
@@ -95,6 +96,18 @@ struct SidebarView: View {
         }
     }
 
+    /// "· LAN" / "· Tailscale" / "· connecting…" for a remote server group, so
+    /// you can see which path is active at a glance.
+    private func remotePathLabel(_ id: UUID) -> String? {
+        guard let link = model.remoteLinks.first(where: { $0.id == id }) else { return nil }
+        switch link.state {
+        case .connected:    return link.activePath.map { "· \($0)" } ?? "· connected"
+        case .connecting:   return "· connecting…"
+        case .failed:       return "· failed"
+        case .disconnected: return "· offline"
+        }
+    }
+
     /// Footer button revealing the archived Connections sheet. Hidden when nothing
     /// is archived to keep the sidebar quiet on first use.
     @ViewBuilder
@@ -121,6 +134,7 @@ struct SidebarView: View {
 /// context-menu "Remove" for remote groups.
 private struct SectionHeader: View {
     let group: SidebarServerGroup
+    var pathLabel: String? = nil
     let onEdit: (() -> Void)?
     let onRemove: (() -> Void)?
 
@@ -135,6 +149,11 @@ private struct SectionHeader: View {
                 .font(Theme.display(11, .semibold))
                 .foregroundStyle(Theme.textFaint)
                 .textCase(.uppercase)
+            if let pathLabel {
+                Text(pathLabel)
+                    .font(Theme.body(9))
+                    .foregroundStyle(pathLabel.contains("LAN") ? Theme.accent : Theme.textFaint)
+            }
         }
         .contextMenu {
             if let onEdit {

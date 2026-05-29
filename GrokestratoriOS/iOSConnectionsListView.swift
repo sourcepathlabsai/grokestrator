@@ -30,12 +30,16 @@ struct iOSConnectionsListView: View {
                 } header: {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(link.state == .connected ? Color.green : Color.gray)
+                            .fill(dotColor(link.state))
                             .frame(width: 6, height: 6)
                         Text(link.config.name)
                             .font(Theme.display(11, .semibold))
                             .foregroundStyle(Theme.textFaint)
                             .textCase(.uppercase)
+                        Text(pathLabel(link))
+                            .font(Theme.body(9))
+                            .foregroundStyle(link.activePath == "LAN" ? Theme.accent : Theme.textFaint)
+                            .textCase(.lowercase)
                         Spacer()
                         // Always-visible edit + remove. (Swipe-to-delete can't be
                         // used here: the rows are Connections under the server, and
@@ -105,6 +109,26 @@ struct iOSConnectionsListView: View {
         case .connecting:   return "Connecting…"
         case .connected:    return "Connected"
         case .failed(let r): return "Failed: \(r)"
+        }
+    }
+
+    /// Short path/state label shown next to a server name so you can tell at a
+    /// glance whether you're on the fast LAN path or Tailscale.
+    private func pathLabel(_ link: RemoteServerLink) -> String {
+        switch link.state {
+        case .connected:    return link.activePath.map { "· \($0)" } ?? "· connected"
+        case .connecting:   return "· connecting…"
+        case .disconnected: return "· offline"
+        case .failed:       return "· failed"
+        }
+    }
+
+    private func dotColor(_ s: RemoteServerLink.LinkState) -> Color {
+        switch s {
+        case .connected:    return .green
+        case .connecting:   return .yellow
+        case .failed:       return .red
+        case .disconnected: return .gray
         }
     }
 }
