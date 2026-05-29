@@ -63,6 +63,5 @@ device over your Tailscale network.
 ### Notes for the next release
 
 - Convert audio/files/full-image to the HTTP media path; consider per-file Range caching.
-- Wire a **Support/Donate** link into About once GitHub Sponsors / Ko-fi is set up.
 - Swap the iOS signing `DEVELOPMENT_TEAM` to the org once the paid account clears; switch
   distribution to TestFlight via `scripts/build-ios-release.sh`.
