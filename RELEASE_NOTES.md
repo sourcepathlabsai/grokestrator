@@ -43,11 +43,19 @@ device over your Tailscale network.
 
 ### Install
 
-- **Mac:** unsigned `.dmg` (`Grokestrator-0.1.0-unsigned.dmg`). First launch needs a one-time
-  Gatekeeper override — see *"How to open Grokestrator.txt"* inside the DMG (System Settings →
-  Privacy & Security → "Open Anyway", or `xattr -dr com.apple.quarantine /Applications/Grokestrator.app`).
-- **iOS:** sideload from Xcode with a free Personal Team (7-day cert). TestFlight comes once the
-  paid Apple Developer account clears.
+- **Mac — two ways:**
+  - **Clone & build from source** (recommended if you have Xcode): `git clone`, then
+    `xcodegen generate && open Grokestrator.xcodeproj` and run the **GrokestratorMac** scheme —
+    no Gatekeeper hoops because it's your own local build. See the README's *Getting Started*.
+  - **Unsigned `.dmg`** (`Grokestrator-0.1.0-unsigned.dmg`, no Xcode needed): first launch needs a
+    one-time Gatekeeper override — see *"How to open Grokestrator.txt"* inside the DMG
+    (System Settings → Privacy & Security → "Open Anyway", or
+    `xattr -dr com.apple.quarantine /Applications/Grokestrator.app`).
+- **iOS — build & deploy yourself:** there is no downloadable iOS build yet. You must
+  **build from source in Xcode and deploy to your own device** as a developer (the
+  **GrokestratoriOS** scheme + a free Personal Team gives a 7-day cert; an Apple Developer
+  account gives a longer one). A public **TestFlight** build will come once the paid Apple
+  Developer enrollment clears.
 
 ### Known limitations
 
