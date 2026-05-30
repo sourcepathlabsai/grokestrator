@@ -378,6 +378,10 @@ final class GrokestratorModel {
             let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
                                     driver: driver, serverID: serverID)
             instances.append(item)
+            // Subscribe immediately so this remote Connection's live transcript
+            // accumulates in the background — switching away and back (or to
+            // another Connection mid-turn) no longer blanks it.
+            item.conversation.startSubscription()
         }
     }
 

@@ -183,13 +183,19 @@ final class ConversationViewModel {
     private var subscriptionTask: Task<Void, Never>?
 
     func startSubscription() {
-        // A fresh subscription always begins with `.snapshot` — wipe local
-        // state so we don't accumulate from a previous selection. Crucially
-        // reset `isStreaming` too: a stuck spinner from a previous (possibly
-        // raced) send shouldn't survive into a re-subscribe. `sessionReady`
-        // resets so the "Connecting…" banner reappears while the new
-        // Connection's capabilities come up.
-        subscriptionTask?.cancel()
+        // IDEMPOTENT. The VM owns exactly one long-lived subscription for the
+        // item's lifetime; the live transcript accumulates here independent of
+        // which Connection is selected. Re-selecting a Connection re-fires the
+        // view's `.task(id:)`, which calls this again — but if we're already
+        // subscribed we must NOT tear down and wipe the stream. Doing so blanked
+        // the transcript when switching Connections mid-turn (the fresh snapshot
+        // has no in-progress answer and no thoughts), until the turn finished.
+        guard subscriptionTask == nil else { return }
+
+        // First/fresh subscription: reset local state, then replay `.snapshot`
+        // (the broadcast's first event) and pump live `.update`s. `isStreaming`
+        // resets so a stuck spinner can't survive; `sessionReady` resets so the
+        // "Connecting…" banner reappears while capabilities come up.
         entries = []
         quickReplies = []
         pendingPermission = nil
@@ -208,6 +214,9 @@ final class ConversationViewModel {
                 case .update(let update): self.handle(update)
                 }
             }
+            // Stream ended (driver replaced / disconnected) — clear the handle so
+            // a later call can establish a fresh subscription.
+            self.subscriptionTask = nil
         }
     }
 
