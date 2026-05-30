@@ -103,9 +103,16 @@ final class iOSAppModel {
             // Pull a driver for this remote instance from its link.
             Task { @MainActor [weak self] in
                 guard let self, let driver = await link.driver(for: inst.id) else { return }
+                // Guard against a duplicate created by a concurrent reconcile
+                // while we awaited the driver.
+                guard !self.instances.contains(where: { $0.id == inst.id }) else { return }
                 let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
                                         driver: driver, serverID: serverID)
                 self.instances.append(item)
+                // Subscribe immediately so this Connection's live transcript
+                // accumulates in the background — switching Connections mid-turn
+                // no longer blanks it.
+                item.conversation.startSubscription()
             }
         }
     }
