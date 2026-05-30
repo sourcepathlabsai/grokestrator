@@ -170,13 +170,21 @@ final class ConversationViewModel {
     /// `.snapshot` + `.update` events into `entries`. Call once per view
     /// appear, with the matching `id:` so a Connection switch re-subscribes
     /// cleanly. Cancellation of the awaiting Task ends the subscription.
-    func startSubscription() async {
+    /// Owns the live broadcast subscription as a self-managed task so it can
+    /// outlive any single view. The host keeps this running for its local
+    /// Connections even when their conversation isn't on-screen — otherwise a
+    /// turn driven from a *remote* device wouldn't appear on the host until it
+    /// happened to open that conversation.
+    private var subscriptionTask: Task<Void, Never>?
+
+    func startSubscription() {
         // A fresh subscription always begins with `.snapshot` — wipe local
         // state so we don't accumulate from a previous selection. Crucially
         // reset `isStreaming` too: a stuck spinner from a previous (possibly
         // raced) send shouldn't survive into a re-subscribe. `sessionReady`
         // resets so the "Connecting…" banner reappears while the new
         // Connection's capabilities come up.
+        subscriptionTask?.cancel()
         entries = []
         quickReplies = []
         pendingPermission = nil
@@ -185,11 +193,15 @@ final class ConversationViewModel {
         endStreaming()
         streamTick += 1
 
-        let stream = await driver.subscribe()
-        for await event in stream {
-            switch event {
-            case .snapshot(let turns): replay(turns: turns)
-            case .update(let update): handle(update)
+        subscriptionTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.driver.subscribe()
+            for await event in stream {
+                if Task.isCancelled { break }
+                switch event {
+                case .snapshot(let turns): self.replay(turns: turns)
+                case .update(let update): self.handle(update)
+                }
             }
         }
     }
@@ -287,9 +299,9 @@ final class ConversationViewModel {
         Task { await driver.clearHistory() }
     }
 
-    /// Soft-cancel: clears local streaming state. The subscription itself is
-    /// owned by the view's `.task(id:)` and is auto-cancelled when the view
-    /// goes away, dropping the server-side broadcaster registration cleanly.
+    /// Soft-cancel: clears local streaming state. The broadcast subscription is
+    /// owned by `subscriptionTask` (re-armed on each `startSubscription`), so it
+    /// is left untouched here.
     func cancel() {
         endStreaming()
         isStreaming = false

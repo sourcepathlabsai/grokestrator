@@ -66,11 +66,12 @@ struct ConversationView: View {
             conversation.loadCapabilities()
             conversation.refreshUsage()
         }
-        // Subscription lives as long as this view is visible. `.task(id:)` so
-        // selecting a different Connection cleanly tears the previous one down
-        // and starts a fresh one (snapshot replay → live updates).
+        // Re-arm the broadcast subscription when the selected Connection changes
+        // (snapshot replay → live updates). The subscription is self-managed by
+        // the view-model and persists past this view, so the host keeps showing
+        // turns driven from other devices even when this isn't on-screen.
         .task(id: instance.id) {
-            await conversation.startSubscription()
+            conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
     }

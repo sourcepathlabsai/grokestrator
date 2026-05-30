@@ -69,7 +69,7 @@ struct iOSConversationView: View {
         }
         .task(id: instance.id) {
             // Live session subscription. `.task(id:)` auto-cancels on switch.
-            await conversation.startSubscription()
+            conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
     }
