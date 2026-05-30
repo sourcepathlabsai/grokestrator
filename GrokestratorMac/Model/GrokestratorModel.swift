@@ -104,10 +104,14 @@ final class GrokestratorModel {
         // Re-bind LiveConversationDrivers to the actual manager (the items
         // above used a throwaway manager because `self` wasn't ready yet).
         for (idx, item) in instances.enumerated() {
-            instances[idx] = InstanceItem(
+            let rebound = InstanceItem(
                 id: item.id, name: item.name, status: .stopped,
                 driver: LiveConversationDriver(manager: manager, instanceID: item.id)
             )
+            instances[idx] = rebound
+            // Subscribe now so the host reflects remote-driven turns even before
+            // this Connection is ever opened on the host.
+            rebound.conversation.startSubscription()
         }
         if selectedInstanceID == nil { selectedInstanceID = instances.first?.id }
 
@@ -167,6 +171,9 @@ final class GrokestratorModel {
         )
         instances.append(item)
         selectedInstanceID = item.id
+        // Keep the host live for this Connection even when it isn't on-screen,
+        // so a turn driven from a remote device streams onto the host too.
+        item.conversation.startSubscription()
 
         Task { [weak self] in await self?.launchConnection(config, startingItem: item) }
     }
@@ -266,6 +273,7 @@ final class GrokestratorModel {
             driver: LiveConversationDriver(manager: manager, instanceID: connection.id)
         )
         instances.append(item)
+        item.conversation.startSubscription()
     }
 
     /// Permanently delete an archived Connection — drops config and history dir.
@@ -370,6 +378,10 @@ final class GrokestratorModel {
             let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
                                     driver: driver, serverID: serverID)
             instances.append(item)
+            // Subscribe immediately so this remote Connection's live transcript
+            // accumulates in the background — switching away and back (or to
+            // another Connection mid-turn) no longer blanks it.
+            item.conversation.startSubscription()
         }
     }
 

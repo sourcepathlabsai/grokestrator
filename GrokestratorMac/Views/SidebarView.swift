@@ -12,6 +12,8 @@ struct SidebarView: View {
     @State private var pendingDelete: InstanceItem?
     /// Remote server config being edited (nil ⇒ none).
     @State private var editingServer: RemoteServerConfig?
+    /// Remote server awaiting a remove confirmation (nil ⇒ none).
+    @State private var pendingServerRemoval: RemoteServerLink?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +55,7 @@ struct SidebarView: View {
                             } : nil,
                             onRemove: group.isRemote ? {
                                 if let link = model.remoteLinks.first(where: { $0.id == group.id }) {
-                                    model.removeRemoteServer(link)
+                                    pendingServerRemoval = link
                                 }
                             } : nil)
                     }
@@ -93,6 +95,20 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { _ in
             Text("This stops the connection and erases its config and entire chat history. This can't be undone. To keep it recoverable, Archive instead.")
+        }
+        .confirmationDialog(
+            "Remove “\(pendingServerRemoval?.config.name ?? "")”?",
+            isPresented: Binding(get: { pendingServerRemoval != nil },
+                                 set: { if !$0 { pendingServerRemoval = nil } }),
+            presenting: pendingServerRemoval
+        ) { link in
+            Button("Remove Server", role: .destructive) {
+                model.removeRemoteServer(link)
+                pendingServerRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingServerRemoval = nil }
+        } message: { _ in
+            Text("Removes this server from this device. The Mac and its grok sessions are unaffected.")
         }
     }
 
@@ -153,6 +169,25 @@ private struct SectionHeader: View {
                 Text(pathLabel)
                     .font(Theme.body(9))
                     .foregroundStyle(pathLabel.contains("LAN") ? Theme.accent : Theme.textFaint)
+            }
+            if onEdit != nil || onRemove != nil {
+                Spacer(minLength: 4)
+                if let onEdit {
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil").font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.textFaint)
+                    .help("Edit server")
+                }
+                if let onRemove {
+                    Button(action: onRemove) {
+                        Image(systemName: "trash").font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.textFaint)
+                    .help("Remove server")
+                }
             }
         }
         .contextMenu {

@@ -66,11 +66,12 @@ struct ConversationView: View {
             conversation.loadCapabilities()
             conversation.refreshUsage()
         }
-        // Subscription lives as long as this view is visible. `.task(id:)` so
-        // selecting a different Connection cleanly tears the previous one down
-        // and starts a fresh one (snapshot replay → live updates).
+        // Re-arm the broadcast subscription when the selected Connection changes
+        // (snapshot replay → live updates). The subscription is self-managed by
+        // the view-model and persists past this view, so the host keeps showing
+        // turns driven from other devices even when this isn't on-screen.
         .task(id: instance.id) {
-            await conversation.startSubscription()
+            conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
     }
@@ -241,6 +242,41 @@ struct ConversationView: View {
     }
 }
 
+/// A completed turn's thinking, collapsed into an expandable "Thought process"
+/// disclosure. Collapsed by default once the answer lands; the caret re-exposes
+/// the full reasoning. Live-only (history never persists thoughts), so this
+/// appears only in the active session, not on a reloaded transcript.
+private struct ThoughtProcessView: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Thought process").font(Theme.body(11, .medium))
+                }
+                .foregroundStyle(Theme.textFaint)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                Text(text)
+                    .font(Theme.body(12))
+                    .foregroundStyle(Theme.textMuted)
+                    .textSelection(.enabled)
+                    .padding(.leading, 13)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.leading, 24)
+    }
+}
+
 /// Renders one transcript entry with console-like, low-chrome styling.
 private struct TranscriptRow: View {
     let entry: TranscriptEntry
@@ -261,6 +297,8 @@ private struct TranscriptRow: View {
             }
         case .thought(let text):
             note("💭 \(text)")
+        case .thoughtSummary(let text):
+            ThoughtProcessView(text: text)
         case .update(let update):
             updateBody(update)
         }

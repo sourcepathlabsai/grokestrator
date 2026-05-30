@@ -69,7 +69,7 @@ struct iOSConversationView: View {
         }
         .task(id: instance.id) {
             // Live session subscription. `.task(id:)` auto-cancels on switch.
-            await conversation.startSubscription()
+            conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
     }
@@ -187,6 +187,42 @@ struct iOSConversationView: View {
 
 // MARK: - Row + overlay
 
+/// A completed turn's thinking, collapsed into an expandable "Thought process"
+/// disclosure (tap the caret to re-expose). Collapsed by default once the answer
+/// lands. Live-only — history never persists thoughts, so it shows only in the
+/// active session.
+private struct iOSThoughtProcessView: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Thought process").font(Theme.body(12, .medium))
+                }
+                .foregroundStyle(Theme.textFaint)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                Text(text)
+                    .font(Theme.body(13))
+                    .foregroundStyle(Theme.textMuted)
+                    .textSelection(.enabled)
+                    .padding(.leading, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.leading, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Renders one transcript entry. Media (`.assistantContent`) now renders via
 /// `iOSAssistantContentView` — inline UIImage / AVPlayerViewController / QuickLook
 /// for the corresponding `ContentPart` kinds (PR D).
@@ -209,6 +245,8 @@ private struct iOSTranscriptRow: View {
             }
         case .thought(let text):
             note("💭 \(text)")
+        case .thoughtSummary(let text):
+            iOSThoughtProcessView(text: text)
         case .update(let update):
             updateRow(update)
         }

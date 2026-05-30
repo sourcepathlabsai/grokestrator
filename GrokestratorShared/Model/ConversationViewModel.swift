@@ -15,6 +15,11 @@ struct TranscriptEntry: Identifiable, Sendable {
         case assistantContent([ContentPart])
         /// Assistant thinking text (may grow live as deltas stream in).
         case thought(String)
+        /// A completed turn's thinking, coalesced into one collapsed,
+        /// expandable "Thought process" group once the answer arrived. Replaces
+        /// the loose live `.thought` rows so they don't clutter the finished
+        /// turn but stay one tap away. Live-only — never persisted to history.
+        case thoughtSummary(String)
         /// Any other update: tool calls, progress/activity notes, errors, turn divider, etc.
         case update(ConversationUpdate)
     }
@@ -170,13 +175,27 @@ final class ConversationViewModel {
     /// `.snapshot` + `.update` events into `entries`. Call once per view
     /// appear, with the matching `id:` so a Connection switch re-subscribes
     /// cleanly. Cancellation of the awaiting Task ends the subscription.
-    func startSubscription() async {
-        // A fresh subscription always begins with `.snapshot` — wipe local
-        // state so we don't accumulate from a previous selection. Crucially
-        // reset `isStreaming` too: a stuck spinner from a previous (possibly
-        // raced) send shouldn't survive into a re-subscribe. `sessionReady`
-        // resets so the "Connecting…" banner reappears while the new
-        // Connection's capabilities come up.
+    /// Owns the live broadcast subscription as a self-managed task so it can
+    /// outlive any single view. The host keeps this running for its local
+    /// Connections even when their conversation isn't on-screen — otherwise a
+    /// turn driven from a *remote* device wouldn't appear on the host until it
+    /// happened to open that conversation.
+    private var subscriptionTask: Task<Void, Never>?
+
+    func startSubscription() {
+        // IDEMPOTENT. The VM owns exactly one long-lived subscription for the
+        // item's lifetime; the live transcript accumulates here independent of
+        // which Connection is selected. Re-selecting a Connection re-fires the
+        // view's `.task(id:)`, which calls this again — but if we're already
+        // subscribed we must NOT tear down and wipe the stream. Doing so blanked
+        // the transcript when switching Connections mid-turn (the fresh snapshot
+        // has no in-progress answer and no thoughts), until the turn finished.
+        guard subscriptionTask == nil else { return }
+
+        // First/fresh subscription: reset local state, then replay `.snapshot`
+        // (the broadcast's first event) and pump live `.update`s. `isStreaming`
+        // resets so a stuck spinner can't survive; `sessionReady` resets so the
+        // "Connecting…" banner reappears while capabilities come up.
         entries = []
         quickReplies = []
         pendingPermission = nil
@@ -185,12 +204,19 @@ final class ConversationViewModel {
         endStreaming()
         streamTick += 1
 
-        let stream = await driver.subscribe()
-        for await event in stream {
-            switch event {
-            case .snapshot(let turns): replay(turns: turns)
-            case .update(let update): handle(update)
+        subscriptionTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.driver.subscribe()
+            for await event in stream {
+                if Task.isCancelled { break }
+                switch event {
+                case .snapshot(let turns): self.replay(turns: turns)
+                case .update(let update): self.handle(update)
+                }
             }
+            // Stream ended (driver replaced / disconnected) — clear the handle so
+            // a later call can establish a fresh subscription.
+            self.subscriptionTask = nil
         }
     }
 
@@ -287,9 +313,9 @@ final class ConversationViewModel {
         Task { await driver.clearHistory() }
     }
 
-    /// Soft-cancel: clears local streaming state. The subscription itself is
-    /// owned by the view's `.task(id:)` and is auto-cancelled when the view
-    /// goes away, dropping the server-side broadcaster registration cleanly.
+    /// Soft-cancel: clears local streaming state. The broadcast subscription is
+    /// owned by `subscriptionTask` (re-armed on each `startSubscription`), so it
+    /// is left untouched here.
     func cancel() {
         endStreaming()
         isStreaming = false
@@ -332,19 +358,20 @@ final class ConversationViewModel {
             pendingPermission = info
         case .error:
             // A failure ends the turn — clear the spinner (only `.turnComplete`
-            // did before, so an error left "waiting" spinning forever) and show
-            // the message inline.
+            // did before, so an error left "waiting" spinning forever), tuck away
+            // any live thinking, and show the message inline.
             endStreaming()
             isStreaming = false
+            collapseThoughts()
             appendEntry(.update(update))
         case .turnComplete:
             endStreaming()
             isStreaming = false
-            // Ephemeral thoughts: the final answer has landed, so erase the
-            // turn's thinking — it was shown live while the agent worked, but
-            // it's noise once the answer is here. (History never persisted it,
-            // so a reload is already clean; this clears the live transcript.)
-            entries.removeAll { if case .thought = $0.kind { return true } else { return false } }
+            // The final answer has landed — collapse the turn's live thinking
+            // into one expandable "Thought process" group. (Belt-and-braces:
+            // we also collapse when the answer message itself finalizes, so a
+            // turn that never sends `.turnComplete` doesn't strand the thoughts.)
+            collapseThoughts()
             appendEntry(.update(update))
             refreshUsage()
         default:
@@ -354,6 +381,9 @@ final class ConversationViewModel {
     }
 
     private func appendDelta(_ text: String, kind: StreamKind) {
+        // The answer is starting to arrive — tuck the turn's thinking into a
+        // collapsed group right away (idempotent: no-op once collapsed).
+        if kind == .message { collapseThoughts() }
         if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
             switch entries[idx].kind {
             case .assistantMessage(let s): entries[idx].kind = .assistantMessage(s + text)
@@ -374,6 +404,10 @@ final class ConversationViewModel {
     /// A coalesced full message/thought arrived — finalize the streaming bubble
     /// (replacing with authoritative text) or add a finalized entry if none.
     private func finalize(_ full: String, kind: StreamKind) {
+        // A finalized answer collapses the turn's thinking even if no `.message`
+        // deltas (and no `.turnComplete`) ever arrived — the case that left the
+        // old erase-on-turnComplete path stranding live thoughts.
+        if kind == .message { collapseThoughts() }
         let finalKind = finalizedKind(full, kind: kind)
         if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
             entries[idx].kind = finalKind
@@ -414,5 +448,28 @@ final class ConversationViewModel {
     private func endStreaming() {
         streamingID = nil
         streamingKind = nil
+    }
+
+    /// Coalesce the current turn's loose live `.thought` rows into a single
+    /// collapsed `.thoughtSummary` placed where the first thought was (i.e. just
+    /// above the answer). Idempotent — once collapsed there are no loose thoughts
+    /// left, so repeat calls do nothing. Only this turn's thoughts are affected;
+    /// a prior turn's already-collapsed summary is a different kind and untouched.
+    private func collapseThoughts() {
+        guard let firstIdx = entries.firstIndex(where: {
+            if case .thought = $0.kind { return true } else { return false }
+        }) else { return }
+        let texts: [String] = entries.compactMap {
+            if case .thought(let t) = $0.kind { return t } else { return nil }
+        }
+        let combined = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        entries.removeAll { if case .thought = $0.kind { return true } else { return false } }
+        guard !combined.isEmpty else { streamTick += 1; return }
+        // If this thought entry was the one being streamed into, clear the marker
+        // so a trailing thoughtDelta doesn't try to grow a now-removed row.
+        if streamingKind == .thought { endStreaming() }
+        let insertAt = min(firstIdx, entries.count)
+        entries.insert(TranscriptEntry(kind: .thoughtSummary(combined)), at: insertAt)
+        streamTick += 1
     }
 }
