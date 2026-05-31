@@ -116,14 +116,24 @@ else
 fi
 [[ -n "$VERSION" ]] || die "could not determine MARKETING_VERSION"
 
+# Git provenance — stamp the short SHA into UNSIGNED (dev/test) builds so a
+# given DMG is always traceable to the exact commit it came from. A "-dirty"
+# suffix flags a build made with uncommitted changes. Signed/notarized PUBLIC
+# releases keep the clean "Grokestrator-X.Y.Z.dmg" name for distribution.
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+  GIT_SHA="${GIT_SHA}-dirty"
+fi
+
 if [[ "$SIGNED_MODE" -eq 1 ]]; then
   DMG_NAME="Grokestrator-$VERSION.dmg"
   log "Build mode: SIGNED + NOTARIZED  (team=$APPLE_TEAM_ID, version=$VERSION)"
 else
-  DMG_NAME="Grokestrator-$VERSION-unsigned.dmg"
+  DMG_NAME="Grokestrator-$VERSION-$GIT_SHA-unsigned.dmg"
   warn "Build mode: UNSIGNED  (no Developer ID / notarization)"
   warn "Distributable Mac-to-Mac, but the first launch needs a one-time"
   warn "Gatekeeper override — install steps are bundled in the DMG."
+  warn "Output is stamped with git commit $GIT_SHA for traceability."
 fi
 
 # ---------------------------------------------------------------------------

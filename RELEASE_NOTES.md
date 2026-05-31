@@ -1,5 +1,28 @@
 # Grokestrator — Release Notes
 
+## v0.1.1-alpha — 2026-05-30
+
+Bug-fix release for the remote-client path (a Mac/iPad/iPhone driving another
+Mac's grok over Tailscale). All issues surfaced in alpha testing.
+
+### Fixed
+
+- **Remote video now plays on the Mac client.** The Mac was pulling the whole
+  file through the control channel (which could deadlock and never start); it now
+  streams over HTTP from the host's media server — progressive and seekable — the
+  same path iOS already uses.
+- **The host Mac updates live when a turn is driven from another device.** A
+  prompt sent from a remote client now streams onto the host's own screen in real
+  time. Previously the host showed nothing unless that conversation was already
+  open — it only subscribed to the live broadcast when the view appeared.
+- **Remote servers can always be removed.** Each remote-server row now has a
+  visible **Remove** (trash) and **Edit** (pencil) button in its header, with a
+  confirm step — no more hunting for a right-click menu. Removal works regardless
+  of connection state (connecting / failed / offline) and persists across restart.
+- **A stuck "Connecting…" server can recover.** An interrupted connect attempt no
+  longer wedges the link in `connecting` forever (which had blocked every retry);
+  reconnects and the LAN→Tailscale fallback now proceed reliably.
+
 ## v0.1.0-alpha — 2026-05-29
 
 First alpha. Grokestrator is a control console for **grok agents** (`grok agent stdio`):

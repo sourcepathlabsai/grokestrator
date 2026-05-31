@@ -143,6 +143,20 @@ struct InstanceInspectorView: View {
                         }
                         .frame(height: 6)
                     }
+                    if let instance {
+                        HStack {
+                            Spacer()
+                            Button { instance.conversation.send("/compact") } label: {
+                                Label("Compact", systemImage: "arrow.down.right.and.arrow.up.left")
+                                    .font(Theme.body(10, .medium))
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .tint(Theme.accent)
+                            .disabled(instance.conversation.isStreaming)
+                            .help("Compress the conversation to free up context (sends /compact)")
+                        }
+                    }
                 }
                 Divider().overlay(Theme.border)
                 Text("LAST TURN").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)

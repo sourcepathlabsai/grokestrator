@@ -452,7 +452,6 @@ struct RemoteVideoPartView: View {
     @Environment(\.mediaLoader) private var loader
     @State private var poster: NSImage?
     @State private var player: AVPlayer?
-    @State private var loadingFull = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -460,15 +459,14 @@ struct RemoteVideoPartView: View {
                 if let player {
                     PlayerView(player: player)
                 } else {
-                    Button { Task { await play() } } label: {
+                    Button { play() } label: {
                         ZStack {
                             if let poster {
                                 Image(nsImage: poster).resizable().aspectRatio(contentMode: .fit)
                             } else {
                                 Color.black.opacity(0.3)
                             }
-                            if loadingFull { ProgressView() }
-                            else { Image(systemName: "play.circle.fill").font(.largeTitle).foregroundStyle(.white) }
+                            Image(systemName: "play.circle.fill").font(.largeTitle).foregroundStyle(.white)
                         }
                     }
                     .buttonStyle(.plain)
@@ -487,12 +485,14 @@ struct RemoteVideoPartView: View {
         if let data = await loader.thumbnail(path: path, maxDimension: 600) { poster = NSImage(data: data) }
     }
 
-    private func play() async {
-        guard let loader else { return }
-        loadingFull = true
-        let url = await loader.fullFileURL(path: path)
-        loadingFull = false
-        if let url { player = AVPlayer(url: url); player?.play() }
+    private func play() {
+        // Stream over HTTP from the host's media server (mirrors the iOS fix):
+        // hand AVPlayer the URL and let it buffer/seek natively. The old path
+        // fetched the whole file via the chunked control transfer, which
+        // deadlocked and never played for remote connections.
+        guard let loader, let url = loader.streamURL(path: path) else { NSSound.beep(); return }
+        player = AVPlayer(url: url)
+        player?.play()
     }
 }
 

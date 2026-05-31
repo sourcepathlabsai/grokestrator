@@ -88,6 +88,11 @@ public final class RemoteServerLink: Identifiable {
     private var transport: NetworkGrokestratorTransport?
     private var serverSession: MultiServerSession?
     private var eventLoopTask: Task<Void, Never>?
+    /// True while a `connect()` attempt is in flight. Tracked separately from
+    /// `state` so an interrupted attempt can't wedge the link in `.connecting`
+    /// forever — which previously blocked every retry and left a server that
+    /// couldn't be reconnected (and was hard to delete).
+    private var isConnecting = false
 
     public init(config: RemoteServerConfig) {
         self.config = config
@@ -98,7 +103,9 @@ public final class RemoteServerLink: Identifiable {
     /// Tailscale (works anywhere). Tries each candidate with a timeout so an
     /// unreachable LAN IP fails over quickly instead of hanging.
     public func connect() async {
-        guard state != .connected, state != .connecting else { return }
+        guard state != .connected, !isConnecting else { return }
+        isConnecting = true
+        defer { isConnecting = false }
         state = .connecting
 
         // Tear down any transport left over from a previous (dropped) connection
