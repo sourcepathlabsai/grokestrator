@@ -505,8 +505,8 @@ final class ConversationViewModel {
     }
 
     /// One preformatted line for a collapsible "work" update (tool call, tool
-    /// result, progress/tool-activity note), or `nil` if the update should stay
-    /// inline (answers, errors, permission/question records, status, etc.).
+    /// result, progress/activity note), or `nil` if the update should stay
+    /// inline (answers, errors, explicit user permission/question decisions, etc.).
     private func toolActivityLine(_ update: ConversationUpdate) -> String? {
         switch update {
         case .toolCallRequested(let info):
@@ -517,9 +517,11 @@ final class ConversationViewModel {
         case .progressNote(let text, let phase, _):
             return "\(phase.map { "[\($0)] " } ?? "")\(text)"
         case .activityNote(let text, let kind, _):
-            // Only tool activity collapses; permission/user_question records,
-            // which mark real user decisions, stay visible inline.
-            return kind == "tool" ? text : nil
+            // Collapse all agent activity chatter (tool updates, fs ops, progress,
+            // etc.). Only explicit user decision records (appended after the user
+            // answers a permission or question) stay visible inline.
+            let isUserDecision = (kind == "permission" || kind == "user_question")
+            return isUserDecision ? nil : text
         default:
             return nil
         }
@@ -534,12 +536,17 @@ final class ConversationViewModel {
             if case .update(let u) = kind { return toolActivityLine(u) != nil }
             return false
         }
-        guard let firstIdx = entries.firstIndex(where: { isWork($0.kind) }) else { return }
-        let lines: [String] = entries.compactMap {
-            if case .update(let u) = $0.kind { return toolActivityLine(u) }
+        // Scope to the current (last) turn only: work items before the most recent
+        // userPrompt belong to history and must not be touched.
+        let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
+        let workIndices = entries.indices.filter { $0 > currentTurnStart && isWork(entries[$0].kind) }
+        guard let firstIdx = workIndices.first else { return }
+        let lines: [String] = workIndices.compactMap { idx in
+            if case .update(let u) = entries[idx].kind { return toolActivityLine(u) }
             return nil
         }
-        entries.removeAll { isWork($0.kind) }
+        // Remove from the end so earlier indices stay valid
+        for idx in workIndices.reversed() { entries.remove(at: idx) }
         guard !lines.isEmpty else { streamTick += 1; return }
         let insertAt = min(firstIdx, entries.count)
         entries.insert(TranscriptEntry(kind: .toolActivitySummary(lines)), at: insertAt)
@@ -552,14 +559,17 @@ final class ConversationViewModel {
     /// left, so repeat calls do nothing. Only this turn's thoughts are affected;
     /// a prior turn's already-collapsed summary is a different kind and untouched.
     private func collapseThoughts() {
-        guard let firstIdx = entries.firstIndex(where: {
-            if case .thought = $0.kind { return true } else { return false }
-        }) else { return }
-        let texts: [String] = entries.compactMap {
-            if case .thought(let t) = $0.kind { return t } else { return nil }
+        let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
+        let thoughtIndices = entries.indices.filter { idx in
+            idx > currentTurnStart && { if case .thought = entries[idx].kind { return true } else { return false } }()
+        }
+        guard let firstIdx = thoughtIndices.first else { return }
+        let texts: [String] = thoughtIndices.compactMap { idx in
+            if case .thought(let t) = entries[idx].kind { return t }
+            return nil as String?
         }
         let combined = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        entries.removeAll { if case .thought = $0.kind { return true } else { return false } }
+        for idx in thoughtIndices.reversed() { entries.remove(at: idx) }
         guard !combined.isEmpty else { streamTick += 1; return }
         // If this thought entry was the one being streamed into, clear the marker
         // so a trailing thoughtDelta doesn't try to grow a now-removed row.
