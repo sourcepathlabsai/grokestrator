@@ -141,6 +141,9 @@ public actor MacGrokestratorServer {
         case .respondToPermission(let instanceID, _, let permissionId, let chosenOption):
             try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: chosenOption)
 
+        case .respondToUserQuestion(let instanceID, _, let questionId, let questionIndex, let answer):
+            try? await manager.respondToUserQuestion(for: instanceID, questionId: questionId, questionIndex: questionIndex, answer: answer)
+
         case .getCapabilities(let instanceID):
             if let caps = try? await manager.capabilities(for: instanceID) {
                 await outbox.toClient(.grokBuild(.capabilitiesUpdated(instanceID: instanceID, capabilities: caps)), clientID)

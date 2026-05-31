@@ -194,6 +194,16 @@ public actor GrokBuildClientSession {
         )))
     }
 
+    /// Answers a structured user question (`_x.ai/ask_user_question`) for an
+    /// in-flight prompt. Parallels `respondToPermission` over the wire.
+    public func respondToUserQuestion(promptID: UUID, questionId: String, questionIndex: Int, answer: String) async throws {
+        guard isValid else { throw GrokestratorError.sessionInvalidated }
+        try await sendRequest(.grokBuild(.respondToUserQuestion(
+            instanceID: instanceID, promptID: promptID,
+            questionId: questionId, questionIndex: questionIndex, answer: answer
+        )))
+    }
+
     /// Fetches the latest capabilities for this remote instance. Sends a
     /// `getCapabilities` request and awaits the matching `capabilitiesUpdated`
     /// event. Falls back to the cached value on timeout so the UI never stalls.

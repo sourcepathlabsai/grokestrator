@@ -88,6 +88,11 @@ public enum GrokBuildRequest: Codable, Sendable {
     /// Respond to a permission request from the agent.
     case respondToPermission(instanceID: UUID, promptID: UUID, permissionId: String, chosenOption: String)
 
+    /// Respond to a structured user question (`_x.ai/ask_user_question`) from the
+    /// agent. `questionIndex` is which question in the set; `answer` is the chosen
+    /// option's label or the user's free-text answer.
+    case respondToUserQuestion(instanceID: UUID, promptID: UUID, questionId: String, questionIndex: Int, answer: String)
+
     /// Request current state for a specific prompt (pending tools, etc.).
     case getPromptState(instanceID: UUID, promptID: UUID)
 
@@ -154,6 +159,9 @@ public enum GrokBuildEvent: Codable, Sendable {
 
     /// The agent is requesting a permission decision.
     case permissionRequested(instanceID: UUID, promptID: UUID, info: PermissionRequestInfo)
+
+    /// The agent is asking the user a structured question (`_x.ai/ask_user_question`).
+    case userQuestionRequested(instanceID: UUID, promptID: UUID, info: UserQuestionInfo)
 
     /// Generic error for the prompt / instance.
     case error(instanceID: UUID?, promptID: UUID?, message: String)

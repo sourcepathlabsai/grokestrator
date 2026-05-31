@@ -237,4 +237,13 @@ public actor GrokBuildManager {
         }
         try await convo.respondToPermission(permissionId: permissionId, chosenOption: chosenOption)
     }
+
+    /// Answer a pending user question (`_x.ai/ask_user_question`). Parallels
+    /// `respondToPermission`.
+    public func respondToUserQuestion(for instanceID: UUID, questionId: String, questionIndex: Int, answer: String) async throws {
+        guard let convo = activeConversations[instanceID] else {
+            throw GrokBuildError.instanceManagementError("No active conversation for \(instanceID)")
+        }
+        try await convo.respondToUserQuestion(questionId: questionId, questionIndex: questionIndex, answer: answer)
+    }
 }
