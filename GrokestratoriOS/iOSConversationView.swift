@@ -230,6 +230,66 @@ private struct iOSThoughtProcessView: View {
     }
 }
 
+/// grok's live task checklist (touch-sized), mirroring the Mac `PlanView`. A
+/// single titled card that updates in place as grok re-broadcasts the plan.
+/// Live-only — never persisted.
+private struct iOSPlanView: View {
+    let plan: AgentPlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Plan").font(Theme.body(13, .semibold)).foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text("\(plan.completedCount)/\(plan.entries.count) done")
+                    .font(Theme.body(12)).foregroundStyle(Theme.textFaint)
+            }
+            ForEach(plan.entries) { entry in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: Self.glyph(entry.status))
+                        .font(.system(size: 14))
+                        .foregroundStyle(Self.glyphColor(entry.status))
+                        .frame(width: 18)
+                    Text(entry.content)
+                        .font(Theme.body(14))
+                        .foregroundStyle(entry.status == .completed ? Theme.textFaint : Theme.textBody)
+                        .strikethrough(entry.status == .completed, color: Theme.textFaint)
+                    if entry.priority == .high, entry.status != .completed {
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+        .padding(.leading, 24)
+    }
+
+    private static func glyph(_ status: AgentPlan.Entry.Status) -> String {
+        switch status {
+        case .pending: return "circle"
+        case .inProgress: return "circle.dotted"
+        case .completed: return "checkmark.circle.fill"
+        }
+    }
+
+    private static func glyphColor(_ status: AgentPlan.Entry.Status) -> Color {
+        switch status {
+        case .pending: return Theme.textFaint
+        case .inProgress: return Theme.accent
+        case .completed: return .green
+        }
+    }
+}
+
 /// Renders one transcript entry. Media (`.assistantContent`) now renders via
 /// `iOSAssistantContentView` — inline UIImage / AVPlayerViewController / QuickLook
 /// for the corresponding `ContentPart` kinds (PR D).
@@ -254,6 +314,8 @@ private struct iOSTranscriptRow: View {
             note("💭 \(text)")
         case .thoughtSummary(let text):
             iOSThoughtProcessView(text: text)
+        case .plan(let plan):
+            iOSPlanView(plan: plan)
         case .update(let update):
             updateRow(update)
         }
@@ -280,6 +342,10 @@ private struct iOSTranscriptRow: View {
             }
         case .turnComplete:
             Divider().overlay(Theme.border).padding(.vertical, 2)
+        case .planUpdated(let plan):
+            // Plans normally render via the `.plan` entry kind (live, in-place);
+            // render the card too if one ever arrives wrapped as `.update`.
+            iOSPlanView(plan: plan)
         case .userPrompt, .messageDelta, .thoughtDelta:
             EmptyView()
         case .permissionRequested, .userQuestionRequested, .toolResultRecorded, .sessionStatus, .unknownEvent:

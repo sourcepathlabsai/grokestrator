@@ -119,7 +119,19 @@ struct SessionUpdateParams: Decodable {
         let kind: String?                  // tool call kind
         let status: String?                // tool call status
         let availableCommands: [CommandWire]?   // for "available_commands_update"
+        let entries: [PlanEntryWire]?      // for "plan" (grok's live task checklist)
+        let currentModeId: String?         // for "current_mode_update" (ACP standard; unobserved from grok)
     }
+}
+
+/// Wire shape of one entry in grok's `plan` session update. Verified against
+/// real grok logs: `{ content, priority, status }`. `priority`/`status` are
+/// decoded as raw strings and mapped defensively (unknown → sensible default)
+/// so a future grok value never crashes decoding.
+struct PlanEntryWire: Decodable {
+    let content: String
+    let priority: String?
+    let status: String?
 }
 
 /// Wire shape of an advertised slash command — shared by the `initialize` result
@@ -209,6 +221,9 @@ public enum ACPEvent: Codable, Sendable {
     case toolResult(ToolResultEvent)
     case permissionRequest(PermissionRequestEvent)
     case userQuestion(UserQuestionEvent)
+
+    /// grok's live task plan (a re-broadcast snapshot of the whole checklist).
+    case plan(PlanEvent)
     case sessionUpdate(SessionUpdateEvent)
     case error(ACPErrorEvent)
     case done(sessionId: String)
@@ -238,6 +253,18 @@ public struct ThoughtEvent: Codable, Sendable {
     public let sessionId: String
     public let content: String
     public let metadata: [String: String]?
+}
+
+/// grok's live task plan event, already mapped to the Core `AgentPlan` model
+/// (raw priority/status strings normalized defensively in the session client).
+public struct PlanEvent: Codable, Sendable {
+    public let sessionId: String
+    public let plan: AgentPlan
+
+    public init(sessionId: String, plan: AgentPlan) {
+        self.sessionId = sessionId
+        self.plan = plan
+    }
 }
 
 public struct ToolCallEvent: Codable, Sendable {
