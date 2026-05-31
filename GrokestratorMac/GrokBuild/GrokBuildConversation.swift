@@ -23,6 +23,7 @@ public actor GrokBuildConversation {
     // High-level pending state (tracked so callers never need to parse raw events)
     private var pendingToolCalls: [String: ToolCallInfo] = [:]
     private var pendingPermissions: [String: PermissionRequestInfo] = [:]
+    private var pendingQuestions: [String: UserQuestionInfo] = [:]
     private var lastFinalAnswer: String?
     private var primed = false
 
@@ -112,6 +113,7 @@ public actor GrokBuildConversation {
         lastFinalAnswer = nil
         pendingToolCalls.removeAll()
         pendingPermissions.removeAll()
+        pendingQuestions.removeAll()
         for (_, cont) in subscribers { cont.yield(.snapshot([])) }
     }
 
@@ -174,7 +176,7 @@ public actor GrokBuildConversation {
 
         // Aggressive auto-persist on meaningful events
         switch raw {
-        case .message, .toolCall, .permissionRequest:
+        case .message, .toolCall, .permissionRequest, .userQuestion:
             try? await history.save()
         default:
             break
@@ -196,9 +198,10 @@ public actor GrokBuildConversation {
 
         let final = lastFinalAnswer
 
-        // Clear any tool/permission expectations for this turn.
+        // Clear any tool/permission/question expectations for this turn.
         pendingToolCalls.removeAll()
         pendingPermissions.removeAll()
+        pendingQuestions.removeAll()
 
         return final
     }
@@ -234,6 +237,13 @@ public actor GrokBuildConversation {
                 sessionId: p.sessionId
             )
             return .permissionRequested(info)
+        case .userQuestion(let q):
+            let info = UserQuestionInfo(
+                id: q.questionId,
+                questions: q.questions,
+                sessionId: q.sessionId
+            )
+            return .userQuestionRequested(info)
         case .toolResult(let t):
             return .toolResultRecorded(toolCallId: t.toolCallId, isError: t.isError)
         case .sessionUpdate(let u):
@@ -275,6 +285,14 @@ public actor GrokBuildConversation {
                 sessionId: p.sessionId
             )
             pendingPermissions[p.permissionId] = info
+
+        case .userQuestion(let q):
+            let info = UserQuestionInfo(
+                id: q.questionId,
+                questions: q.questions,
+                sessionId: q.sessionId
+            )
+            pendingQuestions[q.questionId] = info
 
         case .toolResult(let t):
             pendingToolCalls.removeValue(forKey: t.toolCallId)
@@ -338,6 +356,18 @@ public actor GrokBuildConversation {
             permissionId: permissionId,
             chosenOption: chosenOption,
             sessionId: sessionID
+        )
+    }
+
+    /// Answer a pending `_x.ai/ask_user_question`. `answer` is the chosen option's
+    /// label or the user's free-text answer. Parallels `respondToPermission`.
+    public func respondToUserQuestion(questionId: String, questionIndex: Int, answer: String) async throws {
+        pendingQuestions.removeValue(forKey: questionId)
+
+        try await client.respondToUserQuestion(
+            questionId: questionId,
+            questionIndex: questionIndex,
+            answer: answer
         )
     }
 

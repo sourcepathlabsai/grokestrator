@@ -18,6 +18,9 @@ public actor GrokBuildSessionClient {
     private var pending: [RPCID: CheckedContinuation<Data, Error>] = [:]
     /// Agent→client permission requests awaiting the user's choice (permissionId → JSON-RPC id).
     private var pendingPermissions: [String: RPCID] = [:]
+    /// Agent→client user-question requests (`_x.ai/ask_user_question`) awaiting the
+    /// user's answer (questionId → JSON-RPC id). Parallels `pendingPermissions`.
+    private var pendingQuestions: [String: RPCID] = [:]
 
     private var initialized = false
     private var sessionId: String?
@@ -168,6 +171,28 @@ public actor GrokBuildSessionClient {
         // grok a full window to resume before considering the connection stalled.
         noteActivity()
         respond(id: id, result: selectedOutcome(chosenOption))
+    }
+
+    /// Resolves a pending `_x.ai/ask_user_question` request with the user's answer.
+    /// `answer` is either a chosen option's label or free text (the "Other" path);
+    /// both are returned to the agent as the label string for the given question.
+    public func respondToUserQuestion(questionId: String, questionIndex: Int, answer: String) async throws {
+        guard let id = pendingQuestions.removeValue(forKey: questionId) else { return }
+        // Answering revives the turn: refresh the idle clock so the watchdog gives
+        // grok a full window to resume before considering the connection stalled.
+        noteActivity()
+        // NOTE: The exact result shape grok expects for `_x.ai/ask_user_question`
+        // is UNVERIFIED — we have wire logs for the request but not the reply. This
+        // is a reasonable guess and MAY NEED ADJUSTMENT after live testing. We send
+        // a structured per-question answer carrying both the index and the label.
+        respond(id: id, result: .object([
+            "selectedOptions": .array([
+                .object([
+                    "optionIndex": .int(questionIndex),
+                    "label": .string(answer),
+                ])
+            ])
+        ]))
     }
 
     /// Finishes the active prompt stream early.
@@ -334,6 +359,27 @@ public actor GrokBuildSessionClient {
                 options: options
             )))
 
+        case "_x.ai/ask_user_question":
+            guard let p = try? JSONDecoder().decode(RPCParams<AskUserQuestionParams>.self, from: line).params,
+                  !p.questions.isEmpty else {
+                respondError(id, "invalid _x.ai/ask_user_question params"); return
+            }
+            // Suspend the request: keep its JSON-RPC id pending and surface it to the
+            // user, exactly as `session/request_permission` does. `respondToUserQuestion`
+            // resolves it once the user answers.
+            let questionId = idString(id)
+            pendingQuestions[questionId] = id
+            let questions = p.questions.map { q in
+                UserQuestion(prompt: q.question, options: q.options.map {
+                    UserQuestionOption(label: $0.label, description: $0.description)
+                })
+            }
+            emit(.userQuestion(UserQuestionEvent(
+                sessionId: p.sessionId ?? sessionId ?? "",
+                questionId: questionId,
+                questions: questions
+            )))
+
         case "fs/read_text_file":
             guard let p = try? JSONDecoder().decode(RPCParams<FsReadParams>.self, from: line).params else {
                 respondError(id, "invalid fs/read_text_file params"); return
@@ -471,7 +517,7 @@ public actor GrokBuildSessionClient {
     /// resolved or failed), `false` to keep watching.
     private func idleCheck(id: RPCID, method: String) -> Bool {
         guard pending[id] != nil else { return true }   // already resolved → done
-        if !pendingPermissions.isEmpty {
+        if !pendingPermissions.isEmpty || !pendingQuestions.isEmpty {
             noteActivity()                                // paused on the user; don't age out
             return false
         }

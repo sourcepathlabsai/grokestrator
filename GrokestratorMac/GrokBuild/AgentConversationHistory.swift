@@ -80,6 +80,10 @@ public actor AgentConversationHistory {
         case .permissionRequest(let p):
             currentTurnMessages.append(AgentMessage(role: .system, content: "Permission requested: \(p.description)"))
 
+        case .userQuestion(let q):
+            let prompts = q.questions.map(\.prompt).joined(separator: " / ")
+            currentTurnMessages.append(AgentMessage(role: .system, content: "Question asked: \(prompts)"))
+
         case .sessionUpdate, .sessionCreated, .done:
             break
 

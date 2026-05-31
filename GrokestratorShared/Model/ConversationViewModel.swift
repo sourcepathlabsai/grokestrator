@@ -43,6 +43,9 @@ final class ConversationViewModel {
     /// A permission request awaiting the user's decision (shown over the thread,
     /// not inline). `nil` when there is nothing to answer.
     private(set) var pendingPermission: PermissionRequestInfo?
+    /// A structured user question (`_x.ai/ask_user_question`) awaiting an answer,
+    /// shown over the thread like `pendingPermission`. `nil` when nothing pending.
+    private(set) var pendingUserQuestion: UserQuestionInfo?
     /// Confident quick-reply options for the last assistant question (set when a
     /// message finalizes; cleared on the next prompt). Empty ⇒ user types.
     private(set) var quickReplies: [String] = []
@@ -199,6 +202,7 @@ final class ConversationViewModel {
         entries = []
         quickReplies = []
         pendingPermission = nil
+        pendingUserQuestion = nil
         isStreaming = false
         sessionReady = capabilities != nil
         endStreaming()
@@ -303,6 +307,20 @@ final class ConversationViewModel {
         Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
     }
 
+    /// Answers a pending user question and dismisses the overlay, leaving a compact
+    /// record in the thread. `answer` is either a chosen option's label or the
+    /// user's free-text answer (the "Other" path). Mirrors `answerPermission`.
+    func answerUserQuestion(questionIndex: Int, answer: String) {
+        guard let q = pendingUserQuestion else { return }
+        let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingUserQuestion = nil
+        let prompt = q.questions.indices.contains(questionIndex) ? q.questions[questionIndex].prompt : ""
+        appendEntry(.update(.activityNote("Answered\(prompt.isEmpty ? "" : " “\(prompt)”"): \(trimmed)", kind: "user_question", metadata: nil)))
+        let driver = self.driver
+        Task { await driver.respondToUserQuestion(questionId: q.id, questionIndex: questionIndex, answer: trimmed) }
+    }
+
     /// Clears the Connection's chat history. Fire-and-forget: the driver wipes
     /// the stored transcript and the cleared state arrives back as an empty
     /// `.snapshot` over the active subscription (`replay([])`), so this view and
@@ -356,6 +374,10 @@ final class ConversationViewModel {
             // Surface over the thread (overlay), not as an inline row.
             endStreaming()
             pendingPermission = info
+        case .userQuestionRequested(let info):
+            // Surface over the thread (overlay), like a permission request.
+            endStreaming()
+            pendingUserQuestion = info
         case .error:
             // A failure ends the turn — clear the spinner (only `.turnComplete`
             // did before, so an error left "waiting" spinning forever), tuck away

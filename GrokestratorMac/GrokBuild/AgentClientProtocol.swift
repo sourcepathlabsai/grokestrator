@@ -161,6 +161,23 @@ struct PermissionParams: Decodable {
     var category: String? { toolCall?.rawInput?.variant ?? toolCall?.kind }
 }
 
+/// `_x.ai/ask_user_question` request payload (verified from real wire logs):
+/// `{ sessionId, questions: [{ question, options: [{ label, description }] }] }`.
+struct AskUserQuestionParams: Decodable {
+    let sessionId: String?
+    let questions: [AUQQuestion]
+
+    struct AUQQuestion: Decodable {
+        let question: String
+        let options: [AUQOption]
+    }
+
+    struct AUQOption: Decodable {
+        let label: String
+        let description: String?
+    }
+}
+
 /// `fs/read_text_file` request payload.
 struct FsReadParams: Decodable {
     let sessionId: String?
@@ -191,6 +208,7 @@ public enum ACPEvent: Codable, Sendable {
     case toolCall(ToolCallEvent)
     case toolResult(ToolResultEvent)
     case permissionRequest(PermissionRequestEvent)
+    case userQuestion(UserQuestionEvent)
     case sessionUpdate(SessionUpdateEvent)
     case error(ACPErrorEvent)
     case done(sessionId: String)
@@ -245,6 +263,21 @@ public struct PermissionRequestEvent: Codable, Sendable {
 
 // `PermissionOption` moved to GrokestratorCore (Models/GrokBuildConversation.swift)
 // so the wire protocol can carry it directly.
+
+/// Emitted when grok sends `_x.ai/ask_user_question`. `questionId` is the pending
+/// request id (`respondToUserQuestion` resolves it); `questions` are mapped to the
+/// UI-friendly Core shape. Parallels `PermissionRequestEvent`.
+public struct UserQuestionEvent: Codable, Sendable {
+    public let sessionId: String
+    public let questionId: String
+    public let questions: [UserQuestion]
+
+    public init(sessionId: String, questionId: String, questions: [UserQuestion]) {
+        self.sessionId = sessionId
+        self.questionId = questionId
+        self.questions = questions
+    }
+}
 
 public struct SessionUpdateEvent: Codable, Sendable {
     public let sessionId: String
