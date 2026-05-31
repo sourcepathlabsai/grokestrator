@@ -383,6 +383,53 @@ private struct ThoughtProcessView: View {
     }
 }
 
+/// A completed turn's tool calls + progress notes, collapsed into an expandable
+/// disclosure (mirrors `ThoughtProcessView`). Collapsed by default once the
+/// answer lands, so the finished turn isn't buried under `🔧 tool(...)` rows.
+/// Live-only — history never persists these.
+private struct ToolActivityView: View {
+    let lines: [String]
+    @State private var expanded = false
+
+    private var toolCount: Int { lines.lazy.filter { $0.hasPrefix("🔧") }.count }
+    private var title: String {
+        toolCount > 0 ? "\(toolCount) tool call\(toolCount == 1 ? "" : "s")" : "Activity"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 9))
+                    Text(title).font(Theme.body(11, .medium))
+                }
+                .foregroundStyle(Theme.textFaint)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(Theme.mono(11))
+                            .foregroundStyle(Theme.textMuted)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.leading, 13)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.leading, 24)
+    }
+}
+
 /// grok's live task checklist, mirroring its TUI plan view. A single titled
 /// card that updates in place as grok re-broadcasts the plan (status flips per
 /// entry). Live-only — never persisted, so it shows only in the active session.
@@ -465,6 +512,8 @@ private struct TranscriptRow: View {
             note("💭 \(text)")
         case .thoughtSummary(let text):
             ThoughtProcessView(text: text)
+        case .toolActivitySummary(let lines):
+            ToolActivityView(lines: lines)
         case .plan(let plan):
             PlanView(plan: plan)
         case .update(let update):

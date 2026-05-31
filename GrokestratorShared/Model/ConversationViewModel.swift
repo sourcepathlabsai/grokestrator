@@ -20,6 +20,12 @@ struct TranscriptEntry: Identifiable, Sendable {
         /// the loose live `.thought` rows so they don't clutter the finished
         /// turn but stay one tap away. Live-only — never persisted to history.
         case thoughtSummary(String)
+        /// A completed turn's tool calls + progress/activity notes, coalesced
+        /// into one collapsed, expandable group once the answer arrived — the
+        /// same treatment as `.thoughtSummary`, so the finished turn shows just
+        /// the answer instead of a stack of `🔧 tool(...)` / `↳ result` rows.
+        /// Each element is a preformatted line. Live-only — never persisted.
+        case toolActivitySummary([String])
         /// grok's live task checklist. There is at most ONE `.plan` entry in the
         /// transcript at a time: each plan re-broadcast replaces it in place
         /// (see `handle`'s `.planUpdated`), so the checklist updates rather than
@@ -402,16 +408,16 @@ final class ConversationViewModel {
             // any live thinking, and show the message inline.
             endStreaming()
             isStreaming = false
-            collapseThoughts()
+            collapseWork()
             appendEntry(.update(update))
         case .turnComplete:
             endStreaming()
             isStreaming = false
             // The final answer has landed — collapse the turn's live thinking
-            // into one expandable "Thought process" group. (Belt-and-braces:
-            // we also collapse when the answer message itself finalizes, so a
-            // turn that never sends `.turnComplete` doesn't strand the thoughts.)
-            collapseThoughts()
+            // and tool calls into expandable groups. (Belt-and-braces: we also
+            // collapse when the answer message itself finalizes, so a turn that
+            // never sends `.turnComplete` doesn't strand them.)
+            collapseWork()
             appendEntry(.update(update))
             refreshUsage()
         default:
@@ -421,9 +427,9 @@ final class ConversationViewModel {
     }
 
     private func appendDelta(_ text: String, kind: StreamKind) {
-        // The answer is starting to arrive — tuck the turn's thinking into a
-        // collapsed group right away (idempotent: no-op once collapsed).
-        if kind == .message { collapseThoughts() }
+        // The answer is starting to arrive — tuck the turn's thinking and tool
+        // calls into collapsed groups right away (idempotent once collapsed).
+        if kind == .message { collapseWork() }
         if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
             switch entries[idx].kind {
             case .assistantMessage(let s): entries[idx].kind = .assistantMessage(s + text)
@@ -444,10 +450,10 @@ final class ConversationViewModel {
     /// A coalesced full message/thought arrived — finalize the streaming bubble
     /// (replacing with authoritative text) or add a finalized entry if none.
     private func finalize(_ full: String, kind: StreamKind) {
-        // A finalized answer collapses the turn's thinking even if no `.message`
-        // deltas (and no `.turnComplete`) ever arrived — the case that left the
-        // old erase-on-turnComplete path stranding live thoughts.
-        if kind == .message { collapseThoughts() }
+        // A finalized answer collapses the turn's thinking + tool calls even if
+        // no `.message` deltas (and no `.turnComplete`) ever arrived — the case
+        // that left the old erase-on-turnComplete path stranding live thoughts.
+        if kind == .message { collapseWork() }
         let finalKind = finalizedKind(full, kind: kind)
         if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
             entries[idx].kind = finalKind
@@ -490,20 +496,80 @@ final class ConversationViewModel {
         streamingKind = nil
     }
 
+    /// Tuck the just-finished turn's transient work — live thinking and the
+    /// `🔧 tool(...)` / progress rows — into collapsed, expandable groups so the
+    /// finished turn reads as just its answer.
+    private func collapseWork() {
+        collapseThoughts()
+        collapseToolActivity()
+    }
+
+    /// One preformatted line for a collapsible "work" update (tool call, tool
+    /// result, progress/activity note), or `nil` if the update should stay
+    /// inline (answers, errors, explicit user permission/question decisions, etc.).
+    private func toolActivityLine(_ update: ConversationUpdate) -> String? {
+        switch update {
+        case .toolCallRequested(let info):
+            let args = (info.arguments ?? [:]).map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")
+            return "🔧 \(info.toolName)(\(args))"
+        case .toolResultRecorded(let id, let isError):
+            return "↳ tool \(id) \(isError ? "failed" : "ok")"
+        case .progressNote(let text, let phase, _):
+            return "\(phase.map { "[\($0)] " } ?? "")\(text)"
+        case .activityNote(let text, let kind, _):
+            // Collapse all agent activity chatter (tool updates, fs ops, progress,
+            // etc.). Only explicit user decision records (appended after the user
+            // answers a permission or question) stay visible inline.
+            let isUserDecision = (kind == "permission" || kind == "user_question")
+            return isUserDecision ? nil : text
+        default:
+            return nil
+        }
+    }
+
+    /// Coalesce the current turn's loose tool-call / progress rows into one
+    /// collapsed `.toolActivitySummary`, placed where the first one was. Same
+    /// incremental, idempotent contract as `collapseThoughts`: a prior turn's
+    /// summary is a different kind, so only this turn's loose rows are folded.
+    private func collapseToolActivity() {
+        func isWork(_ kind: TranscriptEntry.Kind) -> Bool {
+            if case .update(let u) = kind { return toolActivityLine(u) != nil }
+            return false
+        }
+        // Scope to the current (last) turn only: work items before the most recent
+        // userPrompt belong to history and must not be touched.
+        let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
+        let workIndices = entries.indices.filter { $0 > currentTurnStart && isWork(entries[$0].kind) }
+        guard let firstIdx = workIndices.first else { return }
+        let lines: [String] = workIndices.compactMap { idx in
+            if case .update(let u) = entries[idx].kind { return toolActivityLine(u) }
+            return nil
+        }
+        // Remove from the end so earlier indices stay valid
+        for idx in workIndices.reversed() { entries.remove(at: idx) }
+        guard !lines.isEmpty else { streamTick += 1; return }
+        let insertAt = min(firstIdx, entries.count)
+        entries.insert(TranscriptEntry(kind: .toolActivitySummary(lines)), at: insertAt)
+        streamTick += 1
+    }
+
     /// Coalesce the current turn's loose live `.thought` rows into a single
     /// collapsed `.thoughtSummary` placed where the first thought was (i.e. just
     /// above the answer). Idempotent — once collapsed there are no loose thoughts
     /// left, so repeat calls do nothing. Only this turn's thoughts are affected;
     /// a prior turn's already-collapsed summary is a different kind and untouched.
     private func collapseThoughts() {
-        guard let firstIdx = entries.firstIndex(where: {
-            if case .thought = $0.kind { return true } else { return false }
-        }) else { return }
-        let texts: [String] = entries.compactMap {
-            if case .thought(let t) = $0.kind { return t } else { return nil }
+        let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
+        let thoughtIndices = entries.indices.filter { idx in
+            idx > currentTurnStart && { if case .thought = entries[idx].kind { return true } else { return false } }()
+        }
+        guard let firstIdx = thoughtIndices.first else { return }
+        let texts: [String] = thoughtIndices.compactMap { idx in
+            if case .thought(let t) = entries[idx].kind { return t }
+            return nil as String?
         }
         let combined = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        entries.removeAll { if case .thought = $0.kind { return true } else { return false } }
+        for idx in thoughtIndices.reversed() { entries.remove(at: idx) }
         guard !combined.isEmpty else { streamTick += 1; return }
         // If this thought entry was the one being streamed into, clear the marker
         // so a trailing thoughtDelta doesn't try to grow a now-removed row.
