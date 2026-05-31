@@ -7,7 +7,9 @@ import GrokestratorCore
 /// session left off), then live updates regardless of which device initiated.
 struct iOSConversationView: View {
     @Bindable var instance: InstanceItem
-    @FocusState private var composerFocused: Bool
+    /// Plain `Bool` (not `@FocusState`) because the composer is a
+    /// `UIViewRepresentable` that drives/observes first-responder via this binding.
+    @State private var composerFocused = false
     @State private var showInspector = false
     /// Drives the "clear chat history" confirmation — destructive and synced to
     /// every connected device, so we always confirm first.
@@ -148,23 +150,22 @@ struct iOSConversationView: View {
     private var composer: some View {
         @Bindable var conv = instance.conversation
         return HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(instance.name)…", text: $conv.draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(Theme.body(15))
-                .lineLimit(1...6)
-                // Fill the available width so the field re-wraps its text when
-                // the composer shrinks (e.g. the inspector panel opens) instead
-                // of letting a long line run past the new margin.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focused($composerFocused)
-                .submitLabel(.send)
-                .onSubmit(send)
-                .onChange(of: slashToken) { _, new in
-                    if new != nil { conversation.refreshCapabilities() }
-                }
-                .padding(10)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+            // Backed by a real UITextView so the prompt reflows at the
+            // composer's current width — both when the panel resizes it and for
+            // a freshly typed line in the narrowed box.
+            ComposerTextView(
+                text: $conv.draft,
+                placeholder: "Message \(instance.name)…",
+                fontSize: 15,
+                isFocused: $composerFocused,
+                onSubmit: send
+            )
+            .onChange(of: slashToken) { _, new in
+                if new != nil { conversation.refreshCapabilities() }
+            }
+            .padding(10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
             if conversation.isStreaming {
                 Button(action: { conversation.cancelCurrent() }) {

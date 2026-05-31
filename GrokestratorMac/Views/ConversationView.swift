@@ -9,8 +9,10 @@ struct ConversationView: View {
     /// Set when the user dismisses the popup with Escape; reset when the token changes.
     @State private var slashDismissed = false
     /// Owned by the view so we can programmatically focus the field when the
-    /// inspector inserts a command via double-click.
-    @FocusState private var composerFocused: Bool
+    /// inspector inserts a command via double-click. Plain `Bool` (not
+    /// `@FocusState`) because the composer is now an `NSViewRepresentable`,
+    /// which drives/observes first-responder state through this binding.
+    @State private var composerFocused = false
     /// Drives the "clear chat history" confirmation — wiping is destructive and
     /// hits every connected device, so we always confirm first.
     @State private var confirmingClear = false
@@ -117,26 +119,26 @@ struct ConversationView: View {
         // Local @Bindable wrapper so the TextField can bind to the VM's `draft`.
         @Bindable var conv = instance.conversation
         return HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(instance.name)…  (type / for commands)", text: $conv.draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(Theme.body(13))
-                .lineLimit(1...6)
-                // Fill the available width so the field re-wraps its text when
-                // the composer shrinks (e.g. the inspector panel opens) instead
-                // of letting a long line run past the new margin.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focused($composerFocused)
-                .onSubmit(send)
-                .onChange(of: slashToken) { _, new in
-                    slashHighlight = 0; slashDismissed = false
-                    // Opening the `/` popup pulls the freshest command list,
-                    // including any MCP commands registered since launch.
-                    if new != nil { conversation.refreshCapabilities() }
-                }
-                .onKeyPress(action: handleComposerKey)
-                .padding(8)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+            // Backed by a real NSTextView so the prompt reflows at the
+            // composer's current width — both when the panel resizes it and for
+            // a freshly typed line in the narrowed box.
+            ComposerTextView(
+                text: $conv.draft,
+                placeholder: "Message \(instance.name)…  (type / for commands)",
+                fontSize: 13,
+                isFocused: $composerFocused,
+                onSubmit: send,
+                onKey: handleComposerKey
+            )
+            .onChange(of: slashToken) { _, new in
+                slashHighlight = 0; slashDismissed = false
+                // Opening the `/` popup pulls the freshest command list,
+                // including any MCP commands registered since launch.
+                if new != nil { conversation.refreshCapabilities() }
+            }
+            .padding(8)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
             if conversation.isStreaming {
                 Button(action: { conversation.cancelCurrent() }) {
@@ -199,22 +201,20 @@ struct ConversationView: View {
         slashHighlight = 0
     }
 
-    /// Routes arrow/return/escape to the popup while it's open; otherwise lets the
-    /// field handle the key normally (returns `.ignored`).
-    private func handleComposerKey(_ press: KeyPress) -> KeyPress.Result {
-        guard showSlashPopup else { return .ignored }
-        switch press.key {
-        case .upArrow:
-            slashHighlight = max(0, slashHighlight - 1); return .handled
-        case .downArrow:
-            slashHighlight = min(slashMatches.count - 1, slashHighlight + 1); return .handled
-        case .return:
+    /// Routes arrow/return/escape to the popup while it's open; otherwise returns
+    /// `false` so the text view handles the key normally (Return → submit).
+    private func handleComposerKey(_ key: ComposerKey) -> Bool {
+        guard showSlashPopup else { return false }
+        switch key {
+        case .up:
+            slashHighlight = max(0, slashHighlight - 1); return true
+        case .down:
+            slashHighlight = min(slashMatches.count - 1, slashHighlight + 1); return true
+        case .returnKey:
             if slashMatches.indices.contains(slashHighlight) { applyCommand(slashMatches[slashHighlight]) }
-            return .handled
+            return true
         case .escape:
-            slashDismissed = true; return .handled
-        default:
-            return .ignored
+            slashDismissed = true; return true
         }
     }
 
