@@ -234,6 +234,8 @@ public actor GrokBuildConversation {
                 sessionId: p.sessionId
             )
             return .permissionRequested(info)
+        case .plan(let p):
+            return .planUpdated(p.plan)
         case .toolResult(let t):
             return .toolResultRecorded(toolCallId: t.toolCallId, isError: t.isError)
         case .sessionUpdate(let u):

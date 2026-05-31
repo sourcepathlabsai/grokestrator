@@ -80,6 +80,12 @@ public actor AgentConversationHistory {
         case .permissionRequest(let p):
             currentTurnMessages.append(AgentMessage(role: .system, content: "Permission requested: \(p.description)"))
 
+        case .plan:
+            // The task plan is transient live state — grok re-broadcasts the
+            // whole thing on every change and it has no value in a reloaded
+            // transcript (mirrors how thoughts are treated as ephemeral). Skip.
+            break
+
         case .sessionUpdate, .sessionCreated, .done:
             break
 

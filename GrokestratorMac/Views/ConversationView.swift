@@ -277,6 +277,66 @@ private struct ThoughtProcessView: View {
     }
 }
 
+/// grok's live task checklist, mirroring its TUI plan view. A single titled
+/// card that updates in place as grok re-broadcasts the plan (status flips per
+/// entry). Live-only — never persisted, so it shows only in the active session.
+private struct PlanView: View {
+    let plan: AgentPlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Plan").font(Theme.body(12, .semibold)).foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text("\(plan.completedCount)/\(plan.entries.count) done")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+            }
+            ForEach(plan.entries) { entry in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: Self.glyph(entry.status))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Self.glyphColor(entry.status))
+                        .frame(width: 16)
+                    Text(entry.content)
+                        .font(Theme.body(13))
+                        .foregroundStyle(entry.status == .completed ? Theme.textFaint : Theme.textBody)
+                        .strikethrough(entry.status == .completed, color: Theme.textFaint)
+                    if entry.priority == .high, entry.status != .completed {
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+        .padding(.leading, 24)
+    }
+
+    private static func glyph(_ status: AgentPlan.Entry.Status) -> String {
+        switch status {
+        case .pending: return "circle"
+        case .inProgress: return "circle.dotted"
+        case .completed: return "checkmark.circle.fill"
+        }
+    }
+
+    private static func glyphColor(_ status: AgentPlan.Entry.Status) -> Color {
+        switch status {
+        case .pending: return Theme.textFaint
+        case .inProgress: return Theme.accent
+        case .completed: return .green
+        }
+    }
+}
+
 /// Renders one transcript entry with console-like, low-chrome styling.
 private struct TranscriptRow: View {
     let entry: TranscriptEntry
@@ -299,6 +359,8 @@ private struct TranscriptRow: View {
             note("💭 \(text)")
         case .thoughtSummary(let text):
             ThoughtProcessView(text: text)
+        case .plan(let plan):
+            PlanView(plan: plan)
         case .update(let update):
             updateBody(update)
         }
@@ -327,6 +389,11 @@ private struct TranscriptRow: View {
             row(icon: "lock.shield", tint: .orange) {
                 Text("Permission requested: \(info.description)")
             }
+        case .planUpdated(let plan):
+            // Plans normally render via the `.plan` TranscriptEntry kind (live,
+            // in-place). If one ever arrives wrapped as a generic `.update`,
+            // render the same card so nothing is dropped.
+            PlanView(plan: plan)
         case .toolResultRecorded(let id, let isError):
             note("↳ tool \(id) \(isError ? "failed" : "ok")")
         case .sessionStatus(let s):
