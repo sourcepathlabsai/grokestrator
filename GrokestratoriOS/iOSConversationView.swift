@@ -237,6 +237,53 @@ private struct iOSThoughtProcessView: View {
     }
 }
 
+/// A completed turn's tool calls + progress notes, collapsed into an expandable
+/// disclosure (mirrors `iOSThoughtProcessView`). Collapsed by default once the
+/// answer lands. Live-only — history never persists these.
+private struct iOSToolActivityView: View {
+    let lines: [String]
+    @State private var expanded = false
+
+    private var toolCount: Int { lines.lazy.filter { $0.hasPrefix("🔧") }.count }
+    private var title: String {
+        toolCount > 0 ? "\(toolCount) tool call\(toolCount == 1 ? "" : "s")" : "Activity"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 10))
+                    Text(title).font(Theme.body(12, .medium))
+                }
+                .foregroundStyle(Theme.textFaint)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(Theme.mono(12))
+                            .foregroundStyle(Theme.textMuted)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.leading, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.leading, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// grok's live task checklist (touch-sized), mirroring the Mac `PlanView`. A
 /// single titled card that updates in place as grok re-broadcasts the plan.
 /// Live-only — never persisted.
@@ -321,6 +368,8 @@ private struct iOSTranscriptRow: View {
             note("💭 \(text)")
         case .thoughtSummary(let text):
             iOSThoughtProcessView(text: text)
+        case .toolActivitySummary(let lines):
+            iOSToolActivityView(lines: lines)
         case .plan(let plan):
             iOSPlanView(plan: plan)
         case .update(let update):
