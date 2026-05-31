@@ -290,8 +290,26 @@ public actor GrokBuildSessionClient {
                 capabilities.commands = GrokBuiltinCommands.merged(advertised: advertised)
             }
 
-        case "plan", "current_mode_update":
-            break
+        case "plan":
+            // grok re-broadcasts the ENTIRE plan on every status change. Map the
+            // raw wire entries to the Core model, normalizing unknown
+            // priority/status strings defensively (never crash on a new value).
+            let entries = (p.update.entries ?? []).map { wire in
+                AgentPlan.Entry(
+                    content: wire.content,
+                    priority: AgentPlan.Entry.Priority(rawValue: wire.priority ?? "") ?? .medium,
+                    status: AgentPlan.Entry.Status(rawValue: wire.status ?? "") ?? .pending
+                )
+            }
+            emit(.plan(PlanEvent(sessionId: sid, plan: AgentPlan(entries: entries))))
+
+        case "current_mode_update":
+            // ACP standard carries `currentModeId`. grok hasn't been observed to
+            // emit this, so we don't build UI for it — just stop dropping it
+            // silently: leave a low-key activity note if a mode id is present.
+            if let mode = p.update.currentModeId {
+                emit(.activity(ActivityEvent(sessionId: sid, note: "mode: \(mode)", kind: "mode", metadata: nil)))
+            }
 
         default:
             emit(.activity(ActivityEvent(sessionId: sid, note: p.update.sessionUpdate, kind: "update", metadata: nil)))

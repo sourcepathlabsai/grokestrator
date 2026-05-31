@@ -28,6 +28,11 @@ public enum ConversationUpdate: Sendable, Codable {
 
     case toolCallRequested(ToolCallInfo)
     case permissionRequested(PermissionRequestInfo)
+    /// grok re-broadcasts its ENTIRE task plan whenever any entry's status
+    /// changes. The UI keeps ONE live checklist that updates in place (keyed by
+    /// entry content) rather than appending a row per broadcast — see
+    /// `ConversationViewModel.handle`'s `.planUpdated` in-place merge.
+    case planUpdated(AgentPlan)
     case toolResultRecorded(toolCallId: String, isError: Bool)
     case error(String)
     case turnComplete(finalAnswer: String?)
@@ -69,6 +74,44 @@ public struct PermissionRequestInfo: Identifiable, Sendable, Equatable, Codable 
         self.options = options
         self.sessionId = sessionId
     }
+}
+
+/// grok's live task plan, delivered via the ACP `session/update` notification
+/// with `sessionUpdate: "plan"`. grok re-broadcasts the WHOLE plan (same
+/// entries, updated statuses) every time any entry changes, so consumers must
+/// treat this as a snapshot of the current plan, not an append.
+public struct AgentPlan: Sendable, Codable, Equatable {
+    public struct Entry: Sendable, Codable, Equatable, Identifiable {
+        public enum Status: String, Sendable, Codable {
+            case pending
+            case inProgress = "in_progress"
+            case completed
+        }
+        public enum Priority: String, Sendable, Codable {
+            case low, medium, high
+        }
+        /// `content` is the stable identity across re-broadcasts — grok keeps the
+        /// text fixed and only flips `status`/`priority`, so we key on it.
+        public var id: String { content }
+        public let content: String
+        public let priority: Priority
+        public let status: Status
+
+        public init(content: String, priority: Priority, status: Status) {
+            self.content = content
+            self.priority = priority
+            self.status = status
+        }
+    }
+
+    public let entries: [Entry]
+
+    public init(entries: [Entry]) {
+        self.entries = entries
+    }
+
+    /// Count of completed entries — for the compact "n/m done" header.
+    public var completedCount: Int { entries.filter { $0.status == .completed }.count }
 }
 
 /// One selectable answer to a permission request. `id` is the ACP `optionId`

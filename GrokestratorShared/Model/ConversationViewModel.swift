@@ -20,6 +20,11 @@ struct TranscriptEntry: Identifiable, Sendable {
         /// the loose live `.thought` rows so they don't clutter the finished
         /// turn but stay one tap away. Live-only — never persisted to history.
         case thoughtSummary(String)
+        /// grok's live task checklist. There is at most ONE `.plan` entry in the
+        /// transcript at a time: each plan re-broadcast replaces it in place
+        /// (see `handle`'s `.planUpdated`), so the checklist updates rather than
+        /// stacking up. Live-only — never persisted to history.
+        case plan(AgentPlan)
         /// Any other update: tool calls, progress/activity notes, errors, turn divider, etc.
         case update(ConversationUpdate)
     }
@@ -356,6 +361,19 @@ final class ConversationViewModel {
             // Surface over the thread (overlay), not as an inline row.
             endStreaming()
             pendingPermission = info
+        case .planUpdated(let plan):
+            // grok re-broadcasts the ENTIRE plan on every status change. Keep a
+            // single live checklist that updates IN PLACE: replace the existing
+            // `.plan` entry's kind if present, otherwise append a new one. This
+            // is the same single-live-widget spirit as `collapseThoughts`.
+            if let idx = entries.firstIndex(where: {
+                if case .plan = $0.kind { return true } else { return false }
+            }) {
+                entries[idx].kind = .plan(plan)
+            } else {
+                entries.append(TranscriptEntry(kind: .plan(plan)))
+            }
+            streamTick += 1
         case .error:
             // A failure ends the turn — clear the spinner (only `.turnComplete`
             // did before, so an error left "waiting" spinning forever), tuck away
