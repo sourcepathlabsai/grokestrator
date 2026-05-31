@@ -12,6 +12,9 @@ struct iOSConversationView: View {
     /// Drives the "clear chat history" confirmation — destructive and synced to
     /// every connected device, so we always confirm first.
     @State private var confirmingClear = false
+    /// Bumped whenever the user sends, to force the transcript back to the
+    /// bottom (and re-arm stick) even if they had scrolled up to read.
+    @State private var pinToken = 0
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -72,6 +75,9 @@ struct iOSConversationView: View {
             conversation.startSubscription()
         }
         .onChange(of: conversation.focusToken) { composerFocused = true }
+        // Switching Connections should land on the newest content, not inherit
+        // wherever the previous transcript was scrolled.
+        .onChange(of: instance.id) { pinToken += 1 }
     }
 
     // MARK: - Slash command popup
@@ -107,32 +113,27 @@ struct iOSConversationView: View {
     // MARK: - Transcript
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(conversation.entries) { entry in
-                        iOSTranscriptRow(entry: entry)
-                            .id(entry.id)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if conversation.isStreaming {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small).tint(Theme.accent)
-                            Text("Working…").font(Theme.body(12)).foregroundStyle(Theme.textMuted)
-                        }
-                        .padding(.leading, 16)
-                    }
+        // Console-style stick-to-bottom: auto-follows the live reply only while
+        // the user is already at the bottom; if they scroll up to read, new
+        // content appends without yanking the viewport down.
+        StickyBottomScrollView(tick: conversation.streamTick, pinToken: pinToken) {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(conversation.entries) { entry in
+                    iOSTranscriptRow(entry: entry)
+                        .id(entry.id)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(16)
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg)
-            .onChange(of: conversation.streamTick) {
-                if let last = conversation.entries.last {
-                    withAnimation(.snappy) { proxy.scrollTo(last.id, anchor: .bottom) }
+                if conversation.isStreaming {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small).tint(Theme.accent)
+                        Text("Working…").font(Theme.body(12)).foregroundStyle(Theme.textMuted)
+                    }
+                    .padding(.leading, 16)
                 }
             }
+            .padding(16)
         }
+        .background(Theme.bg)
     }
 
     // MARK: - Composer
@@ -144,6 +145,10 @@ struct iOSConversationView: View {
                 .textFieldStyle(.plain)
                 .font(Theme.body(15))
                 .lineLimit(1...6)
+                // Fill the available width so the field re-wraps its text when
+                // the composer shrinks (e.g. the inspector panel opens) instead
+                // of letting a long line run past the new margin.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focused($composerFocused)
                 .submitLabel(.send)
                 .onSubmit(send)
@@ -182,6 +187,7 @@ struct iOSConversationView: View {
     private func send() {
         conversation.send(conversation.draft)
         conversation.draft = ""
+        pinToken += 1
     }
 }
 
