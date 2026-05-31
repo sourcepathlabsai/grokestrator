@@ -26,9 +26,16 @@ struct iOSConversationView: View {
                         }
                         .padding(12)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else if let question = conversation.pendingUserQuestion {
+                        iOSUserQuestionOverlay(request: question) { index, answer in
+                            conversation.answerUserQuestion(questionIndex: index, answer: answer)
+                        }
+                        .padding(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .animation(.snappy, value: conversation.pendingPermission)
+                .animation(.snappy, value: conversation.pendingUserQuestion)
             Divider().overlay(Theme.border)
             if showSlashPopup {
                 iOSSlashCommandPopup(matches: slashMatches, loading: conversation.commandsSettling) { applyCommand($0) }
@@ -95,7 +102,7 @@ struct iOSConversationView: View {
     }
 
     private var showSlashPopup: Bool {
-        guard !conversation.isStreaming, conversation.pendingPermission == nil else { return false }
+        guard !conversation.isStreaming, conversation.pendingPermission == nil, conversation.pendingUserQuestion == nil else { return false }
         return !slashMatches.isEmpty || (slashToken != nil && conversation.commandsSettling)
     }
 
@@ -341,7 +348,7 @@ private struct iOSTranscriptRow: View {
             iOSPlanView(plan: plan)
         case .userPrompt, .messageDelta, .thoughtDelta:
             EmptyView()
-        case .permissionRequested, .toolResultRecorded, .sessionStatus, .unknownEvent:
+        case .permissionRequested, .userQuestionRequested, .toolResultRecorded, .sessionStatus, .unknownEvent:
             EmptyView()
         }
     }
@@ -394,6 +401,100 @@ private struct iOSPermissionOverlay: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
         .shadow(radius: 16, y: 6)
+    }
+}
+
+/// A floating card shown when the agent asks a structured question
+/// (`_x.ai/ask_user_question`). Mirrors `iOSPermissionOverlay` but renders each
+/// question's prompt + options (label + muted description) plus a free-text
+/// field for an "Other" answer. Tuned for touch (bigger tap targets).
+private struct iOSUserQuestionOverlay: View {
+    let request: UserQuestionInfo
+    /// (questionIndex, answer) — answer is a chosen option label or free text.
+    let onAnswer: (Int, String) -> Void
+
+    @State private var freeText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Grok is asking a question", systemImage: "questionmark.bubble")
+                .font(.headline)
+                .foregroundStyle(Theme.accent)
+
+            ForEach(Array(request.questions.enumerated()), id: \.offset) { qIdx, question in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(question.prompt)
+                        .font(Theme.body(15))
+                        .foregroundStyle(Theme.textBody)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(question.options) { option in
+                        Button {
+                            onAnswer(qIdx, option.label)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.label).font(Theme.body(15))
+                                if let desc = option.description, !desc.isEmpty {
+                                    Text(desc)
+                                        .font(Theme.body(12))
+                                        .foregroundStyle(Theme.textMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(iOSUserQuestionOptionButtonStyle())
+                    }
+                }
+            }
+
+            // Free-text / "Other" path — answers the first question.
+            HStack(spacing: 8) {
+                TextField("Type a different answer…", text: $freeText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .font(Theme.body(15))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+                    .submitLabel(.send)
+                    .onSubmit { submitFreeText() }
+                Button {
+                    submitFreeText()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(freeText.isEmpty ? Theme.textMuted : Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(freeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: 540)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.accent.opacity(0.4)))
+        .shadow(color: .black.opacity(0.4), radius: 24, y: 10)
+    }
+
+    private func submitFreeText() {
+        let trimmed = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onAnswer(0, trimmed)
+    }
+}
+
+private struct iOSUserQuestionOptionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+            .foregroundStyle(Theme.textBody)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

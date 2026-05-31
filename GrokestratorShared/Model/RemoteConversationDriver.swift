@@ -36,6 +36,14 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
                                                chosenOption: optionId)
     }
 
+    public func respondToUserQuestion(questionId: String, questionIndex: Int, answer: String) async {
+        guard let promptID = lastPromptID else { return }
+        try? await session.respondToUserQuestion(promptID: promptID,
+                                                 questionId: questionId,
+                                                 questionIndex: questionIndex,
+                                                 answer: answer)
+    }
+
     public func cancel() async {
         guard let promptID = lastPromptID else { return }
         // The wire's `cancelPrompt(instanceID:promptID:)` already existed; the

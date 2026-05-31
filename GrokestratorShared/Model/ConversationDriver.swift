@@ -23,6 +23,11 @@ public protocol ConversationDriver: Sendable {
     /// Answer a pending permission request with the chosen ACP `optionId`.
     func respondToPermission(permissionId: String, optionId: String) async
 
+    /// Answer a pending user question (`_x.ai/ask_user_question`). `answer` is the
+    /// chosen option's label or the user's free-text answer; `questionIndex` is
+    /// which question in the set. Parallels `respondToPermission`.
+    func respondToUserQuestion(questionId: String, questionIndex: Int, answer: String) async
+
     /// Stops the currently in-flight turn (Stop button). Best-effort: tells
     /// the underlying agent to stop, and locally unwinds the active stream so
     /// `turnComplete` rides through the broadcast and every connected device's
@@ -107,6 +112,10 @@ public struct LiveConversationDriver: ConversationDriver {
 
     public func respondToPermission(permissionId: String, optionId: String) async {
         try? await manager.respondToPermission(for: instanceID, permissionId: permissionId, chosenOption: optionId)
+    }
+
+    public func respondToUserQuestion(questionId: String, questionIndex: Int, answer: String) async {
+        try? await manager.respondToUserQuestion(for: instanceID, questionId: questionId, questionIndex: questionIndex, answer: answer)
     }
 
     public func cancel() async {

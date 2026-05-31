@@ -28,9 +28,16 @@ struct ConversationView: View {
                         }
                         .padding(12)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else if let question = conversation.pendingUserQuestion {
+                        UserQuestionOverlay(request: question) { index, answer in
+                            conversation.answerUserQuestion(questionIndex: index, answer: answer)
+                        }
+                        .padding(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .animation(.snappy, value: conversation.pendingPermission)
+                .animation(.snappy, value: conversation.pendingUserQuestion)
             Divider()
             quickReplyBar
             if showSlashPopup {
@@ -175,7 +182,7 @@ struct ConversationView: View {
     }
 
     private var showSlashPopup: Bool {
-        guard !slashDismissed, !conversation.isStreaming, conversation.pendingPermission == nil else { return false }
+        guard !slashDismissed, !conversation.isStreaming, conversation.pendingPermission == nil, conversation.pendingUserQuestion == nil else { return false }
         // Show for matches, or for a bare/typing `/` while commands are still
         // loading (so the "loading commands…" hint is visible).
         return !slashMatches.isEmpty || (slashToken != nil && conversation.commandsSettling)
@@ -239,6 +246,99 @@ struct ConversationView: View {
     private func send() {
         conversation.send(conversation.draft)
         conversation.draft = ""
+    }
+}
+
+/// A floating card shown over the thread when the agent asks a structured
+/// question (`_x.ai/ask_user_question`). Renders each question's prompt plus its
+/// options (label + muted description) as click targets, and a free-text field
+/// for an "Other" / free-form answer. Mirrors `PermissionOverlay`'s styling.
+private struct UserQuestionOverlay: View {
+    let request: UserQuestionInfo
+    /// (questionIndex, answer) — answer is a chosen option label or free text.
+    let onAnswer: (Int, String) -> Void
+
+    @State private var freeText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Grok is asking a question", systemImage: "questionmark.bubble")
+                .font(.headline)
+                .foregroundStyle(Theme.accent)
+
+            ForEach(Array(request.questions.enumerated()), id: \.offset) { qIdx, question in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(question.prompt)
+                        .font(Theme.body(13))
+                        .foregroundStyle(Theme.textBody)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(question.options) { option in
+                        Button {
+                            onAnswer(qIdx, option.label)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.label).font(Theme.body(13))
+                                if let desc = option.description, !desc.isEmpty {
+                                    Text(desc)
+                                        .font(Theme.body(11))
+                                        .foregroundStyle(Theme.textMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(UserQuestionOptionButtonStyle())
+                    }
+                }
+            }
+
+            // Free-text / "Other" path — answers the first question.
+            HStack(spacing: 8) {
+                TextField("Type a different answer…", text: $freeText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .font(Theme.body(13))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+                    .onSubmit { submitFreeText() }
+                Button {
+                    submitFreeText()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(freeText.isEmpty ? Theme.textMuted : Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(freeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(0.4)))
+        .frame(maxWidth: 460)
+        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+    }
+
+    private func submitFreeText() {
+        let trimmed = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onAnswer(0, trimmed)
+    }
+}
+
+private struct UserQuestionOptionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+            .foregroundStyle(Theme.textBody)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
@@ -388,6 +488,10 @@ private struct TranscriptRow: View {
         case .permissionRequested(let info):
             row(icon: "lock.shield", tint: .orange) {
                 Text("Permission requested: \(info.description)")
+            }
+        case .userQuestionRequested(let info):
+            row(icon: "questionmark.bubble", tint: Theme.accent) {
+                Text(info.questions.first?.prompt ?? "Grok is asking a question")
             }
         case .planUpdated(let plan):
             // Plans normally render via the `.plan` TranscriptEntry kind (live,

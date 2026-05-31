@@ -28,6 +28,9 @@ public enum ConversationUpdate: Sendable, Codable {
 
     case toolCallRequested(ToolCallInfo)
     case permissionRequested(PermissionRequestInfo)
+    /// The agent is asking the user one or more structured questions
+    /// (grok's `_x.ai/ask_user_question`). Parallel to `permissionRequested`.
+    case userQuestionRequested(UserQuestionInfo)
     /// grok re-broadcasts its ENTIRE task plan whenever any entry's status
     /// changes. The UI keeps ONE live checklist that updates in place (keyed by
     /// entry content) rather than appending a row per broadcast — see
@@ -128,6 +131,49 @@ public struct PermissionOption: Codable, Sendable, Equatable, Identifiable {
     }
 
     public var isAllow: Bool { (kind ?? "").hasPrefix("allow") }
+}
+
+// MARK: - User Questions (grok `_x.ai/ask_user_question`)
+
+/// Structured information about one or more questions the agent is asking the
+/// user. Parallels `PermissionRequestInfo`. `id` is the pending request id used
+/// to route the answer back to the agent (the suspended JSON-RPC request).
+public struct UserQuestionInfo: Identifiable, Sendable, Equatable, Codable {
+    public let id: String
+    public let questions: [UserQuestion]
+    public let sessionId: String?
+
+    public init(id: String, questions: [UserQuestion], sessionId: String? = nil) {
+        self.id = id
+        self.questions = questions
+        self.sessionId = sessionId
+    }
+}
+
+/// A single question with a set of suggested options. The user may pick one of
+/// the `options` or supply free text (the "Other" path).
+public struct UserQuestion: Sendable, Equatable, Codable {
+    public let prompt: String
+    public let options: [UserQuestionOption]
+
+    public init(prompt: String, options: [UserQuestionOption]) {
+        self.prompt = prompt
+        self.options = options
+    }
+}
+
+/// One suggested answer to a `UserQuestion`. `label` is the literal option text
+/// (also what we send back to the agent); `description` is optional supporting
+/// detail shown muted under the label.
+public struct UserQuestionOption: Sendable, Equatable, Codable, Identifiable {
+    public var id: String { label }
+    public let label: String
+    public let description: String?
+
+    public init(label: String, description: String? = nil) {
+        self.label = label
+        self.description = description
+    }
 }
 
 /// Result of a completed prompt turn.

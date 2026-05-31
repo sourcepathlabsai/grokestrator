@@ -80,6 +80,9 @@ public actor AgentConversationHistory {
         case .permissionRequest(let p):
             currentTurnMessages.append(AgentMessage(role: .system, content: "Permission requested: \(p.description)"))
 
+        case .userQuestion(let q):
+            let prompts = q.questions.map(\.prompt).joined(separator: " / ")
+            currentTurnMessages.append(AgentMessage(role: .system, content: "Question asked: \(prompts)"))
         case .plan:
             // The task plan is transient live state — grok re-broadcasts the
             // whole thing on every change and it has no value in a reloaded
