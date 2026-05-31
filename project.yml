@@ -19,8 +19,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode, matching GrokestratorCore
-    MARKETING_VERSION: "0.1.1"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
 
 packages:

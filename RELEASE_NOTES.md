@@ -1,5 +1,38 @@
 # Grokestrator — Release Notes
 
+## v0.2.0-alpha — 2026-05-31
+
+Second alpha. A round of conversation-surface and remote fixes on top of the
+first alpha — the transcript is calmer, the composer behaves, and a turn that
+asks you something now has real UI for it. Includes everything from the
+(untagged) v0.1.1-alpha remote fixes below.
+
+### New
+
+- **Structured questions.** When grok asks you something mid-turn
+  (`_x.ai/ask_user_question`), it now renders as a native question card — labelled
+  options plus a free-text field — instead of falling back to a parsed text hack.
+  Works across devices (answer on the Mac or a remote iPhone/iPad; first to answer
+  wins). The old `[[CHOICES]]` parsing stays as a safety net.
+- **Live task checklist.** grok's plan renders as a single in-place checklist that
+  updates as it works (pending → in-progress → done), mirroring its TUI plan view,
+  instead of re-printing the whole list on every change.
+
+### Fixed / improved
+
+- **The prompt box wraps correctly.** The composer is now backed by a real text
+  view, so a long line soft-wraps to the box's width — including when the inspector
+  panel shrinks it, and for a freshly typed line in the narrow box. (The old field
+  let text run off-screen on one line.)
+- **The chat respects your scroll.** While grok streams a reply, the transcript
+  only auto-scrolls if you're already at the bottom — like a log console. Scroll up
+  to read and new text appends quietly without yanking you back down; return to the
+  bottom to re-arm the follow.
+- **Tool calls fold away.** A finished turn's `🔧 tool(...)` rows collapse into one
+  expandable "N tool calls" group — the same treatment as the thought process — so
+  completed turns aren't buried under tool noise. They still show live while the
+  turn runs.
+
 ## v0.1.1-alpha — 2026-05-30
 
 Bug-fix release for the remote-client path (a Mac/iPad/iPhone driving another
