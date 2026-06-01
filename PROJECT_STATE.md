@@ -26,6 +26,42 @@ Update this file when any of the following change:
 
 The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
 
+> **Note (2026-06-01):** the per-PR detail below is a historical snapshot (through PR #22). The product is well past that (v0.2.0-alpha; through PR #71). The current *direction* is captured in the dated section immediately below; the historical decisions/state are kept for context but not exhaustively refreshed here — see `RELEASE_NOTES.md` and `design/` for current detail.
+
+## Product Direction (2026-06-01)
+
+A deliberate re-framing of the north star and the agent-orchestration path
+(full reasoning in `design/00-vision-and-north-star.md` and
+`design/10-agent-orchestration.md`):
+
+- **North star now leads with general-purpose, supervisable orchestration.**
+  Coding is the first proving ground, not the definition. Anchor persona: a
+  *non-technical operator* (e.g. a winery manager) running a multi-step job
+  ("pull from the POS → reconcile → email me") who must be able to **watch the
+  work and answer the agent's questions without a console**. Differentiator vs.
+  console agent tools (Warp): observable, answerable, native supervision.
+
+- **Sub-agent reality (authoritative, `~/.grok/docs/user-guide/16-subagents.md`):**
+  grok's `task` tool spawns parallel child sessions and the parent collects each
+  summary on completion — but subagents **cannot interact with the user** and are
+  **invisible over ACP** (in-process; only a `task` tool-call is on the wire). So
+  "watch a worker think live / answer its question" is impossible with grok-native
+  subagents.
+
+- **Orchestration path = both, sequenced.** Near-term: a **cross-conversation
+  attention cue** (badge a background Connection with a pending question — works on
+  today's flat model) + **surfacing** grok-native subagents inline. Then the config
+  GUI (rung 2). **Rung 3 — each role a real, observable, steerable Connection +
+  a Grokestrator-hosted `delegate` MCP tool + a soft `parentID` edge — is now the
+  committed destination** (was "deferred indefinitely"), because only it delivers
+  the live-watch + human-in-the-loop-on-a-child the north star now leads with. The
+  "1:1 instance, no nested chats" rule holds; rung 3 *extends* it with `parentID`,
+  it doesn't break it.
+
+- **Status:** design/strategy only — no implementation of any rung yet. The
+  attention cue is the cheapest near-term candidate and is independent of the
+  hierarchy work.
+
 ### Key Decisions Made
 - **Native Swift + SwiftUI** (Mac hybrid + iOS client) after evaluation of Tauri/Rust path. Chosen for true iOS client support, seamless multi-device (Tailscale), and avoiding local stdio + sandbox limitations.
 - Mac server owns everything (instance lifecycle, persistence, client sessions).

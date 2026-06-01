@@ -1,16 +1,30 @@
 # Grokestrator — Agent Orchestration
 
 Status: **design exploration** — not yet implemented. This document proposes how
-Grokestrator helps you stand up and run *teams of grok agents* — a coordinator
-plus specialists (coder, reviewer, architect) that carry a feature from "design
-it" through "code it" to "open and merge a PR."
+Grokestrator helps you stand up and **supervise** *teams of grok agents* — a
+coordinator plus specialists — that carry a job from "figure out how" through
+"do it" to "report back." The recurring example is coding (architect → code →
+review → PR → merge), but the model is **deliberately domain-agnostic**: the same
+machinery supervises a non-coding pipeline (e.g. a winery agent that pulls from a
+POS, reconciles inventory, and emails a summary — pausing for a human answer when
+it's unsure). This carries the north star's lead: general-purpose, observable,
+answerable supervision — not a coding-only tool. See `00-vision-and-north-star.md`.
 
 It is grounded in the existing model (`ManagedConnection`, `GrokBuildManager`,
 `GrokBuildConversation`, the broadcast/subscription plane) and — critically — in
 **grok's own native subagent system**, which already does most of the
 coordination we'd otherwise have to build. See `connection-semantics` (memory) for
 the standing rule this respects: *GKSS owns the Connection registry + history; one
-Connection is 1:1 with one grok instance; there are no nested chats.*
+Connection is 1:1 with one grok instance; there are no nested chats* — a rule that
+holds through rungs 1–2 and is extended (not broken) by a soft `parentID` edge at
+rung 3 (below).
+
+**Direction (revised 2026-06-01).** The path is now stated as **both, sequenced**:
+surface grok-native subagents first (cheap, partial), then graduate to
+**real, steerable Connection children** as the explicit destination. Rung 3 is no
+longer "deferred until some hypothetical need" — the product's headline vision
+(*watch a worker think live, and answer its question*) structurally *requires* it,
+because grok-native subagents can do neither (see the limits below).
 
 ## The pivotal fact: grok already orchestrates
 
@@ -24,6 +38,25 @@ optional **persona** (bundled: `implementer`, `reviewer`, `researcher`,
 bundles **skills** that *are* our pipeline — `design`, `implement`, `review`,
 `execute-plan`, `pr-babysit`.
 
+**How they actually run** (authoritative, from `~/.grok/docs/user-guide/16-subagents.md`):
+subagents are **parallel child sessions**, each with its own context window. The
+parent keeps working and **receives each child's result (a summary) when the child
+completes** — it does *not* fire-and-forget; delegation is "spin off, optionally
+keep working, then collect." Children chain via `resume_from`, can be isolated in a
+git worktree, and are depth-limited. **Two hard limits, straight from grok's docs:**
+
+1. **A subagent cannot interact with the user.** "Tasks that require tight
+   back-and-forth with the user" are an explicit anti-pattern — when a child needs
+   help it works within its capability mode or fails; it has **no channel to ask
+   you**. There is no native "the architect has a question for the human."
+2. **Subagents are invisible over ACP** (see below) — their thinking is not on the
+   wire.
+
+Together these mean the headline flow — *watch the architect think live, and
+answer its question from another conversation* — is **structurally impossible with
+grok-native subagents**. Delivering it requires making each role a real,
+observable Connection (rung 3).
+
 Grok reads all of this **from disk**, not over ACP:
 
 - agent definitions: `~/.grok/agents/*.md`, project `.grok/agents/*.md`
@@ -36,44 +69,92 @@ opportunity is to be the **control panel for grok's native subagent system**:
 author its config beautifully, standardize it into reusable teams, scope it to a
 project or globally, and surface what it's doing.
 
-The one hard limit to keep in view: grok's subagents run **in-process** and are
-**not exposed over ACP**. From Grokestrator's vantage a parent that spawns three
-subagents is still *one* ACP session; children appear only as `tool_call` activity
-(grok stores them under `~/.grok/sessions/<cwd>/<id>/subagents/`, a side channel).
-Subagents also *cannot interact with the user*. That limit is exactly what
-separates the rungs below.
+The opacity limit, in detail (the "invisible over ACP" point above): grok's
+subagents run **in-process** and are **not exposed over ACP**. From Grokestrator's
+vantage a parent that spawns three subagents is still *one* ACP session; children
+appear only as `tool_call` activity (grok stores them under
+`~/.grok/sessions/<cwd>/<id>/subagents/`, a side channel). Together with "cannot
+interact with the user," that opacity is exactly what separates the rungs below.
 
 ## The integration ladder
 
-There are three increasingly ambitious ways to integrate, with sharply different
-cost/value. We pick the middle rung for v1 and defer the top.
+Increasingly ambitious ways to integrate, with sharply different cost/value. The
+direction is **both, sequenced**: ship the cheap near-term wins (rung 0 + rung 1)
+and the config GUI (rung 2), *while building toward* the steerable fleet (rung 3)
+as the explicit destination — because rung 3 is the only rung that delivers the
+headline vision (watch a worker live + answer it + non-coding supervision).
 
 | Rung | What Grokestrator does | Cost | What you gain |
 |---|---|---|---|
-| **1 — Surface** | Read grok's task lineage; render in-process subagents inline | Low | Visibility into what native subagents are doing |
-| **2 — Configure** ← **v1** | Connection dialogs author `.grok/` agent + role + persona files; reusable team templates; project/global scope | Low–med | Set up a team's roles/prompts once, reuse, share via the repo — and ride grok's tuned coordination |
-| **3 — Hierarchy** | Separate Connections/processes coordinated via a Grokestrator-hosted `delegate` MCP tool | High | A persistent, cross-machine, **human-steerable** fleet |
+| **0 — Attention cue** ← near-term, no hierarchy | Badge a background Connection (and a global indicator) when it has a pending question/permission, so you click back to answer | Low | Human-in-the-loop across many conversations *today*; de-risks rung-3 UX |
+| **1 — Surface** ← near-term | Read grok's task lineage; render in-process subagents inline | Low | Visibility into what native subagents *did* (not live, not answerable) |
+| **2 — Configure** | Connection dialogs author `.grok/` agent + role + persona files; reusable team templates; project/global scope | Low–med | Set up a team's roles/prompts once, reuse, share via the repo — and ride grok's tuned coordination |
+| **3 — Steerable fleet** ← **destination** | Each role = a real Connection (own ACP stream, own chat, own sidebar node), coordinated by a Grokestrator-hosted `delegate` MCP tool; soft `parentID` edge | High | **Watch a worker think live and grab the wheel from any device** — the one thing grok-native structurally can't do |
 
-Rung 2 is the best value-per-effort: it makes Grokestrator a coherent, shippable
-product (a GUI for grok's subagents) without re-implementing coordination, and the
-role/prompt definitions it produces are exactly the seeds rung 3 would later
-consume. Rung 1 folds in for free as we render the orchestrator's transcript.
-Rung 3 is the only rung that delivers something grok structurally can't —
-cross-device steerability — and is deferred until that need is real (see
-*Deferred: the steerable fleet*).
+How the rungs relate:
 
-## Why not the process hierarchy (rung 3) now
+- **Rung 0** is independent of everything else and serves the vision immediately —
+  it works on **today's flat model** (every Connection is already an observable ACP
+  session; the wire protocol already carries `promptState.pendingPermissions`). It's
+  the cheapest possible down-payment on "answer the worker's question," and the UX
+  it establishes (a question on a background worker pulling you back) is exactly
+  what rung 3 needs at scale.
+- **Rung 1** folds in for free as we render the orchestrator's transcript — but it
+  is **explicitly partial**: you see what a child *did* (a `task` tool-call,
+  optionally labeled from the on-disk `subagents/` lineage), never live thinking,
+  and you cannot answer it. It is "read-only history of opaque workers."
+- **Rung 2** is the best value-per-effort for *configuring* a team without
+  re-implementing coordination, and the role/persona files it authors are **the
+  literal seeds rung 3 consumes**. It's a genuine stepping stone, not a throwaway.
+- **Rung 3** is the destination. It is *more work* than riding grok-native
+  coordination, and for a fully-autonomous single-repo coding flow grok-native is
+  still the better tool. But rung 3 is the **only** rung that reaches the axes the
+  north star now leads with — **live observability, human-in-the-loop on a child,
+  and cross-device steering** — which a non-technical operator supervising a
+  general-purpose job fundamentally needs. We build toward it deliberately, seeded
+  by rung 2, with rung 0's UX already proven.
 
-It's tempting to model "a dev lead owns three developers" as a tree of separate
-Grokestrator Connections coordinated by a hosted `delegate` MCP tool. For the
-stated use case — *one feature, one repo, architect→code→review→PR→merge,
-autonomous* — that's **strictly more work for a worse result**: we'd hand-roll
-spawning, routing, worktree isolation, depth limits, and persona prompts that grok
-already ships and has tuned. The hierarchy only earns its cost on axes grok-native
-genuinely can't reach (persistence, cross-machine, human-in-the-loop on a child).
-We capture those later, deliberately, not by default.
+### When grok-native is still the right answer
 
-## v1 — Configure grok's subagents (rung 2)
+For a *fully autonomous* job where the human does **not** need to watch or answer a
+specific worker — "ship this one feature in this one repo, architect→code→review→
+PR→merge, don't bother me" — grok's in-process `task` system is **strictly better**:
+it already does spawning, routing, worktree isolation, depth limits, and tuned
+personas. Rung 3 is not a replacement for that; it's the path for the *supervised*,
+*cross-device*, *general-purpose* work grok-native structurally can't surface.
+Both coexist: a rung-2 Connection running grok-native subagents, with rung-0/1
+making them legible; rung-3 Connections when a worker must be watchable and
+answerable.
+
+## Near-term: the cross-conversation attention cue (rung 0)
+
+The cheapest, highest-leverage step toward "supervise the work" — and it needs
+**no hierarchy and no new transport**. Today, when a background Connection raises a
+permission or question, you only see it if that conversation is selected
+(`pendingPermission` / `pendingUserQuestion` live on `ConversationViewModel`, and
+the overlay renders only for the foreground conversation). So an agent quietly
+waiting for an answer is invisible until you happen to click in.
+
+The cue closes that gap:
+
+- **Sidebar badge.** A Connection with something pending gets a distinct indicator
+  (e.g. an amber pulse / "?" badge on its row) — visually louder than the plain
+  status dot, so a waiting worker stands out across a long sidebar.
+- **Global indicator.** An app-level count ("2 agents need you") so you notice even
+  when the sidebar group is collapsed or you're on another server.
+- **Click-through.** Selecting the badged Connection lands you on the pending
+  overlay, ready to answer.
+
+This is already supported by the data the system has: every Connection is an
+observable ACP session, and the control-plane protocol already carries
+`promptState.pendingPermissions` for remote instances — the model just needs to be
+read across *all* Connections (not only the selected one) and surfaced in the
+sidebar. It directly answers "*if the architect has a question, a visible cue gets
+me to click back to answer*," works for one flat Connection or a future tree, and
+the interaction it establishes is exactly the one rung 3 leans on. Cross-reference
+`02-ui-navigation-and-interaction.md` (sidebar + out-of-thread prompts).
+
+## Configure grok's subagents (rung 2)
 
 The shape: **two dialogs**, mirroring how the app already separates "Add
 Connection" (fast) from per-connection editing (deep). The setup dialog gets you a
@@ -191,7 +272,24 @@ You ▸ Build a rate-limiter and ship it.
 One narrative, sub-steps as progressive disclosure — directly answering the
 "separate chats would be confusing" concern without any process hierarchy.
 
-## What's new vs. reused (v1)
+The same rendering is **domain-agnostic** — a non-coding pipeline reads identically:
+
+```
+You ▸ Pull today's sales from the POS, reconcile against inventory, email me the summary.
+
+✦ grok (coordinator)
+  ▸ 📥 puller (read-only) — exported 142 sales rows from the POS
+  ▸ 🧮 reconciler — matched against inventory; 3 variances flagged
+  ▸ ✉️ sender — drafted the summary email
+  Sent the summary to you. Done.
+```
+
+Note the ceiling of rung 1 here: if the reconciler is unsure about a variance, a
+grok-native subagent **cannot ask** — it guesses or fails. Making "pause and ask
+the operator" possible mid-pipeline is precisely the rung-0 cue (for the
+coordinator's own questions) and rung 3 (for a *child's* questions).
+
+## What's new vs. reused (config slice)
 
 | Concern | Reuse | New |
 |---|---|---|
@@ -208,22 +306,29 @@ Note what's **absent** from v1 versus the earlier draft: no MCP host, no
 `delegate` tool, no `delegate` router, no role-seeding injection, no `parentID`
 tree, no sidebar nesting. Those all belong to rung 3.
 
-## Non-goals (v1)
+## Non-goals (config slice)
 
 - **Re-implementing coordination.** grok's `task` system does the spawning and
   routing; we configure and surface it, full stop.
-- **A process hierarchy of Connections.** Deferred to rung 3.
-- **Driving sub-agents directly / human-in-the-loop on a child.** Not possible
-  with grok-native subagents; deferred to rung 3.
+- **A process hierarchy of Connections.** Belongs to rung 3 (the committed
+  destination), sequenced after the near-term wins — not in the config-GUI slice.
+- **Driving sub-agents directly / human-in-the-loop on a *child*.** Not possible
+  with grok-native subagents; it's the whole point of rung 3 and arrives there.
+  (Human-in-the-loop on a *coordinator* — answering its own questions across
+  conversations — arrives earlier, via the rung-0 attention cue.)
 - **Changing the standalone single-connection experience.** "Plain" remains the
   default and is completely unchanged.
 
-## Deferred: the steerable fleet (rung 3)
+## The destination: the steerable fleet (rung 3)
 
 The one thing grok-native subagents structurally cannot do is let a human **watch
-and grab the wheel of an individual worker, from any device**. When that need is
-real — long-lived role agents, multiple repos/machines, answering a specific
-worker's permission prompt from your iPad — rung 3 applies:
+and grab the wheel of an individual worker, from any device**. Because the north
+star now leads with exactly that — observable, answerable, general-purpose
+supervision — this is the **committed destination** the roadmap builds toward
+(seeded by rung 2, with rung 0's UX already proven), not an open-ended "maybe
+later." It's still sequenced *after* the cheap wins, and grok-native remains the
+right tool for fully-autonomous jobs (above) — but the direction is settled. The
+shape:
 
 - Each role becomes a **real Connection** (own grok process, own ACP stream, own
   sidebar node, own chat) so it rides the existing broadcast/subscription plane
@@ -257,20 +362,39 @@ host-local (remote devices view + prompt, host drives).
 - **Template authority + updates.** When we ship a better "Feature team" template,
   do existing connections that minted from it get offered an update, or stay
   frozen? (Lean: stay frozen; offer a manual "re-apply template.")
+- **Child question roll-up (rung 3).** When a real-Connection child raises a
+  question, how does it surface? It's both its *own* badged Connection (rung-0 cue)
+  *and* something the parent's narrative should reflect ("waiting on reviewer"). How
+  do the two views stay consistent without double-prompting?
+- **Orchestration locality (rung 3).** Where does the `delegate` routing live —
+  host-local (the Mac that owns the Connections drives; remote devices view +
+  answer), matching today's "GKSS is the source of truth"? First-stab: yes,
+  host-local; remote devices observe and answer, they don't host routing.
+- **Non-coding capability surface.** Coding rides MCP + shell tools that mostly
+  exist. A winery-style pipeline (POS export, email) needs those integrations as
+  MCP servers/skills — is standing those up a Grokestrator concern, a template
+  concern, or purely the operator's `.grok/` config?
 
 ## Relationship to other documents
 
+- `00-vision-and-north-star.md` — the (revised) north star this serves: lead with
+  general-purpose, observable, answerable supervision; coding is one instance.
 - `04-conversation-model.md` — the conversation/instance 1:1 rule this preserves;
-  multi-instance was deferred there and stays deferred (it's rung 3).
+  multi-instance is sequenced to rung 3 (a soft `parentID` edge, not nested chats).
 - `07-client-control-plane-protocol.md` — the broadcast plane rung 1 surfacing and
   any rung-3 work would ride on.
 - `09-slash-commands.md` — `/compact` and the command catalog; relevant to seed
   budget at rung 3 and to driving agents generally.
-- `connection-semantics` (memory) — GKSS owns the registry; v1 adds only a
-  `teamTemplate` field and authored `.grok/` files, leaving the 1:1 instance rule
-  fully intact.
+- `connection-semantics` (memory) — GKSS owns the registry; the config-GUI slice
+  adds only a `teamTemplate` field and authored `.grok/` files, leaving the 1:1
+  instance rule fully intact. Rung 3 extends it with a **soft `parentID` edge**
+  (still no nested objects — one Connection stays 1:1 with one grok instance).
 
 ---
 
-*Created: 2026-05-30. Status: design exploration; no implementation yet. v1 scope
-= rung 2 (configure grok's native subagents); rung 3 (steerable fleet) deferred.*
+*Created: 2026-05-30. Revised 2026-06-01: direction is now **both, sequenced** —
+near-term = rung 0 (cross-conversation attention cue) + rung 1 (surface
+grok-native subagents); rung 2 = the config GUI; **rung 3 (steerable fleet) is the
+committed destination**, not indefinitely deferred — because the north star now
+leads with observable, answerable, general-purpose supervision, which only rung 3
+delivers. Status: design exploration; no implementation yet.*

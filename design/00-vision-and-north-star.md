@@ -9,22 +9,31 @@ This is currently a placeholder. We can change it once the vision is solid.
 
 ## North Star
 
-**A single comfortable native desktop application that lets one person fluidly direct and orchestrate many Grok Build agents — local and remote — as if they were one coherent system.**
+**A single comfortable native application that lets one person direct and _supervise_ many Grok agents — across any domain, local and remote — as if they were one coherent system.**
 
-The user should feel like they have one high-quality interface and one source of truth for context and history, while the actual thinking, tool use, and execution can happen on whichever machine (or set of machines) is most appropriate.
+The user should feel like they have one high-quality interface and one source of truth for context and history, while the actual thinking, tool use, and execution can happen on whichever agent (or machine) is most appropriate. Critically, they can **watch an agent think and answer its questions** — supervise the work — without dropping into a console.
 
-This is not "a nicer TUI" or "Grok in a window." It is a **control plane** for distributed Grok agents.
+This is not "a nicer TUI" or "Grok in a window." It is a **control plane for supervisable agent work** — Grok agents that happen to be excellent at coding, but are equally capable of running any multi-step job a person would otherwise do by hand.
+
+### Lead with general-purpose, not coding
+
+Coding is the **first proving ground**, not the definition. Grok Build is optimized for coding but can do nearly anything an agent with tools can do — pull data from a system, reconcile it, run a process, send an email. The differentiating bet is making that **approachable and observable for people who are not developers**.
+
+**Anchor persona — the non-technical operator.** A winery manager, marginally computer-literate at the developer/AI/console level, wants: "download today's numbers from our POS, reconcile against inventory, and email me the summary." Tools like Warp can already do work like this — but a **console-based UI befuddles a non-technical operator**. The opportunity is a native, observable, _answerable_ surface where that person can launch such a job, watch it work, and step in when it asks a question — no terminal, no copy/paste, no YAML.
+
+**Differentiator vs. console agent tools (e.g. Warp):** observable, answerable, _native_ supervision. You see agents think and you answer their questions in a GUI — instead of an opaque terminal that only a developer can drive. (See `10-agent-orchestration.md` for how this shapes the orchestration path.)
 
 ### Why This North Star Matters
 
-The current state is painful for power users who want to use Grok seriously for development and research work:
+The current state is painful — for power users running Grok seriously, and for non-technical operators who can't use a console at all:
 
-- The TUI is powerful but uncomfortable for long sessions.
+- The TUI is powerful but uncomfortable for long sessions — and a non-starter for non-developers.
 - Copy/paste between the web/app experience and local machines is unsustainable.
 - People who run multiple machines (or want to) have no good way to coordinate privileged agents across them.
+- When an agent delegates work, **what its workers are doing is opaque** — you can't watch a sub-task think or answer its question (see `10-agent-orchestration.md`).
 - Valuable conversation history and context is scattered across machines and sessions.
 
-The goal is to remove the friction so that the limiting factor becomes the quality of the underlying Grok models and the user's own thinking — not the interface or the logistics of managing multiple agents.
+The goal is to remove the friction so that the limiting factor becomes the quality of the underlying Grok models and the user's own thinking — not the interface, the logistics of managing multiple agents, or being able to read a terminal.
 
 ---
 
@@ -110,4 +119,4 @@ Phase 1 MVP does **not** need to include:
 
 ---
 
-*Created: 2026-05-25.*
+*Created: 2026-05-25. Revised 2026-06-01: North Star re-led around general-purpose, supervisable agent orchestration (coding is the first proving ground, not the definition); added the non-technical-operator persona and the observable-vs-console differentiator. See `10-agent-orchestration.md` for the orchestration path this implies.*
