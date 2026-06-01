@@ -22,9 +22,13 @@ rung 3 (below).
 **Direction (revised 2026-06-01).** The path is now stated as **both, sequenced**:
 surface grok-native subagents first (cheap, partial), then graduate to
 **real, steerable Connection children** as the explicit destination. Rung 3 is no
-longer "deferred until some hypothetical need" — the product's headline vision
-(*watch a worker think live, and answer its question*) structurally *requires* it,
-because grok-native subagents can do neither (see the limits below).
+longer "deferred until some hypothetical need" — Grokestrator's heart is the
+supervision UX (*watch a worker think live, and answer its question*), which
+grok-native subagents structurally can't provide (see the limits below). This
+supervision slice is built for the **free founder/solo-dev tool on its own
+merits** — and it doubles as the **live prototype** for the separate monetization
+bet in `strategy-general-case-ai.md` (which reuses the *concept*, not this app's
+grok brain or local-Mac deployment).
 
 ## The pivotal fact: grok already orchestrates
 
@@ -322,13 +326,13 @@ tree, no sidebar nesting. Those all belong to rung 3.
 ## The destination: the steerable fleet (rung 3)
 
 The one thing grok-native subagents structurally cannot do is let a human **watch
-and grab the wheel of an individual worker, from any device**. Because the north
-star now leads with exactly that — observable, answerable, general-purpose
-supervision — this is the **committed destination** the roadmap builds toward
-(seeded by rung 2, with rung 0's UX already proven), not an open-ended "maybe
-later." It's still sequenced *after* the cheap wins, and grok-native remains the
-right tool for fully-autonomous jobs (above) — but the direction is settled. The
-shape:
+and grab the wheel of an individual worker, from any device**. Because that
+supervision UX is Grokestrator's heart — and the live prototype of the separate
+monetization bet (`strategy-general-case-ai.md`) — this is the **committed
+destination** the roadmap builds toward (seeded by rung 2, with rung 0's UX already
+proven), not an open-ended "maybe later." It's still sequenced *after* the cheap
+wins, and grok-native remains the right tool for fully-autonomous jobs (above) —
+but the direction is settled. The shape:
 
 - Each role becomes a **real Connection** (own grok process, own ACP stream, own
   sidebar node, own chat) so it rides the existing broadcast/subscription plane

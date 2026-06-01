@@ -15,21 +15,21 @@ The user should feel like they have one high-quality interface and one source of
 
 This is not "a nicer TUI" or "Grok in a window." It is a **control plane for supervisable agent work** — Grok agents that happen to be excellent at coding, but are equally capable of running any multi-step job a person would otherwise do by hand.
 
-### Lead with general-purpose, not coding
+### Who it's for — and the one thing kept deliberately separate
 
-Coding is the **first proving ground**, not the definition. Grok Build is optimized for coding but can do nearly anything an agent with tools can do — pull data from a system, reconcile it, run a process, send an email. The differentiating bet is making that **approachable and observable for people who are not developers**.
+**Grokestrator is a free, focused tool for the founder and fellow solo devs / power users — "use it if you want."** Its heart is the **supervision UX**: watch agents think, answer their questions, and steer them across your devices, in a GUI instead of a terminal. It's general-purpose *for the individual* — drive it for coding or for any multi-step job you'd otherwise do by hand — but it is **not** a product aimed at non-technical operators, and it doesn't try to be. It has a real place exactly as that: a comfortable, observable cockpit for one technical person's fleet of agents.
 
-**Anchor persona — the non-technical operator.** A winery manager, marginally computer-literate at the developer/AI/console level, wants: "download today's numbers from our POS, reconcile against inventory, and email me the summary." Tools like Warp can already do work like this — but a **console-based UI befuddles a non-technical operator**. The opportunity is a native, observable, _answerable_ surface where that person can launch such a job, watch it work, and step in when it asks a question — no terminal, no copy/paste, no YAML.
+**The commercial idea lives elsewhere, on purpose.** The genuinely novel, transferable asset here is the **supervision/approval control plane** — and there *is* a case for monetizing it as a general-case AI tool for non-technical operators (a winery manager who says "pull the POS numbers, reconcile, email me" and supervises without a console). But that is a **separate bet**: different architecture (hosted, not your-Mac-is-the-server), a single narrow vertical, a far higher reliability/trust bar, a different brain (grok is a *coding* agent), and a services-led business model. It must not be allowed to quietly redefine this free tool into an unfocused everything-platform. It is captured — kept apart but linked — in **`strategy-general-case-ai.md`**.
 
-**Differentiator vs. console agent tools (e.g. Warp):** observable, answerable, _native_ supervision. You see agents think and you answer their questions in a GUI — instead of an opaque terminal that only a developer can drive. (See `10-agent-orchestration.md` for how this shapes the orchestration path.)
+**Differentiator both share:** observable, answerable, _native_ supervision. You see agents think and answer their questions in a GUI — instead of an opaque terminal that only a developer can drive. For Grokestrator that's the daily-driver delight; for the separate bet it's the wedge.
 
-**Honest scope — what this architecture delivers vs. what is a separate bet.** The current product is *local-first*: your Mac owns the grok processes, the history, and the server; clients view and steer over Tailscale. That substrate is a **developer** substrate — it serves a solo dev / power user with multiple devices and (at most) other devs on the tailnet. The fully non-technical operator (the winery manager who has no grok on a Mac mini, no terminal, no tailnet) is **not** served by this architecture: that product is inevitably **hosted** — someone else runs the agents, holds the integrations, and carries the uptime/liability — with a different stack, a single narrow vertical, and a far higher reliability/trust bar. So treat "agentic AI for the rest of us" as the **transferable interaction model this app prototypes**, and a **separate future bet** to be made deliberately — *not* something the local-first architecture ships. The near-term north star is the supervision UX itself (observable, answerable agents), proven on developer work; the broad consumer product is downstream of proving it and is out of scope for the current architecture.
+**So, scope discipline:** Grokestrator's near-term north star is the **supervision UX itself** — proven on the founder's own developer work (the rung-0 attention cue + a minimal rung-3 observable, answerable child; see `10-agent-orchestration.md`). That slice is useful to solo devs on its own merits *and* is the live prototype of the strategy doc's interaction model. The broad consumer product is downstream of proving it, lives in `strategy-general-case-ai.md`, and is out of scope here.
 
 ### Why This North Star Matters
 
-The current state is painful — for power users running Grok seriously, and for non-technical operators who can't use a console at all:
+The current state is painful for power users who want to use Grok seriously (the broader non-technical-operator pain is the separate bet's, in `strategy-general-case-ai.md`):
 
-- The TUI is powerful but uncomfortable for long sessions — and a non-starter for non-developers.
+- The TUI is powerful but uncomfortable for long sessions.
 - Copy/paste between the web/app experience and local machines is unsustainable.
 - People who run multiple machines (or want to) have no good way to coordinate privileged agents across them.
 - When an agent delegates work, **what its workers are doing is opaque** — you can't watch a sub-task think or answer its question (see `10-agent-orchestration.md`).
@@ -121,4 +121,4 @@ Phase 1 MVP does **not** need to include:
 
 ---
 
-*Created: 2026-05-25. Revised 2026-06-01: North Star re-led around general-purpose, supervisable agent orchestration (coding is the first proving ground, not the definition); added the non-technical-operator persona and the observable-vs-console differentiator. See `10-agent-orchestration.md` for the orchestration path this implies.*
+*Created: 2026-05-25. Revised 2026-06-01: positioned Grokestrator as a **free, focused tool for the founder + solo devs** whose heart is the supervision UX (observable, answerable agents in a GUI, any domain, across devices). The general-case "agentic AI for the rest of us" was split out as a **separate, linked monetization bet** in `strategy-general-case-ai.md` (different architecture/brain/business model) so it can't redefine the free tool. Orchestration path in `10-agent-orchestration.md`.*

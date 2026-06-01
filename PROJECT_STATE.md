@@ -34,12 +34,15 @@ A deliberate re-framing of the north star and the agent-orchestration path
 (full reasoning in `design/00-vision-and-north-star.md` and
 `design/10-agent-orchestration.md`):
 
-- **North star now leads with general-purpose, supervisable orchestration.**
-  Coding is the first proving ground, not the definition. Anchor persona: a
-  *non-technical operator* (e.g. a winery manager) running a multi-step job
-  ("pull from the POS → reconcile → email me") who must be able to **watch the
-  work and answer the agent's questions without a console**. Differentiator vs.
-  console agent tools (Warp): observable, answerable, native supervision.
+- **Two things, kept separate (revised 2026-06-01).** (a) **Grokestrator** =
+  a **free, focused tool for the founder + solo devs** — "use it if you want" —
+  whose heart is the **supervision UX** (watch agents think, answer their
+  questions, steer across devices, in a GUI; any domain). (b) The general-case
+  **"agentic AI for the rest of us"** is split out as a **separate, linked
+  monetization bet** in `design/strategy-general-case-ai.md` (hosted, narrow
+  vertical, services-led, a non-grok brain) — captured so it can't redefine the
+  free tool. Differentiator both share vs. console tools (Warp): observable,
+  answerable, native supervision.
 
 - **Sub-agent reality (authoritative, `~/.grok/docs/user-guide/16-subagents.md`):**
   grok's `task` tool spawns parallel child sessions and the parent collects each
