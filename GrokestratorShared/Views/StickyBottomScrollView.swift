@@ -97,11 +97,18 @@ private struct MacStickyScroll<Content: View>: NSViewRepresentable {
 
         if !coord.didInitialScroll || forced || wasAtBottom {
             coord.didInitialScroll = true
-            // After layout settles, so documentView height is final.
-            DispatchQueue.main.async { coord.scrollToBottom(scrollView) }
+            // Defer to the next main-actor turn so the documentView height is
+            // final after the content update. `Task { @MainActor }` (not
+            // DispatchQueue) keeps the AppKit access on the main actor, which
+            // Swift 6 requires for NSScrollView's main-actor-isolated members.
+            Task { @MainActor in coord.scrollToBottom(scrollView) }
         }
     }
 
+    /// Main-actor isolated: every method touches main-actor-isolated AppKit
+    /// state (NSScrollView/NSClipView), and all call sites are the
+    /// representable's own main-actor methods.
+    @MainActor
     final class Coordinator {
         var hosting: NSHostingView<AnyView>?
         var lastPinToken: Int
