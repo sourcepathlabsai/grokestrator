@@ -230,7 +230,13 @@ final class ConversationViewModel {
                 }
             }
             // Stream ended (driver replaced / disconnected) — clear the handle so
-            // a later call can establish a fresh subscription.
+            // a later call can establish a fresh subscription. Defensive: if the
+            // stream died mid-turn without a terminal `.error`/`.turnComplete`
+            // (e.g. a silent close), don't strand the spinner.
+            if !Task.isCancelled, self.isStreaming {
+                self.endStreaming()
+                self.isStreaming = false
+            }
             self.subscriptionTask = nil
         }
     }
@@ -350,12 +356,15 @@ final class ConversationViewModel {
         isStreaming = false
     }
 
-    /// User pressed Stop. Asks the driver to cancel the in-flight turn —
-    /// which broadcasts `turnComplete` back through the subscription, so every
-    /// connected device (this Mac + any remote GKSCs viewing the same
-    /// Connection) sees the spinner clear together.
+    /// User pressed Stop. Clears the local spinner **immediately** so Stop is
+    /// always responsive — including when the server is gone and the driver's
+    /// cancel / `turnComplete` round-trip can never come back (the old code only
+    /// asked the driver and waited for a broadcast that never arrived). Then it
+    /// best-effort tells the driver to cancel so a *live* turn actually stops.
     func cancelCurrent() {
         guard isStreaming else { return }
+        endStreaming()
+        isStreaming = false
         let driver = self.driver
         Task { await driver.cancel() }
     }

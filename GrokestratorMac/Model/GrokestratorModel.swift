@@ -11,8 +11,15 @@ struct SidebarServerGroup: Identifiable, Sendable {
     let id: UUID
     let title: String
     let isRemote: Bool
-    let isConnected: Bool
+    /// Full link state so the sidebar can colour the dot (green/yellow/red/grey)
+    /// and decide whether to offer a Reconnect button. `.connected` for local.
+    let state: RemoteServerLink.LinkState
     let instances: [InstanceItem]
+
+    var isConnected: Bool { state == .connected }
+    /// A remote server that is not currently connected → its sessions should read
+    /// as unreachable (red dots) and the header offers a manual reconnect.
+    var isDown: Bool { isRemote && state != .connected && state != .connecting }
 }
 
 /// Root application state for the Mac app.
@@ -133,7 +140,7 @@ final class GrokestratorModel {
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             title: "This Mac",
             isRemote: false,
-            isConnected: true,
+            state: .connected,
             instances: instances.filter { $0.serverID == nil }
         )
         let remoteGroups = remoteLinks.map { link in
@@ -141,7 +148,7 @@ final class GrokestratorModel {
                 id: link.id,
                 title: link.config.name,
                 isRemote: true,
-                isConnected: link.state == .connected,
+                state: link.state,
                 instances: instances.filter { $0.serverID == link.id }
             )
         }
@@ -334,6 +341,14 @@ final class GrokestratorModel {
         Task { await connectAndAttach(link) }
     }
 
+    /// Manually reconnect a remote server after it dropped/failed. Re-runs the
+    /// connect + instance-sync flow; on success `link.generation` bumps and the
+    /// reconcile loop rebuilds this server's Connections against the fresh
+    /// session (see `reconcileInstanceItems`).
+    func reconnectRemoteServer(_ link: RemoteServerLink) {
+        Task { await connectAndAttach(link) }
+    }
+
     /// Removes a remote server: disconnects, drops its instances, persists.
     func removeRemoteServer(_ link: RemoteServerLink) {
         Task { await link.disconnect() }
@@ -363,10 +378,25 @@ final class GrokestratorModel {
         }
     }
 
+    /// Tracks the connection generation last reconciled per server, so a
+    /// reconnect (which bumps `link.generation`) triggers a rebuild of that
+    /// server's Connection items against the fresh session.
+    private var reconciledGenerations: [UUID: Int] = [:]
+
     /// Bring the sidebar's `instances` in sync with `link.instances`: add new,
     /// remove gone; each remote item gets its own `RemoteConversationDriver`.
     private func reconcileInstanceItems(link: RemoteServerLink) async {
         let serverID = link.id
+        // On a fresh connection generation (first connect OR a reconnect), drop
+        // the server's existing items so they rebuild against the new session —
+        // the old drivers point at a now-invalidated session and would never
+        // recover. New items re-use the same instance IDs, so the current
+        // selection is preserved and each fresh subscription reloads the server's
+        // authoritative snapshot.
+        if reconciledGenerations[serverID] != link.generation {
+            reconciledGenerations[serverID] = link.generation
+            instances.removeAll { $0.serverID == serverID }
+        }
         let remote = link.instances
         // Remove items for this server that no longer exist remotely.
         instances.removeAll { item in

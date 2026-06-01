@@ -77,6 +77,10 @@ public final class RemoteServerLink: Identifiable {
     public let config: RemoteServerConfig
     nonisolated public var id: UUID { config.id }
     public private(set) var state: LinkState = .disconnected
+    /// Bumped on every successful (re)connect. The model watches this to rebuild
+    /// the server's Connection items against the fresh session after a reconnect
+    /// (the old drivers point at an invalidated session).
+    public private(set) var generation: Int = 0
     public private(set) var instances: [ManagedInstance] = []
     /// Which address actually connected ("LAN" or "Tailscale"), for the UI.
     public private(set) var activePath: String?
@@ -137,12 +141,33 @@ public final class RemoteServerLink: Identifiable {
             serverSession = session
             await client.connect(to: session.id)
             startEventLoop(transport: t)
+            generation += 1
             state = .connected
             try? await t.send(.listInstances, serverID: session.id)
             return
         }
 
         state = .failed("Couldn't reach \(config.name) on the LAN or over Tailscale")
+    }
+
+    /// The connection dropped (server quit / network died). Marks the link failed
+    /// and invalidates the underlying grok-build sessions so every Connection's
+    /// subscription receives a terminal `.error` — which clears the stuck "working"
+    /// spinner and shows a "lost connection" note. We deliberately KEEP `instances`
+    /// so the sidebar can still list the sessions (greyed/red) under the failed
+    /// server; a manual reconnect restores them. Idempotent.
+    private func handleDropped(_ reason: String) async {
+        guard state == .connected || state == .connecting else { return }
+        state = .failed(reason)
+        eventLoopTask?.cancel(); eventLoopTask = nil
+        // Invalidate sessions first (emits `.error` to conversation subscribers),
+        // then tear down the socket so a later reconnect starts clean.
+        if let session = serverSession {
+            await client.disconnect(from: session.id, reason: reason)
+        }
+        await transport?.disconnect(); transport = nil
+        activePath = nil
+        activeHostName = nil
     }
 
     public func disconnect() async {
@@ -195,7 +220,14 @@ public final class RemoteServerLink: Identifiable {
     /// MainActor handler for link-level events (everything that isn't grokBuild,
     /// which the parent client routes directly to a GrokBuildClientSession).
     private func handleLinkEvent(_ event: GrokestratorEvent) async {
-        await MainActor.run { self.applyEvent(event) }
+        // A transport `.error` means the connection dropped (EOF or socket error);
+        // route it through the full drop handler so sessions are invalidated and
+        // spinners clear — not just a state flip.
+        if case .error = event {
+            await handleDropped("Lost connection to \(config.name)")
+            return
+        }
+        applyEvent(event)
     }
 
     private func applyEvent(_ event: GrokestratorEvent) {
@@ -208,8 +240,6 @@ public final class RemoteServerLink: Identifiable {
             } else {
                 instances.append(inst)
             }
-        case .error(let err):
-            state = .failed(err.errorDescription ?? "error")
         default:
             break
         }

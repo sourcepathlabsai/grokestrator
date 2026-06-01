@@ -122,7 +122,14 @@ public actor NetworkGrokestratorTransport: GrokestratorClientTransport {
                 if !result.data.isEmpty {
                     for frame in buffer.append(result.data) { cont.yield(frame) }
                 }
-                if result.done { break }   // genuine EOF (isComplete) — NOT a spurious empty read
+                if result.done {
+                    // Genuine EOF (isComplete) — e.g. the server quit and TCP
+                    // closed cleanly. Surface it as a transport error so the link
+                    // can mark itself failed and invalidate sessions; otherwise the
+                    // stream just ended silently and a client's spinner hung forever.
+                    cont.yield(Data((Self.errorFramePrefix + "Server closed the connection").utf8))
+                    break
+                }
             }
         }
     }
