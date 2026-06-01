@@ -9,22 +9,33 @@ This is currently a placeholder. We can change it once the vision is solid.
 
 ## North Star
 
-**A single comfortable native desktop application that lets one person fluidly direct and orchestrate many Grok Build agents — local and remote — as if they were one coherent system.**
+**A single comfortable native application that lets one person direct and _supervise_ many Grok agents — across any domain, local and remote — as if they were one coherent system.**
 
-The user should feel like they have one high-quality interface and one source of truth for context and history, while the actual thinking, tool use, and execution can happen on whichever machine (or set of machines) is most appropriate.
+The user should feel like they have one high-quality interface and one source of truth for context and history, while the actual thinking, tool use, and execution can happen on whichever agent (or machine) is most appropriate. Critically, they can **watch an agent think and answer its questions** — supervise the work — without dropping into a console.
 
-This is not "a nicer TUI" or "Grok in a window." It is a **control plane** for distributed Grok agents.
+This is not "a nicer TUI" or "Grok in a window." It is a **control plane for supervisable agent work** — Grok agents that happen to be excellent at coding, but are equally capable of running any multi-step job a person would otherwise do by hand.
+
+### Who it's for — and the one thing kept deliberately separate
+
+**Grokestrator is a free, focused tool for the founder and fellow solo devs / power users — "use it if you want."** Its heart is the **supervision UX**: watch agents think, answer their questions, and steer them across your devices, in a GUI instead of a terminal. It's general-purpose *for the individual* — drive it for coding or for any multi-step job you'd otherwise do by hand — but it is **not** a product aimed at non-technical operators, and it doesn't try to be. It has a real place exactly as that: a comfortable, observable cockpit for one technical person's fleet of agents.
+
+**The commercial idea lives elsewhere, on purpose.** The genuinely novel, transferable asset here is the **supervision/approval control plane** — and there *is* a case for monetizing it as a general-case AI tool for non-technical operators (a winery manager who says "pull the POS numbers, reconcile, email me" and supervises without a console). But that is a **separate bet**: different architecture (hosted, not your-Mac-is-the-server), a single narrow vertical, a far higher reliability/trust bar, a different brain (grok is a *coding* agent), and a services-led business model. It must not be allowed to quietly redefine this free tool into an unfocused everything-platform. It is captured — kept apart but linked — in **`strategy-general-case-ai.md`**.
+
+**Differentiator both share:** observable, answerable, _native_ supervision. You see agents think and answer their questions in a GUI — instead of an opaque terminal that only a developer can drive. For Grokestrator that's the daily-driver delight; for the separate bet it's the wedge.
+
+**So, scope discipline:** Grokestrator's near-term north star is the **supervision UX itself** — proven on the founder's own developer work (the rung-0 attention cue + a minimal rung-3 observable, answerable child; see `10-agent-orchestration.md`). That slice is useful to solo devs on its own merits *and* is the live prototype of the strategy doc's interaction model. The broad consumer product is downstream of proving it, lives in `strategy-general-case-ai.md`, and is out of scope here.
 
 ### Why This North Star Matters
 
-The current state is painful for power users who want to use Grok seriously for development and research work:
+The current state is painful for power users who want to use Grok seriously (the broader non-technical-operator pain is the separate bet's, in `strategy-general-case-ai.md`):
 
 - The TUI is powerful but uncomfortable for long sessions.
 - Copy/paste between the web/app experience and local machines is unsustainable.
 - People who run multiple machines (or want to) have no good way to coordinate privileged agents across them.
+- When an agent delegates work, **what its workers are doing is opaque** — you can't watch a sub-task think or answer its question (see `10-agent-orchestration.md`).
 - Valuable conversation history and context is scattered across machines and sessions.
 
-The goal is to remove the friction so that the limiting factor becomes the quality of the underlying Grok models and the user's own thinking — not the interface or the logistics of managing multiple agents.
+The goal is to remove the friction so that the limiting factor becomes the quality of the underlying Grok models and the user's own thinking — not the interface, the logistics of managing multiple agents, or being able to read a terminal.
 
 ---
 
@@ -110,4 +121,4 @@ Phase 1 MVP does **not** need to include:
 
 ---
 
-*Created: 2026-05-25.*
+*Created: 2026-05-25. Revised 2026-06-01: positioned Grokestrator as a **free, focused tool for the founder + solo devs** whose heart is the supervision UX (observable, answerable agents in a GUI, any domain, across devices). The general-case "agentic AI for the rest of us" was split out as a **separate, linked monetization bet** in `strategy-general-case-ai.md` (different architecture/brain/business model) so it can't redefine the free tool. Orchestration path in `10-agent-orchestration.md`.*
