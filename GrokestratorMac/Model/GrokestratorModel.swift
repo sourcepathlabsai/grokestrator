@@ -155,6 +155,12 @@ final class GrokestratorModel {
         return [localGroup] + remoteGroups
     }
 
+    /// How many Connections are currently waiting on the user (pending
+    /// permission/question). Drives the Dock badge / global "needs you" count.
+    var attentionCount: Int {
+        instances.filter(\.needsAttention).count
+    }
+
     // MARK: - Local Connections
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,

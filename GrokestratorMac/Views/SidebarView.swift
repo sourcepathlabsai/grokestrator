@@ -249,6 +249,17 @@ private struct InstanceRow: View {
                 .font(Theme.body(13, .medium))
                 .foregroundStyle(serverDown ? Theme.textFaint : Theme.textBody)
                 .lineLimit(1)
+            Spacer(minLength: 4)
+            // "Needs you" badge: this Connection has a pending permission/question
+            // waiting for an answer — visible even while you're in another one.
+            if instance.needsAttention {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse)
+                    .help("Waiting for your answer")
+                    .accessibilityLabel("Needs your attention")
+            }
         }
         .padding(.vertical, 3)
     }
