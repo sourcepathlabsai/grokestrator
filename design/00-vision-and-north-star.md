@@ -23,6 +23,8 @@ Coding is the **first proving ground**, not the definition. Grok Build is optimi
 
 **Differentiator vs. console agent tools (e.g. Warp):** observable, answerable, _native_ supervision. You see agents think and you answer their questions in a GUI — instead of an opaque terminal that only a developer can drive. (See `10-agent-orchestration.md` for how this shapes the orchestration path.)
 
+**Honest scope — what this architecture delivers vs. what is a separate bet.** The current product is *local-first*: your Mac owns the grok processes, the history, and the server; clients view and steer over Tailscale. That substrate is a **developer** substrate — it serves a solo dev / power user with multiple devices and (at most) other devs on the tailnet. The fully non-technical operator (the winery manager who has no grok on a Mac mini, no terminal, no tailnet) is **not** served by this architecture: that product is inevitably **hosted** — someone else runs the agents, holds the integrations, and carries the uptime/liability — with a different stack, a single narrow vertical, and a far higher reliability/trust bar. So treat "agentic AI for the rest of us" as the **transferable interaction model this app prototypes**, and a **separate future bet** to be made deliberately — *not* something the local-first architecture ships. The near-term north star is the supervision UX itself (observable, answerable agents), proven on developer work; the broad consumer product is downstream of proving it and is out of scope for the current architecture.
+
 ### Why This North Star Matters
 
 The current state is painful — for power users running Grok seriously, and for non-technical operators who can't use a console at all:
