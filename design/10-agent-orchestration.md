@@ -360,6 +360,14 @@ host-local (remote devices view + prompt, host drives).
   (`.grok/roles/*.toml`, `.grok/agents/*.md`) or via `config.toml`
   `[subagents.*]`? The discrete files are cleaner to diff and round-trip; lead
   with those, treat `config.toml` as import-only.
+- **Shared base "house-rules" agent file + per-agent override.** One overarching
+  agents file (the shared base) that other agents *reference* and selectively
+  *override*, rather than duplicating config per agent. Maps onto grok's existing
+  `~/.grok/agents/` (global) + project `.grok/agents/` layering and the rung-2
+  scope toggle; the GUI could make "inherit from base, override here" first-class
+  (resolve + diff the effective config). *(Surfaced when grok, mid-test, proposed
+  a `[[REFERENCE: path]]` priming convention — the marker mechanism was discarded
+  as a no-op; the inherit/override config concept is the part worth keeping.)*
 - **How much subagent lineage to surface (rung 1).** Rendering every `task` child
   inline could get noisy. Start collapsed under the owning turn; revisit if users
   want full lineage / the `subagents/` read is worth the disk coupling.
