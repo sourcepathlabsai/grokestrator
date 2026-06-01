@@ -174,13 +174,22 @@ public actor GrokBuildConversation {
         // Track pending items so pendingToolCalls() and currentState() are truthful
         trackPending(from: raw)
 
-        // Aggressive auto-persist on meaningful events
-        switch raw {
-        case .message, .toolCall, .permissionRequest, .userQuestion:
-            try? await history.save()
-        default:
-            break
-        }
+        // NOTE: We deliberately do NOT persist here, per streamed event. This used
+        // to `await history.save()` on every .message/.toolCall/.permission/
+        // .userQuestion — but that work was both redundant AND a hot-path stall:
+        //   • Redundant: the in-flight turn's messages live in
+        //     `currentTurnMessages` and aren't appended to `turns` until
+        //     `finishCurrentTurn()`. `save()` only encodes `turns`, so a mid-turn
+        //     save rewrites the SAME (unchanged) past-turns blob — persisting
+        //     nothing new.
+        //   • Stall: `save()` re-encodes the ENTIRE history and atomically
+        //     rewrites the whole file. As a session grows (large tool results are
+        //     stored verbatim), each save gets slower; because this runs inside
+        //     the broadcast loop (`process` is awaited before `broadcast`), a slow
+        //     save froze updates to BOTH the host UI and every remote client —
+        //     the "posts results, then spins forever" lock-up.
+        // The authoritative save happens once per turn in `finalizeTurn()` (at
+        // `turnComplete`), which is where `turns` actually changes.
 
         // Capture a simple final answer heuristic for convenience APIs:
         // the last assistant message is a reasonable "final" for many agents.
