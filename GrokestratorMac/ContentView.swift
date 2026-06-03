@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import GrokestratorCore
 
 struct ContentView: View {
@@ -35,6 +36,11 @@ struct ContentView: View {
                 }
                 .help("Show instance inspector")
             }
+        }
+        // Global "needs you" indicator: a Dock badge with the count of Connections
+        // waiting on an answer — visible even when the app isn't focused.
+        .onChange(of: model.attentionCount, initial: true) { _, count in
+            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
         }
     }
 }

@@ -19,6 +19,14 @@ final class InstanceItem: Identifiable {
     /// `nil` for local; non-nil for remote (= the `RemoteServerLink.id`).
     let serverID: UUID?
 
+    /// True while this Connection is waiting on the user — a pending permission or
+    /// question. Because every Connection subscribes eagerly (even unopened ones),
+    /// this is set for background Connections too, so the sidebar "needs you" badge
+    /// and the global/Dock count can surface a pending prompt without opening it.
+    var needsAttention: Bool {
+        conversation.pendingPermission != nil || conversation.pendingUserQuestion != nil
+    }
+
     init(id: UUID = UUID(), name: String, status: InstanceStatus,
                 driver: ConversationDriver, serverID: UUID? = nil) {
         self.id = id
