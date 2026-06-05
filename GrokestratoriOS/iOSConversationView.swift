@@ -358,7 +358,7 @@ private struct iOSTranscriptRow: View {
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
-                Text(text).font(Theme.body(15)).foregroundStyle(Theme.textBody).textSelection(.enabled)
+                MarkdownText(text, baseSize: 15)
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {

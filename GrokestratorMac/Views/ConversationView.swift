@@ -502,7 +502,7 @@ private struct TranscriptRow: View {
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
-                Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
+                MarkdownText(text)
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {

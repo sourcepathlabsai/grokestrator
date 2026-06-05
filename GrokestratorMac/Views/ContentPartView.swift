@@ -20,7 +20,7 @@ struct AssistantContentView: View {
         switch part {
         case .text(let text):
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(text).textSelection(.enabled)
+                MarkdownText(text)
             }
         case .image(let source, let mimeType):
             if case .serverFile(let path) = source {
