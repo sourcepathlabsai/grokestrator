@@ -91,7 +91,7 @@ Phase 1 MVP does **not** need to include:
 
 ## Key Constraints & Realities
 
-- The user has a day job. Work happens in focused early morning blocks.
+- **Full-time as of 2026-06-05** (the founder left a long career at Adobe to focus on Grokestrator, `~/dev/alexander`, and AI consulting). Capacity is no longer the binding constraint — the new realities are a **runway with an income clock** (no salary, so work that validates/earns sooner is favored) and the founder's own focus, not available hours.
 - We will not rush to show this to other people. Demos are only valuable when we are close to a real MVP.
 - The underlying power comes from existing `grok` agents running on each machine. Grokestrator is primarily the orchestration and experience layer on top.
 - Conversation history and extended context should be a first-class strength of the system.

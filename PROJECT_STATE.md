@@ -28,6 +28,17 @@ The long-term North Star remains: one comfortable interface to fluidly direct an
 
 > **Note (2026-06-01):** the per-PR detail below is a historical snapshot (through PR #22). The product is well past that (v0.2.0-alpha; through PR #71). The current *direction* is captured in the dated section immediately below; the historical decisions/state are kept for context but not exhaustively refreshed here — see `RELEASE_NOTES.md` and `design/` for current detail.
 
+## Founder went full-time (2026-06-05)
+
+The founder **left Adobe** (retirement package) and is now **full-time** on
+Grokestrator, `~/dev/alexander`, and AI consulting. **Capacity is no longer the
+binding constraint** — so the "part-time / early-morning" framing that shaped earlier
+docs has been re-baselined (`00-vision-and-north-star.md`, `strategy-general-case-ai.md`,
+`11-orchestration-platform.md`). New binding realities: a **no-salary income clock**
+(favor work that validates/earns sooner — the consulting/validation lane is now a real
+self-funding path) and focus. The **orchestration platform** (`11-…`) is now genuinely
+buildable; still sequence it (Phase 1 first) for *learning/validation*, not survival.
+
 ## Product Direction (2026-06-01)
 
 A deliberate re-framing of the north star and the agent-orchestration path
