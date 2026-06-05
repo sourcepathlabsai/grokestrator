@@ -389,6 +389,9 @@ host-local (remote devices view + prompt, host drives).
 
 ## Relationship to other documents
 
+- `11-orchestration-platform.md` — **the implementation plan that commits to and
+  goes past rung 3**: orchestrator/agent Nodes, an in-app Orchestration MCP, an
+  embedded DB, and a built-in oracle engine. Rung 3 below is its on-ramp.
 - `00-vision-and-north-star.md` — the (revised) north star this serves: lead with
   general-purpose, observable, answerable supervision; coding is one instance.
 - `04-conversation-model.md` — the conversation/instance 1:1 rule this preserves;
