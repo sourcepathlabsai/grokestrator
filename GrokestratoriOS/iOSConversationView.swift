@@ -133,11 +133,8 @@ struct iOSConversationView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if conversation.isStreaming {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small).tint(Theme.accent)
-                        Text("Working…").font(Theme.body(12)).foregroundStyle(Theme.textMuted)
-                    }
-                    .padding(.leading, 16)
+                    ThinkingIndicator(status: conversation.activityStatus)
+                        .padding(.leading, 16)
                 }
             }
             .padding(16)

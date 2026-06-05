@@ -27,6 +27,13 @@ final class InstanceItem: Identifiable {
         conversation.pendingPermission != nil || conversation.pendingUserQuestion != nil
     }
 
+    /// True while this Connection's agent is actively working a turn. Because
+    /// every Connection subscribes eagerly, this reflects busy state even for
+    /// background Connections and for turns driven from another device — so the
+    /// sidebar can show, at a glance, which agents are busy. This is the leaf-node
+    /// signal the orchestration tree will roll up once nodes have children.
+    var isBusy: Bool { conversation.isStreaming }
+
     init(id: UUID = UUID(), name: String, status: InstanceStatus,
                 driver: ConversationDriver, serverID: UUID? = nil) {
         self.id = id
