@@ -103,11 +103,8 @@ struct ConversationView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if conversation.isStreaming {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Working…").foregroundStyle(.secondary)
-                    }
-                    .id(streamingMarkerID)
+                    ThinkingIndicator(status: conversation.activityStatus)
+                        .id(streamingMarkerID)
                 }
             }
             .padding()
