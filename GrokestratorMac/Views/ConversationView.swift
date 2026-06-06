@@ -103,11 +103,8 @@ struct ConversationView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if conversation.isStreaming {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Working…").foregroundStyle(.secondary)
-                    }
-                    .id(streamingMarkerID)
+                    ThinkingIndicator(status: conversation.activityStatus)
+                        .id(streamingMarkerID)
                 }
             }
             .padding()
@@ -502,7 +499,7 @@ private struct TranscriptRow: View {
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
-                Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
+                MarkdownText(text)
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {

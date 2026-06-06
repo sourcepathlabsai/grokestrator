@@ -133,11 +133,8 @@ struct iOSConversationView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if conversation.isStreaming {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small).tint(Theme.accent)
-                        Text("Working…").font(Theme.body(12)).foregroundStyle(Theme.textMuted)
-                    }
-                    .padding(.leading, 16)
+                    ThinkingIndicator(status: conversation.activityStatus)
+                        .padding(.leading, 16)
                 }
             }
             .padding(16)
@@ -358,7 +355,7 @@ private struct iOSTranscriptRow: View {
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
-                Text(text).font(Theme.body(15)).foregroundStyle(Theme.textBody).textSelection(.enabled)
+                MarkdownText(text, baseSize: 15)
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {

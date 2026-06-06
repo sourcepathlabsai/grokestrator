@@ -140,6 +140,17 @@ private struct ConnectionRow: View {
         HStack(spacing: 8) {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             Text(instance.name).font(Theme.body(15, .medium)).foregroundStyle(Theme.textBody)
+            Spacer(minLength: 4)
+            if instance.needsAttention {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.pulse)
+                    .accessibilityLabel("Needs your attention")
+            } else if instance.isBusy {
+                ThinkingIndicator(status: "", compact: true)
+                    .accessibilityLabel("Working")
+            }
         }
         .padding(.vertical, 2)
     }

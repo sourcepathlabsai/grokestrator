@@ -51,6 +51,12 @@ struct TranscriptEntry: Identifiable, Sendable {
 final class ConversationViewModel {
     private(set) var entries: [TranscriptEntry] = []
     private(set) var isStreaming = false
+    /// A short human label for what grok is doing *right now* — shown by the
+    /// "thinking" indicator while `isStreaming` and rolled up into the sidebar's
+    /// per-connection busy state. Updated as updates stream in ("Thinking…",
+    /// "Responding…", "Using read_file…", a progress note's text) and reset when
+    /// the turn ends. Live-only; never persisted.
+    private(set) var activityStatus = "Thinking…"
     /// A permission request awaiting the user's decision (shown over the thread,
     /// not inline). `nil` when there is nothing to answer.
     private(set) var pendingPermission: PermissionRequestInfo?
@@ -215,6 +221,7 @@ final class ConversationViewModel {
         pendingPermission = nil
         pendingUserQuestion = nil
         isStreaming = false
+        activityStatus = "Thinking…"
         sessionReady = capabilities != nil
         endStreaming()
         streamTick += 1
@@ -255,6 +262,7 @@ final class ConversationViewModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
         quickReplies = []
         isStreaming = true
+        activityStatus = "Thinking…"
         startUsagePolling()                 // live context meter during the turn
         appendEntry(.userPrompt(trimmed))   // optimistic echo
         let driver = self.driver
@@ -380,11 +388,20 @@ final class ConversationViewModel {
             // `.userPrompt` with the same text, drop the echo. Otherwise — a
             // turn started by another connected client — append it.
             endStreaming()
+            // A turn has begun — reflect "busy" on *every* subscriber, including
+            // a host watching a turn another client drove (which never goes
+            // through `send`). `turnComplete`/`.error` clear it.
+            isStreaming = true
+            activityStatus = "Thinking…"
             if case .userPrompt(let last) = entries.last?.kind, last == text { break }
             appendEntry(.userPrompt(text))
         case .messageDelta(let t):
+            isStreaming = true
+            activityStatus = "Responding…"
             appendDelta(t, kind: .message)
         case .thoughtDelta(let t):
+            isStreaming = true
+            activityStatus = "Thinking…"
             appendDelta(t, kind: .thought)
         case .message(let full, _):
             finalize(full, kind: .message)
@@ -403,6 +420,8 @@ final class ConversationViewModel {
             // single live checklist that updates IN PLACE: replace the existing
             // `.plan` entry's kind if present, otherwise append a new one. This
             // is the same single-live-widget spirit as `collapseThoughts`.
+            isStreaming = true
+            activityStatus = "Planning…"
             if let idx = entries.firstIndex(where: {
                 if case .plan = $0.kind { return true } else { return false }
             }) {
@@ -417,11 +436,13 @@ final class ConversationViewModel {
             // any live thinking, and show the message inline.
             endStreaming()
             isStreaming = false
+            activityStatus = "Thinking…"
             collapseWork()
             appendEntry(.update(update))
         case .turnComplete:
             endStreaming()
             isStreaming = false
+            activityStatus = "Thinking…"
             // The final answer has landed — collapse the turn's live thinking
             // and tool calls into expandable groups. (Belt-and-braces: we also
             // collapse when the answer message itself finalizes, so a turn that
@@ -431,7 +452,32 @@ final class ConversationViewModel {
             refreshUsage()
         default:
             endStreaming()
+            // Tool calls / progress / activity notes mean grok is actively
+            // working — reflect that as busy and surface what it's doing.
+            if let label = activityLabel(for: update) {
+                isStreaming = true
+                activityStatus = label
+            }
             appendEntry(.update(update))
+        }
+    }
+
+    /// A short "what's happening now" label for the busy indicator, derived from
+    /// a work update (tool call, progress/activity note). `nil` for updates that
+    /// aren't agent work (session status, user-decision records, etc.) so they
+    /// don't flip the connection to "busy".
+    private func activityLabel(for update: ConversationUpdate) -> String? {
+        switch update {
+        case .toolCallRequested(let info):
+            return "Using \(info.toolName)…"
+        case .progressNote(let text, let phase, _):
+            let t = phase.map { "\($0): \(text)" } ?? text
+            return t.isEmpty ? nil : t
+        case .activityNote(let text, let kind, _):
+            if kind == "permission" || kind == "user_question" { return nil }
+            return text.isEmpty ? nil : text
+        default:
+            return nil
         }
     }
 

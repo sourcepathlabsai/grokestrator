@@ -259,6 +259,13 @@ private struct InstanceRow: View {
                     .symbolEffect(.pulse)
                     .help("Waiting for your answer")
                     .accessibilityLabel("Needs your attention")
+            } else if instance.isBusy {
+                // Pulsing cyan dots: this agent is actively working a turn — shown
+                // even when the Connection isn't the one on screen, so you can see
+                // at a glance which agents are busy.
+                ThinkingIndicator(status: "", compact: true)
+                    .help("Working…")
+                    .accessibilityLabel("Working")
             }
         }
         .padding(.vertical, 3)

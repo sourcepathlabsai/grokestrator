@@ -200,6 +200,7 @@ design is shaped by reality and the oracle core stays small.
   the whole thesis cheaply. Resist building Phases 3-5 before 1-2 are *used* — and
   remember there's no salary, so something that demos/earns sooner beats a perfect
   Phase 5 nobody's seen.
+
 - **The oracle engine is the small must-be-correct core** — and the thing that has
   to be right (a broken oracle "heals toward wrong" confidently). Keep it small;
   build it with cathedral-grade care; keep everything it guards disposable.
