@@ -92,6 +92,10 @@ public actor AgentConversationHistory {
         case .sessionUpdate, .sessionCreated, .done:
             break
 
+        // A resolved permission/question is a live overlay-dismissal signal only.
+        case .interactionResolved:
+            break
+
         // Live deltas are UI-only; history is built from the coalesced .message/.thought.
         case .messageDelta, .thoughtDelta:
             break

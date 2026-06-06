@@ -31,6 +31,11 @@ public enum ConversationUpdate: Sendable, Codable {
     /// The agent is asking the user one or more structured questions
     /// (grok's `_x.ai/ask_user_question`). Parallel to `permissionRequested`.
     case userQuestionRequested(UserQuestionInfo)
+    /// A pending permission **or** user-question was answered (on *any* device).
+    /// `id` matches the resolved `PermissionRequestInfo.id` / `UserQuestionInfo.id`
+    /// (both are the JSON-RPC request id). Broadcast so every other device clears
+    /// its overlay — answering on the iPhone dismisses it on the iPad too.
+    case interactionResolved(id: String)
     /// grok re-broadcasts its ENTIRE task plan whenever any entry's status
     /// changes. The UI keeps ONE live checklist that updates in place (keyed by
     /// entry content) rather than appending a row per broadcast — see

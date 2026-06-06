@@ -399,7 +399,7 @@ private struct iOSTranscriptRow: View {
             // Plans normally render via the `.plan` entry kind (live, in-place);
             // render the card too if one ever arrives wrapped as `.update`.
             iOSPlanView(plan: plan)
-        case .userPrompt, .messageDelta, .thoughtDelta:
+        case .userPrompt, .messageDelta, .thoughtDelta, .interactionResolved:
             EmptyView()
         case .permissionRequested, .userQuestionRequested, .toolResultRecorded, .sessionStatus, .unknownEvent:
             EmptyView()

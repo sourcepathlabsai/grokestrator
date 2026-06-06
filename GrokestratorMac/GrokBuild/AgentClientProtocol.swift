@@ -221,6 +221,10 @@ public enum ACPEvent: Codable, Sendable {
     case toolResult(ToolResultEvent)
     case permissionRequest(PermissionRequestEvent)
     case userQuestion(UserQuestionEvent)
+    /// A pending permission / user-question was answered — emitted when we resolve
+    /// it so every subscriber clears its overlay (cross-device dismissal). `id` is
+    /// the request id carried by the original permission/question event.
+    case interactionResolved(InteractionResolvedEvent)
 
     /// grok's live task plan (a re-broadcast snapshot of the whole checklist).
     case plan(PlanEvent)
@@ -240,6 +244,16 @@ public enum ACPEvent: Codable, Sendable {
 public struct SessionCreatedEvent: Codable, Sendable {
     public let sessionId: String
     public let capabilities: [String]?
+}
+
+public struct InteractionResolvedEvent: Codable, Sendable {
+    public let sessionId: String
+    /// The resolved request id (matches the permission/question event's id).
+    public let id: String
+    public init(sessionId: String, id: String) {
+        self.sessionId = sessionId
+        self.id = id
+    }
 }
 
 public struct MessageEvent: Codable, Sendable {
