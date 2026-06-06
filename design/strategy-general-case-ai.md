@@ -10,6 +10,15 @@
 > Status: **strategy exploration — gated, not committed.** Nothing here is built or
 > promised. The next action is a cheap validation test (below), not a platform.
 
+> **Re-baseline (2026-06-05):** the founder went **full-time** (left Adobe). The
+> "*because you're part-time*" reasoning below no longer binds — capacity isn't the
+> limiter. What *does* now bind is a **no-salary income clock.** Net effect: the
+> narrow-wedge / validate-before-platform / services-led-first conclusions **still
+> hold** (they were always market-, moat-, and trust-reasoning, never capacity), and
+> the income clock makes the **consulting/validation lane more urgent, not less** —
+> it self-funds the build. Full-time just means you can build the real product faster
+> *behind* that services motion; earn and validate first.
+
 ## One-line thesis
 
 A GUI where a **non-technical operator** can run an AI agent against their real
@@ -76,10 +85,11 @@ Resist "CRM" and "general-purpose." Win one seam first.
 
 ## Business model / GTM
 
-- **Consulting-led that productizes.** Founder is solo + part-time: install and *manage*
-  it as a service (cloud per-tenant, **not** their box). ~**$1–3k setup + $300–1k/mo**
-  per shop. This funds the work and forces real integration learning; productize the
-  repeated parts.
+- **Consulting-led that productizes.** Founder is solo and now **full-time (with an
+  income clock)**: install and *manage* it as a service (cloud per-tenant, **not** their
+  box). ~**$1–3k setup + $300–1k/mo** per shop. This **self-funds the build** (it matters
+  more with no salary), forces real integration learning, and gives a paying customer
+  from day one; productize the repeated parts.
 - **Sell the outcome, not the architecture.** "Quotes out same day, nothing sent without
   your OK" — never "local AI agents." Non-technical buyers buy results + liability
   transfer.
@@ -87,9 +97,10 @@ Resist "CRM" and "general-purpose." Win one seam first.
   supervision GUI is the demo that closes. (GoHighLevel proves the agency/reseller motion
   monetizes the "AI for small business" space — but it leans toward *removing* the human,
   which makes our **approval bet a genuine differentiator** for liability-sensitive owners.)
-- **Honest framing for a part-time solo founder:** services-led-that-productizes is the
-  *right* model, not a downgrade — it self-funds, builds the integration moat, and has a
-  real paying customer from day one.
+- **Honest framing (founder now full-time, no salary):** services-led-that-productizes is
+  still the *right first* model — not for capacity reasons now, but because it **self-funds**
+  (it matters with no salary), builds the integration moat, and lands a paying customer from
+  day one. Full-time just lets you build the real product faster *behind* that motion.
 
 ## Competitive landscape (web-grounded, 2026-06-01)
 

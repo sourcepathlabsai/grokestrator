@@ -146,9 +146,12 @@ question (overlays + attention badge), grab-the-wheel (select any Node).
 
 ## 4. Phased roadmap (sequenced; each phase ships value)
 
-This is a **multi-quarter** build. The plan's real value is the sequence: each
-phase is independently useful and de-risks the next. A part-time founder can stop
-after any phase with a strictly more capable tool. **Do not build it all at once.**
+This is a large build (now that the founder is **full-time**, faster — but still
+substantial). The plan's real value is the sequence: each phase is independently
+useful and de-risks the next, so you can stop after any phase with a strictly more
+capable tool. **Still don't build it all at once** — but now for *learning and
+focus*, not capacity: each phase should be **used** before the next is built, so the
+design is shaped by reality and the oracle core stays small.
 
 ### Phase 1 — The tree + one real delegation *(the core loop; biggest unlock)*
 - Add `role` + `parentID`; sidebar shows one level of nesting (orchestrator → children).
@@ -191,10 +194,13 @@ after any phase with a strictly more capable tool. **Do not build it all at once
 
 ## 5. Honest risks & guardrails (read before committing)
 
-- **Scope is enormous; you are part-time.** The sequencing is the survival
-  mechanism. **Phase 1 alone** (tree + one delegation) is a real, demoable platform
-  and validates the whole thesis cheaply. Resist building Phases 3-5 before 1-2 are
-  *used*.
+- **Scope is enormous.** Full-time makes it feasible, but sequencing is still the
+  right discipline — now for **learning, focus, and an income clock**, not survival.
+  **Phase 1 alone** (tree + one delegation) is a real, demoable platform and validates
+  the whole thesis cheaply. Resist building Phases 3-5 before 1-2 are *used* — and
+  remember there's no salary, so something that demos/earns sooner beats a perfect
+  Phase 5 nobody's seen.
+
 - **The oracle engine is the small must-be-correct core** — and the thing that has
   to be right (a broken oracle "heals toward wrong" confidently). Keep it small;
   build it with cathedral-grade care; keep everything it guards disposable.
