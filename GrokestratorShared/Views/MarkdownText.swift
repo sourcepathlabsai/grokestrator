@@ -145,7 +145,15 @@ struct MarkdownText: View {
     /// Builds a `Text` from a single block's inline Markdown. Code spans get a
     /// cyan monospaced treatment; the rest (bold/italic/strikethrough/links) is
     /// handled by `AttributedString`. Falls back to literal text on any failure.
+    ///
+    /// The parsed result is **memoized**: the macOS sticky-scroll re-hosts the
+    /// whole transcript on each streaming refresh, which re-evaluates every
+    /// on-screen `MarkdownText` body. Without this cache, every finalized message
+    /// re-ran `AttributedString(markdown:)` ~20×/s during a live turn — the second
+    /// half of the long-output beach-ball. A cache hit is just a dictionary lookup.
     private func inlineText(_ s: String) -> Text {
+        let key = "\(baseSize)\u{1}\(s)" as NSString
+        if let hit = Self.inlineCache.object(forKey: key) { return Text(hit.value) }
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: true,
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
@@ -158,8 +166,23 @@ struct MarkdownText: View {
             attr[run.range].font = .system(size: baseSize - 1, design: .monospaced)
             attr[run.range].foregroundColor = Theme.accent
         }
+        Self.inlineCache.setObject(CachedAttributed(attr), forKey: key)
         return Text(attr)
     }
+
+    /// Box for caching value-type `AttributedString` in an `NSCache`.
+    private final class CachedAttributed {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    /// Thread-safe; keyed by `baseSize` + source string. Bounded so a long session
+    /// can't grow it without limit.
+    private static let inlineCache: NSCache<NSString, CachedAttributed> = {
+        let cache = NSCache<NSString, CachedAttributed>()
+        cache.countLimit = 4000
+        return cache
+    }()
 
     // MARK: - Parsing
 

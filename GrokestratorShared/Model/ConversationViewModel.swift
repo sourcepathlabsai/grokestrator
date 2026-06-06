@@ -104,6 +104,19 @@ final class ConversationViewModel {
     private var streamingID: UUID?
     private var streamingKind: StreamKind?
 
+    /// The id of the assistant bubble currently being streamed into, *only* when
+    /// it's a live message. The transcript renders this one as plain text —
+    /// re-parsing Markdown of a rapidly-growing message on every refresh is the
+    /// streaming hot path — and switches to full Markdown the moment it finalizes.
+    var streamingMessageID: UUID? { streamingKind == .message ? streamingID : nil }
+
+    // Streaming deltas are coalesced (see `enqueueDelta`) so a fast, long stream
+    // refreshes the transcript at ~20 Hz instead of once per token.
+    private var pendingDeltaText = ""
+    private var pendingDeltaKind: StreamKind?
+    private var deltaFlushScheduled = false
+    private let flushIntervalNanos: UInt64 = 50_000_000   // ~20 Hz
+
     init(driver: ConversationDriver) {
         self.driver = driver
         self.mediaLoader = MediaLoader(
@@ -224,6 +237,7 @@ final class ConversationViewModel {
         activityStatus = "Thinking…"
         sessionReady = capabilities != nil
         endStreaming()
+        discardPendingDelta()
         streamTick += 1
 
         subscriptionTask = Task { [weak self] in
@@ -312,6 +326,7 @@ final class ConversationViewModel {
         // replies don't carry over from a previous, possibly raced, state.
         isStreaming = false
         endStreaming()
+        discardPendingDelta()
         streamTick += 1
         refreshUsage()
     }
@@ -361,6 +376,7 @@ final class ConversationViewModel {
     /// is left untouched here.
     func cancel() {
         endStreaming()
+        discardPendingDelta()
         isStreaming = false
     }
 
@@ -372,6 +388,7 @@ final class ConversationViewModel {
     func cancelCurrent() {
         guard isStreaming else { return }
         endStreaming()
+        discardPendingDelta()
         isStreaming = false
         let driver = self.driver
         Task { await driver.cancel() }
@@ -380,6 +397,26 @@ final class ConversationViewModel {
     // MARK: - Update handling
 
     private func handle(_ update: ConversationUpdate) {
+        // Streaming deltas are coalesced and flushed on a timer (~20 Hz) so a
+        // fast, long stream can't drive a full transcript re-parse + relayout per
+        // token — that was the main-thread beach-ball on long output. Every other
+        // (structural / terminal) update flushes the buffer first, so transcript
+        // order stays exact, then applies immediately.
+        switch update {
+        case .messageDelta(let t):
+            isStreaming = true
+            activityStatus = "Responding…"
+            enqueueDelta(t, kind: .message)
+            return
+        case .thoughtDelta(let t):
+            isStreaming = true
+            activityStatus = "Thinking…"
+            enqueueDelta(t, kind: .thought)
+            return
+        default:
+            flushPendingDelta()
+        }
+
         switch update {
         case .userPrompt(let text):
             // Either we initiated this prompt (and the subscription is echoing
@@ -395,14 +432,6 @@ final class ConversationViewModel {
             activityStatus = "Thinking…"
             if case .userPrompt(let last) = entries.last?.kind, last == text { break }
             appendEntry(.userPrompt(text))
-        case .messageDelta(let t):
-            isStreaming = true
-            activityStatus = "Responding…"
-            appendDelta(t, kind: .message)
-        case .thoughtDelta(let t):
-            isStreaming = true
-            activityStatus = "Thinking…"
-            appendDelta(t, kind: .thought)
         case .message(let full, _):
             finalize(full, kind: .message)
         case .thought(let full, _):
@@ -479,6 +508,50 @@ final class ConversationViewModel {
         default:
             return nil
         }
+    }
+
+    // MARK: - Delta coalescing (streaming throttle)
+
+    /// Buffers a streaming delta and schedules a flush. Coalescing many tokens
+    /// into one transcript mutation per ~`flushIntervalNanos` is what keeps a
+    /// fast, long stream from wedging the main thread (a re-parse + full
+    /// re-host/relayout per token). A kind switch (thought→message) flushes first
+    /// so the two never merge into one bubble.
+    private func enqueueDelta(_ text: String, kind: StreamKind) {
+        if let k = pendingDeltaKind, k != kind { flushPendingDelta() }
+        pendingDeltaKind = kind
+        pendingDeltaText += text
+        guard !deltaFlushScheduled else { return }
+        deltaFlushScheduled = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: self?.flushIntervalNanos ?? 50_000_000)
+            self?.flushPendingDelta()
+        }
+    }
+
+    /// Applies buffered streaming text to the transcript in a single mutation.
+    /// Called by the flush timer and synchronously before any structural update,
+    /// so order is exact.
+    private func flushPendingDelta() {
+        deltaFlushScheduled = false
+        guard let kind = pendingDeltaKind, !pendingDeltaText.isEmpty else {
+            pendingDeltaKind = nil
+            return
+        }
+        let text = pendingDeltaText
+        pendingDeltaText = ""
+        pendingDeltaKind = nil
+        appendDelta(text, kind: kind)
+    }
+
+    /// Drops any buffered delta without applying it — for snapshot replay,
+    /// re-subscribe, and cancel, where the buffered text belongs to a context
+    /// that no longer exists. (A pending flush task then finds an empty buffer
+    /// and no-ops.)
+    private func discardPendingDelta() {
+        pendingDeltaText = ""
+        pendingDeltaKind = nil
+        deltaFlushScheduled = false
     }
 
     private func appendDelta(_ text: String, kind: StreamKind) {
