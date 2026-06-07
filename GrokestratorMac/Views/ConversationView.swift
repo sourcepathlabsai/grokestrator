@@ -91,23 +91,25 @@ struct ConversationView: View {
         .onChange(of: instance.id) { pinToken += 1 }
     }
 
+    /// Transcript rows + the trailing live indicator, as one virtualized list so
+    /// the streaming "thinking" cue scrolls with the content and sits at the bottom.
+    private var transcriptItems: [TranscriptListItem] {
+        var items = conversation.entries.map { TranscriptListItem.entry($0) }
+        if conversation.isStreaming { items.append(.indicator(conversation.activityStatus)) }
+        return items
+    }
+
     private var transcript: some View {
-        // Console-style stick-to-bottom: auto-follows the live reply only while
-        // the user is already at the bottom; if they scroll up to read, new
-        // content appends without yanking the viewport down.
-        StickyBottomScrollView(tick: conversation.streamTick, pinToken: pinToken) {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(conversation.entries) { entry in
-                    TranscriptRow(entry: entry, streamingMessageID: conversation.streamingMessageID)
-                        .id(entry.id)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if conversation.isStreaming {
-                    ThinkingIndicator(status: conversation.activityStatus)
-                        .id(streamingMarkerID)
-                }
+        // Console-style stick-to-bottom over a VIRTUALIZED list: only on-screen
+        // rows are built/laid out, so a long live stream costs ~viewport, not the
+        // whole transcript. Auto-follows the reply only while already at bottom.
+        VirtualizedStickyList(items: transcriptItems, tick: conversation.streamTick, pinToken: pinToken) { item in
+            switch item {
+            case .entry(let entry):
+                TranscriptRow(entry: entry, streamingMessageID: conversation.streamingMessageID)
+            case .indicator(let status):
+                ThinkingIndicator(status: status)
             }
-            .padding()
         }
         .background(Theme.bg)
     }
@@ -242,8 +244,6 @@ struct ConversationView: View {
             .fixedSize(horizontal: replies.count <= 3 && replies.allSatisfy { $0.count <= 14 }, vertical: false)
         }
     }
-
-    private var streamingMarkerID: String { "streaming-marker" }
 
     private func send() {
         conversation.send(conversation.draft)

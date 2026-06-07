@@ -41,6 +41,24 @@ struct TranscriptEntry: Identifiable, Sendable {
     }
 }
 
+/// One row in the virtualized transcript list: a transcript entry, or the
+/// trailing live "thinking" indicator (kept in-list so it scrolls with the
+/// content and stays reachable at the bottom). The indicator's identity is
+/// stable across status changes so it updates in place rather than churning.
+enum TranscriptListItem: Identifiable {
+    case entry(TranscriptEntry)
+    case indicator(String)
+
+    enum ID: Hashable { case entry(UUID), indicator }
+
+    var id: ID {
+        switch self {
+        case .entry(let entry): return .entry(entry.id)
+        case .indicator: return .indicator
+        }
+    }
+}
+
 /// MainActor-facing state for a single conversation.
 ///
 /// Bridges the actor-based `AsyncStream<ConversationUpdate>` (black box / mock)

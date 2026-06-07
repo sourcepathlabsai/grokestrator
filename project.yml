@@ -11,8 +11,10 @@ name: Grokestrator
 options:
   bundleIdPrefix: ai.sourcepathlabs.grokestrator
   deploymentTarget:
-    macOS: "14.0"
-    iOS: "17.0"
+    # macOS 15 / iOS 18 for the modern scroll APIs (onScrollGeometryChange) the
+    # virtualized transcript uses for precise, synchronous sticky-bottom tracking.
+    macOS: "15.0"
+    iOS: "18.0"
   createIntermediateGroups: true
   groupSortPosition: top
 

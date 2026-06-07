@@ -121,23 +121,24 @@ struct iOSConversationView: View {
 
     // MARK: - Transcript
 
+    private var transcriptItems: [TranscriptListItem] {
+        var items = conversation.entries.map { TranscriptListItem.entry($0) }
+        if conversation.isStreaming { items.append(.indicator(conversation.activityStatus)) }
+        return items
+    }
+
     private var transcript: some View {
-        // Console-style stick-to-bottom: auto-follows the live reply only while
-        // the user is already at the bottom; if they scroll up to read, new
-        // content appends without yanking the viewport down.
-        StickyBottomScrollView(tick: conversation.streamTick, pinToken: pinToken) {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(conversation.entries) { entry in
-                    iOSTranscriptRow(entry: entry, streamingMessageID: conversation.streamingMessageID)
-                        .id(entry.id)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if conversation.isStreaming {
-                    ThinkingIndicator(status: conversation.activityStatus)
-                        .padding(.leading, 16)
-                }
+        // Console-style stick-to-bottom over a VIRTUALIZED list: only on-screen
+        // rows are built, so a long live stream costs ~viewport, not the whole
+        // transcript. Auto-follows the reply only while already at bottom.
+        VirtualizedStickyList(items: transcriptItems, tick: conversation.streamTick,
+                              pinToken: pinToken, rowSpacing: 10) { item in
+            switch item {
+            case .entry(let entry):
+                iOSTranscriptRow(entry: entry, streamingMessageID: conversation.streamingMessageID)
+            case .indicator(let status):
+                ThinkingIndicator(status: status).padding(.leading, 16)
             }
-            .padding(16)
         }
         .background(Theme.bg)
     }
