@@ -45,11 +45,14 @@ public final class RemoteConversationDriver: ConversationDriver, @unchecked Send
     }
 
     public func cancel() async {
-        guard let promptID = lastPromptID else { return }
-        // The wire's `cancelPrompt(instanceID:promptID:)` already existed; the
-        // server (MacGrokestratorServer) now routes it to `manager.cancelPrompt`,
-        // which broadcasts `turnComplete` to every subscriber.
-        try? await session.cancelPrompt(promptID: promptID)
+        // Stop the connection's CURRENT turn — even one this client didn't start.
+        // In the broadcast model a turn is often driven from the host or another
+        // device, so `lastPromptID` (set only by *our own* `send`) is nil; gating
+        // on it made Stop a silent no-op for those turns. The host ignores the
+        // promptID anyway and cancels whatever turn is in flight
+        // (see `MacGrokestratorServer`'s `.cancelPrompt` → `manager.cancelPrompt`),
+        // so pass `lastPromptID` if we have it, else a throwaway id.
+        try? await session.cancelPrompt(promptID: lastPromptID ?? UUID())
     }
 
     public func capabilities() async -> AgentCapabilities? {
