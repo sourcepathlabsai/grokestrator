@@ -98,7 +98,7 @@ struct ConversationView: View {
         StickyBottomScrollView(tick: conversation.streamTick, pinToken: pinToken) {
             LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(conversation.entries) { entry in
-                    TranscriptRow(entry: entry)
+                    TranscriptRow(entry: entry, streamingMessageID: conversation.streamingMessageID)
                         .id(entry.id)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -490,6 +490,11 @@ private struct PlanView: View {
 /// Renders one transcript entry with console-like, low-chrome styling.
 private struct TranscriptRow: View {
     let entry: TranscriptEntry
+    /// The id of the bubble currently being streamed into (if any). While this
+    /// row *is* that bubble we render plain text — re-parsing Markdown of a
+    /// rapidly-growing message on every refresh is the streaming hot path — and
+    /// switch to full Markdown the instant the message finalizes.
+    var streamingMessageID: UUID? = nil
 
     var body: some View {
         switch entry.kind {
@@ -499,7 +504,11 @@ private struct TranscriptRow: View {
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
-                MarkdownText(text)
+                if entry.id == streamingMessageID {
+                    Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
+                } else {
+                    MarkdownText(text)
+                }
             }
         case .assistantContent(let parts):
             row(icon: "sparkle", tint: Theme.accent) {
