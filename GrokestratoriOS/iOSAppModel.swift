@@ -16,6 +16,12 @@ final class iOSAppModel {
     private(set) var remoteLinks: [RemoteServerLink]
     /// One retry-loop task per link, so `removeRemoteServer` can cancel it.
     private var attachTasks: [UUID: Task<Void, Never>] = [:]
+    /// The connection generation last reconciled per server. A reconnect bumps
+    /// `link.generation`; when it changes we drop and rebuild that server's
+    /// Connection items so they bind to the FRESH session — the old drivers point
+    /// at an invalidated session and would never recover (this is what left the
+    /// phone stuck on "session inactivated" after sleeping and re-opening).
+    private var reconciledGenerations: [UUID: Int] = [:]
 
     init() {
         let configs = RemoteServerStore.load()
@@ -69,6 +75,20 @@ final class iOSAppModel {
         RemoteServerStore.save(saved)
     }
 
+    /// Call when the app returns to the foreground. iOS suspends our tasks while
+    /// the phone sleeps and tears the socket down, so on re-open we (a) reconcile
+    /// each link immediately — applying any generation rebuild without waiting for
+    /// the next poll — and (b) nudge a reconnect for any link that isn't connected,
+    /// so recovery is immediate instead of waiting out the retry-loop backoff.
+    func handleForeground() {
+        for link in remoteLinks {
+            reconcile(link: link)
+            if link.state != .connected {
+                Task { await link.connect() }   // guarded; no-op if already connecting
+            }
+        }
+    }
+
     // MARK: - Private
 
     /// Connect a link and reconcile its instances into the UI list. The link's
@@ -95,6 +115,14 @@ final class iOSAppModel {
 
     private func reconcile(link: RemoteServerLink) {
         let serverID = link.id
+        // On a fresh connection generation (first connect OR a reconnect), drop
+        // this server's existing items so they rebuild against the new session.
+        // Reused instance IDs preserve the current selection; each fresh
+        // subscription reloads the server's authoritative snapshot.
+        if reconciledGenerations[serverID] != link.generation {
+            reconciledGenerations[serverID] = link.generation
+            instances.removeAll { $0.serverID == serverID }
+        }
         let remote = link.instances
         instances.removeAll { item in
             item.serverID == serverID && !remote.contains(where: { $0.id == item.id })
