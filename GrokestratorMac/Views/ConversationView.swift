@@ -547,9 +547,10 @@ private struct TranscriptRow: View {
             }
         case .thought(let text, _):
             note("💭 \(text)")
-        case .messageDelta, .thoughtDelta, .userPrompt:
+        case .messageDelta, .thoughtDelta, .userPrompt, .interactionResolved:
             // Deltas grow bubbles in place; userPrompt is appended as its own
-            // TranscriptEntry kind. None render through this case.
+            // TranscriptEntry kind; interactionResolved only clears an overlay.
+            // None render through this case.
             EmptyView()
         case .progressNote(let text, let phase, _):
             note("\(phase.map { "[\($0)] " } ?? "")\(text)")

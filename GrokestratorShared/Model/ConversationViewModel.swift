@@ -462,6 +462,11 @@ final class ConversationViewModel {
             // Surface over the thread (overlay), like a permission request.
             endStreaming()
             pendingUserQuestion = info
+        case .interactionResolved(let id):
+            // Answered on some device — dismiss the matching overlay here too.
+            // Id-matched so a *new* prompt that arrived in the meantime is kept.
+            if pendingPermission?.id == id { pendingPermission = nil }
+            if pendingUserQuestion?.id == id { pendingUserQuestion = nil }
         case .planUpdated(let plan):
             // grok re-broadcasts the ENTIRE plan on every status change. Keep a
             // single live checklist that updates IN PLACE: replace the existing

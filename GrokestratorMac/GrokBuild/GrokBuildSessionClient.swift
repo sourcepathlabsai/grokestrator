@@ -171,6 +171,8 @@ public actor GrokBuildSessionClient {
         // grok a full window to resume before considering the connection stalled.
         noteActivity()
         respond(id: id, result: selectedOutcome(chosenOption))
+        // Tell every subscriber this is answered so other devices clear the overlay.
+        emit(.interactionResolved(InteractionResolvedEvent(sessionId: sessionId ?? "", id: permissionId)))
     }
 
     /// Resolves a pending `_x.ai/ask_user_question` request with the user's answer.
@@ -193,6 +195,8 @@ public actor GrokBuildSessionClient {
                 ])
             ])
         ]))
+        // Tell every subscriber this is answered so other devices clear the overlay.
+        emit(.interactionResolved(InteractionResolvedEvent(sessionId: sessionId ?? "", id: questionId)))
     }
 
     /// Finishes the active prompt stream early.

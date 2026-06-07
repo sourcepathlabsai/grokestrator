@@ -253,6 +253,8 @@ public actor GrokBuildConversation {
                 sessionId: q.sessionId
             )
             return .userQuestionRequested(info)
+        case .interactionResolved(let e):
+            return .interactionResolved(id: e.id)
         case .plan(let p):
             return .planUpdated(p.plan)
         case .toolResult(let t):
