@@ -444,6 +444,20 @@ private struct iOSPermissionOverlay: View {
             Label("Grok is asking permission", systemImage: "lock.shield")
                 .font(.headline)
                 .foregroundStyle(.orange)
+            // Long description + many options shouldn't push the buttons off the
+            // top of the card — scroll the body when it overflows.
+            ScrollableIfNeeded(maxHeight: 420) { permissionBody }
+        }
+        .padding(16)
+        .frame(maxWidth: 540)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
+        .shadow(radius: 16, y: 6)
+    }
+
+    /// Description + option buttons — the scrollable part when it overflows.
+    private var permissionBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text(request.description)
                 .font(.callout)
                 .textSelection(.enabled)
@@ -458,11 +472,6 @@ private struct iOSPermissionOverlay: View {
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: 540)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
-        .shadow(radius: 16, y: 6)
     }
 }
 
@@ -483,33 +492,9 @@ private struct iOSUserQuestionOverlay: View {
                 .font(.headline)
                 .foregroundStyle(Theme.accent)
 
-            ForEach(Array(request.questions.enumerated()), id: \.offset) { qIdx, question in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(question.prompt)
-                        .font(Theme.body(15))
-                        .foregroundStyle(Theme.textBody)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    ForEach(question.options) { option in
-                        Button {
-                            onAnswer(qIdx, option.label)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(option.label).font(Theme.body(15))
-                                if let desc = option.description, !desc.isEmpty {
-                                    Text(desc)
-                                        .font(Theme.body(12))
-                                        .foregroundStyle(Theme.textMuted)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(iOSUserQuestionOptionButtonStyle())
-                    }
-                }
-            }
+            // grok can offer many wordy options — scroll them when they overflow
+            // so the top choice can't get clipped. Header + free-text stay pinned.
+            ScrollableIfNeeded(maxHeight: 420) { questionsContent }
 
             // Free-text / "Other" path — answers the first question.
             HStack(spacing: 8) {
@@ -539,6 +524,40 @@ private struct iOSUserQuestionOverlay: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.accent.opacity(0.4)))
         .shadow(color: .black.opacity(0.4), radius: 24, y: 10)
+    }
+
+    /// The questions + their option buttons — the part that scrolls when it
+    /// would otherwise overflow the space above the composer.
+    private var questionsContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(request.questions.enumerated()), id: \.offset) { qIdx, question in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(question.prompt)
+                        .font(Theme.body(15))
+                        .foregroundStyle(Theme.textBody)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(question.options) { option in
+                        Button {
+                            onAnswer(qIdx, option.label)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.label).font(Theme.body(15))
+                                if let desc = option.description, !desc.isEmpty {
+                                    Text(desc)
+                                        .font(Theme.body(12))
+                                        .foregroundStyle(Theme.textMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(iOSUserQuestionOptionButtonStyle())
+                    }
+                }
+            }
+        }
     }
 
     private func submitFreeText() {
