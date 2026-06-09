@@ -29,6 +29,13 @@ struct VirtualizedStickyList<Item: Identifiable, RowContent: View>: View where I
     /// True while the viewport is at (or within `threshold` of) the bottom.
     @State private var isPinned = true
 
+    /// True once we've landed at the bottom for the *current* content. Reset on a
+    /// forced re-pin (Connection switch) so the incoming transcript re-lands.
+    @State private var didInitialScroll = false
+
+    /// The in-flight "settle" burst, cancelled when a newer one supersedes it.
+    @State private var settleTask: Task<Void, Never>?
+
     /// Within this many points of the bottom still counts as "at the bottom".
     private let threshold: CGFloat = 44
     private let bottomID = "vsl-bottom-anchor"
@@ -55,16 +62,49 @@ struct VirtualizedStickyList<Item: Identifiable, RowContent: View>: View where I
             }
             // Content changed: follow the bottom only if we were already there.
             .onChange(of: tick) {
+                // First content for this connection arrived after we appeared
+                // (history replays asynchronously): land on the newest entry.
+                if !didInitialScroll, !items.isEmpty {
+                    settleToBottom(proxy)
+                    return
+                }
                 guard isPinned else { return }
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
-            // Forced re-pin (user sent, or switched Connection).
+            // Forced re-pin (user sent, or switched Connection): re-land at the
+            // bottom even though the incoming transcript's rows realize late.
             .onChange(of: pinToken) {
-                isPinned = true
-                withAnimation(.snappy) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                didInitialScroll = false
+                settleToBottom(proxy)
             }
             // Land at the bottom on first appearance.
-            .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) }
+            .onAppear { settleToBottom(proxy) }
+        }
+    }
+
+    /// Drive the viewport to the bottom and *keep* it there across a short
+    /// settling window. A single `scrollTo` is not enough for the transcript:
+    /// the rows render Markdown whose true height is known only after async
+    /// layout, so the first scroll lands against under-estimated heights and the
+    /// rows below then grow and push the real bottom past us — leaving the user
+    /// stranded mid-transcript (worse the more content there is). Re-issuing the
+    /// scroll as heights settle catches up; we force it regardless of the
+    /// transient `isPinned` flips that row-growth itself triggers. Verified in a
+    /// simulator harness: a single shot stalls ~16 rows short of the end; the
+    /// burst lands exactly on the last entry.
+    private func settleToBottom(_ proxy: ScrollViewProxy) {
+        guard !items.isEmpty else { return }
+        didInitialScroll = true
+        isPinned = true
+        proxy.scrollTo(bottomID, anchor: .bottom)
+        settleTask?.cancel()
+        settleTask = Task { @MainActor in
+            for ms in [16, 50, 120, 250, 450] {
+                try? await Task.sleep(for: .milliseconds(ms))
+                if Task.isCancelled { return }
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
+            isPinned = true
         }
     }
 }
