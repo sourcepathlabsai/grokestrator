@@ -235,9 +235,22 @@ public actor GrokBuildSessionClient {
             initialized = true
         }
 
+        // Advertise the in-app Orchestration MCP server (host-local, loopback) so
+        // this Node can `delegate` to children. Per-session injection — no config
+        // files. Shape verified against grok 0.2.22: name + type:"http" + url +
+        // headers (array, required). See design/11-orchestration-platform.md.
+        var mcpServers: [JSONValue] = []
+        if OrchestrationMCPServer.isActive {
+            mcpServers.append(.object([
+                "name": .string("grokestrator"),
+                "type": .string("http"),
+                "url": .string(OrchestrationMCPServer.url(port: OrchestrationMCPServer.defaultPort)),
+                "headers": .array([]),
+            ]))
+        }
         let result = try await request(
             method: "session/new",
-            params: .object(["cwd": .string(cwd), "mcpServers": .array([])]),
+            params: .object(["cwd": .string(cwd), "mcpServers": .array(mcpServers)]),
             as: NewSessionResult.self,
             timeout: 30
         )
