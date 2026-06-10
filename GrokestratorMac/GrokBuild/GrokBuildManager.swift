@@ -86,6 +86,66 @@ public actor GrokBuildManager {
         }
     }
 
+    // MARK: - Orchestration (Phase 1c: delegate routing)
+
+    /// The router behind the Orchestration MCP `delegate` tool: resolve a child
+    /// Connection by name, send it `task` as a prompt (so the child's transcript
+    /// shows the delegated turn live — watchable on every device), await the
+    /// turn's final answer, and return it to the calling orchestrator. Name
+    /// resolution is global across local Connections for now (one level; scoping
+    /// to the *caller's* children waits for per-orchestrator MCP identity).
+    /// See `design/11-orchestration-platform.md`.
+    public func delegate(toChildNamed name: String, task: String, timeout: TimeInterval = 120) async -> String {
+        let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let candidates = instanceStates.values.filter { !$0.archived }
+        guard let target = candidates.first(where: { $0.name.lowercased() == key }) else {
+            let names = candidates.map(\.name).sorted().joined(separator: ", ")
+            return "No Connection named \"\(name)\". Available: \(names.isEmpty ? "(none)" : names)."
+        }
+        do {
+            // Subscribe before prompting so we don't miss the turn's events.
+            let stream = try await subscribe(to: target.id)
+            _ = try await sendPrompt(to: target.id, prompt: task)
+            return await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+        } catch {
+            return "Delegation to \"\(target.name)\" failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Consume a child's broadcast stream until its turn completes (or times out),
+    /// returning the final answer text. Runs the consume and a timeout concurrently.
+    private static func awaitFinalAnswer(_ stream: AsyncStream<ConnectionStreamEvent>,
+                                         timeout: TimeInterval, child: String) async -> String {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask {
+                for await event in stream {
+                    guard case .update(let update) = event else { continue }
+                    switch update {
+                    case .turnComplete(let final): return final ?? ""
+                    case .error(let msg): return "Child \"\(child)\" error: \(msg)"
+                    default: continue
+                    }
+                }
+                return nil   // stream ended without completing
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return "\u{0}TIMEOUT"
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            switch first {
+            case "\u{0}TIMEOUT":
+                return "Child \"\(child)\" is still working after \(Int(timeout))s — delegation timed out, "
+                     + "but it keeps running; check its transcript."
+            case .some(let text) where !text.isEmpty:
+                return text
+            default:
+                return "Child \"\(child)\" completed but returned no text."
+            }
+        }
+    }
+
     // MARK: - Black Box Conversation API
 
     private var activeConversations: [UUID: GrokBuildConversation] = [:]
