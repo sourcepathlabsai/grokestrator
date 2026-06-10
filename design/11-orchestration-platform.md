@@ -31,7 +31,9 @@ This is the **convergence** of three threads already in the repo/vault:
 | **Node** | A Connection in the orchestration tree. Still 1:1 with one grok process, one chat, observable on every device. |
 | **Role** | A Node is an **agent** (leaf — does work, no children) or an **orchestrator** (has children — plans, delegates, aggregates, runs oracles). Multi-level: orchestrators may have orchestrator children → a tree. |
 | **Role prompt/config** | The system prompt + settings that make a Node *behave* as an orchestrator vs. an agent (plan-and-delegate vs. execute-and-return). Authored as grok agent/role files (rides `10`'s rung-2 config) and/or injected by Grokestrator. |
-| **Tools + isolation** | Each Node gets the tool set it needs (its MCP servers + the **Orchestration MCP**, below). *Optional* isolation: own working dir / git worktree, capability mode (read-only / read-write / execute), scoped filesystem. Not required. |
+| **Tools + isolation** | Each Node gets the tool set it needs (its MCP servers + the **Orchestration MCP**, below). *Optional* isolation: own working dir / git worktree, capability mode (read-only / read-write / execute), scoped filesystem. Not required. Tool provisioning is **both, sequenced**: a parent first *grants/scopes existing* tools to a child (Phase 2), and later *synthesizes new* tools — an oracle-gated **cell** the child can call (Phase 4+). |
+| **Trigger** | What *activates* a Node. A parent `delegate` (pull) is one path; a **schedule or event** (push) is the other — cron, a file/webhook, a parent signal, or (once the DB lands) a row appearing. Triggers turn a child from a request/response delegate into a **standing agent** — the "run periodically or on an event" capability. |
+| **Guardrail** | A **pre-action** bound on what a Node may *attempt*, enforced by the mediation layer: tool allowlist, cwd/path scope, capability mode, resource budget (tokens/turns/time). Distinct from an **oracle**, which checks *outputs* after the fact. Guardrails bound the blast radius; oracles catch bad results. Defense in depth. |
 | **Embedded DB** | A Grokestrator-owned database. Orchestrators **create schemas** for task data that must persist during a run. The shared state / workflow system-of-record. |
 | **Data exchange** | Bidirectional, **rigorous** (typed/validated) flow between orchestrators and agents — inputs down, results up — mediated through the Orchestration MCP + DB, never ad-hoc. |
 | **Cell** | A unit an agent produces that must be correct — typically a **script/function** it writes to perform a step. The thing oracles guard. |
@@ -73,6 +75,9 @@ Tool surface (grown across phases):
 ```
 delegate(child, task, inputs)        → route task to a child Node; return its result
 task.report(status, result)          → an agent reports progress/result up
+node.configure(child, policy)        → grant/scope a child's tools + guardrails (allowlist, cwd, capability, budget)
+trigger.schedule(child, when, task)  → wake a child on a cron/event spec (standing agent)
+trigger.fire(event, payload)         → emit an event that may wake subscribed children
 db.createSchema(name, schema)        → orchestrator defines a task table (schema = data oracle)
 db.insert / db.query / db.update      → typed, schema-validated DB access
 oracle.register(target, check)        → attach an oracle (golden/invariant/shape/recon) to a cell/result
@@ -135,6 +140,54 @@ the human, and ask the producing agent to regenerate (`detect→flag→isolate�
 Semantic oracles (did the *meaning* survive) are the hard frontier — **out of early
 scope**; start with the cheap, objective ones. (See `~/dev/AI/03`.)
 
+**Triggers & standing agents.** Delegation (above) is *pull* — an orchestrator calls
+`delegate` and awaits. The second activation model is *push*: a child runs
+**periodically or on an event**, with no parent blocking on it. This is what makes a
+child a **standing agent** rather than a one-shot worker — the "agentic capability
+built in." A host-local **scheduler/event-bus** in GKSS owns it (matching "GKSS is
+the source of truth"; remote devices observe, the host fires):
+
+- **Sources.** cron/interval; a filesystem watch; an inbound webhook; a **parent
+  signal** (`trigger.fire`); and — once Phase 3 lands — **a DB row appearing**
+  (`db.insert` on a watched table). The DB-as-event-source is the elegant unifier:
+  one orchestrator's `db.insert` result *is* the next agent's trigger, so the
+  data-exchange spine and the trigger system are the same mechanism.
+- **Activation.** A trigger wakes the child Connection with a prompt assembled from a
+  task template + payload (same machinery as `delegate`, minus the awaiting caller).
+  The run is tracked like any delegation (status, oracle verdicts), so a scheduled
+  agent is just as observable + answerable as a delegated one.
+- **Lifecycle (the questions to get right).** keep-warm vs. spawn-per-fire;
+  **idempotency** (a fire that re-runs must not double-write — the DB schema/oracle is
+  the backstop); **overlap** (a fire arriving while the prior run is in flight —
+  coalesce, queue, or skip); **backpressure** (a hot event source must not spawn
+  unboundedly — rate-limit + the resource guardrails below).
+- **Safety coupling.** A standing agent is the highest-risk Node (it acts without a
+  human in the immediate loop), so triggers are **only** as safe as the guardrails on
+  the triggered child. Triggers and guardrails ship together.
+
+**Child guardrails (defense in depth).** Three layers, cheapest/earliest first.
+Together they bound *what a child can attempt*, *what it can emit*, and *how much it
+can consume* — the safety the operator wants on autonomous children:
+
+1. **Pre-action (permission policy).** GKSS already mediates ACP
+   `request_permission`; for a child that becomes **policy-driven auto-decisioning**:
+   a tool allowlist, cwd/path scope, capability mode (read-only/execute), no-network.
+   The child *cannot* attempt a disallowed action — it's denied at the wire, not asked.
+   This is the cheapest, strongest guardrail and rides infrastructure that exists.
+2. **Pre-output (oracle gate).** Before a child's result propagates to the parent or
+   the DB, its registered oracle runs; **violation → quarantine** (output blocked,
+   human flagged, regenerate). This is the oracle engine above, applied to *child
+   results*, not just cells.
+3. **Resource caps.** Per-child token / turn / wall-clock budgets; **kill-on-breach**
+   (grok exposes `kill_command_or_subagent`; a Connection is killable). Bounds runaway
+   cost and loops — essential for standing/triggered agents.
+
+The architectural guardrail underneath all three is **mediation** (§2.3): a child
+never touches shared state or a peer directly — only through the Orchestration MCP —
+so every action *is* interceptable, policy-checkable, and loggable. An oracle may
+itself be a **separate Connection** (a judge agent doing runtime adversarial
+verification), which composes with all of the above.
+
 **UI (the console of the immune system).** The sidebar becomes the **orchestration
 tree** (nesting). New surfaces: a **Run view** (the live delegation DAG + per-node
 status + oracle verdicts), **oracle-violation / quarantine** flags inline and in a
@@ -162,11 +215,16 @@ design is shaped by reality and the oracle core stays small.
 - **No DB, no oracles yet.** This proves rung 3 end-to-end on today's stack and is
   the single highest-leverage milestone. Demoable.
 
-### Phase 2 — Roles, prompts, tools & optional isolation
+### Phase 2 — Roles, prompts, tools, guardrails & optional isolation
 - Orchestrator vs. agent **role prompts/config** (ride `10`'s rung-2 `.grok/`
   authoring; ship 2-3 templates: orchestrator, implementer-agent, reviewer-agent).
-- Per-Node **tool set**, **capability mode**, and **optional isolation** (own cwd /
-  git worktree). Configurable in the Node settings.
+- Per-Node **tool set** (grant/scope *existing* tools — the first half of "create
+  tools for the child"), **capability mode**, and **optional isolation** (own cwd /
+  git worktree). Configurable in the Node settings via `node.configure`.
+- **Pre-action guardrails** (guardrail layer 1) + **resource caps** (layer 3): policy-
+  driven auto-decisioning over the ACP `request_permission` GKSS already mediates, plus
+  per-child token/turn/time budgets with kill-on-breach. Cheap, rides existing
+  infrastructure, and is the prerequisite for trusting triggered/standing agents.
 
 ### Phase 3 — Embedded DB + schemas + rigorous data exchange
 - Embed SQLite; Orchestration MCP gains `db.createSchema`, `db.insert/query/update`.
@@ -183,7 +241,12 @@ design is shaped by reality and the oracle core stays small.
 - This is where Grokestrator becomes genuinely novel — *agents kept honest by
   machine-checked contracts, with violations isolated, not propagated.*
 
-### Phase 5 — Scale & robustness *(homeostasis)*
+### Phase 5 — Triggers, scale & robustness *(standing agents + homeostasis)*
+- **Triggers / standing agents**: the host-local scheduler/event-bus. Cron + parent-
+  signal triggers need only Phase 1's tree and can land as soon as Phase 2's guardrails
+  make them safe; **DB-row triggers** unlock here because they need Phase 3's DB
+  (`db.insert` on a watched table = the next agent's wake). This is the "run
+  periodically or on an event" capability — gated on guardrails being in place.
 - Multi-level trees; **parallel** delegation + result aggregation.
 - **Homeostasis**: re-verification cadence, drift detection, retry/escalation policy,
   quarantine management.
@@ -262,5 +325,10 @@ Two small features were queued just before this pivot — they aren't lost; they
 
 ---
 
-*Created 2026-06-05. Status: implementation plan; not yet started. Phase 1 (tree +
-one delegation) is the first milestone and the biggest single unlock.*
+*Created 2026-06-05. Revised 2026-06-09: added **Triggers / standing agents** (push
+activation — cron/event/DB-row, the "run periodically or on an event" capability) and
+**child guardrails as defense in depth** (pre-action permission policy → pre-output
+oracle gate → resource caps); clarified tool provisioning as **both, sequenced**
+(grant existing in Phase 2, synthesize oracle-gated cells in Phase 4+). Status:
+implementation plan; not yet started. Phase 1 (tree + one delegation) is the first
+milestone and the biggest single unlock.*
