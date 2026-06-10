@@ -50,6 +50,17 @@ public actor GrokBuildManager {
         Array(instanceStates.values)
     }
 
+    /// Update a running instance's orchestration-tree metadata (`role`/`parentID`)
+    /// so the next `broadcastInstancesIfChanged` carries the new tree to remote
+    /// clients. No-op if the instance isn't currently tracked (it'll pick the
+    /// values up from its config on next launch).
+    public func updateTreeMetadata(id: UUID, role: NodeRole, parentID: UUID?) {
+        guard var state = instanceStates[id] else { return }
+        state.role = role
+        state.parentID = parentID
+        instanceStates[id] = state
+    }
+
     /// Advanced escape hatch. Most Mac app code should never call this.
     internal func _client(for id: UUID) async -> GrokBuildSessionClient? {
         await server.getClient(for: id)

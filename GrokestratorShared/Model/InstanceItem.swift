@@ -19,6 +19,14 @@ final class InstanceItem: Identifiable {
     /// `nil` for local; non-nil for remote (= the `RemoteServerLink.id`).
     let serverID: UUID?
 
+    /// Place in the orchestration tree (see `ManagedConnection.role`). Mirrored
+    /// here so the sidebar can render orchestrators with their children nested.
+    var role: NodeRole
+    /// The orchestrator this Connection reports to, or `nil` for a root. Used to
+    /// group children under their parent in the sidebar. Always references a
+    /// sibling on the *same* server (orchestration is host-local).
+    var parentID: UUID?
+
     /// True while this Connection is waiting on the user — a pending permission or
     /// question. Because every Connection subscribes eagerly (even unopened ones),
     /// this is set for background Connections too, so the sidebar "needs you" badge
@@ -35,11 +43,14 @@ final class InstanceItem: Identifiable {
     var isBusy: Bool { conversation.isStreaming }
 
     init(id: UUID = UUID(), name: String, status: InstanceStatus,
-                driver: ConversationDriver, serverID: UUID? = nil) {
+                driver: ConversationDriver, serverID: UUID? = nil,
+                role: NodeRole = .agent, parentID: UUID? = nil) {
         self.id = id
         self.name = name
         self.status = status
         self.conversation = ConversationViewModel(driver: driver)
         self.serverID = serverID
+        self.role = role
+        self.parentID = parentID
     }
 }

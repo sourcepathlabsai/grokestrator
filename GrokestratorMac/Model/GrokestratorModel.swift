@@ -103,7 +103,8 @@ final class GrokestratorModel {
             .map { conn in
                 InstanceItem(
                     id: conn.id, name: conn.name, status: .stopped,
-                    driver: LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id)   // re-bound below
+                    driver: LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id),   // re-bound below
+                    role: conn.role, parentID: conn.parentID
                 )
             }
         self.init(instances: seededInstances, connections: registry)
@@ -113,7 +114,8 @@ final class GrokestratorModel {
         for (idx, item) in instances.enumerated() {
             let rebound = InstanceItem(
                 id: item.id, name: item.name, status: .stopped,
-                driver: LiveConversationDriver(manager: manager, instanceID: item.id)
+                driver: LiveConversationDriver(manager: manager, instanceID: item.id),
+                role: item.role, parentID: item.parentID
             )
             instances[idx] = rebound
             // Subscribe now so the host reflects remote-driven turns even before
@@ -164,14 +166,17 @@ final class GrokestratorModel {
     // MARK: - Local Connections
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
-                           autoRestart: Bool = true, shared: Bool = true) {
+                           autoRestart: Bool = true, shared: Bool = true,
+                           role: NodeRole = .agent, parentID: UUID? = nil) {
         let config = ManagedConnection(
             name: name,
             command: command,
             arguments: arguments,
             workingDirectory: workingDirectory,
             autoRestart: autoRestart,
-            shared: shared
+            shared: shared,
+            role: role,
+            parentID: parentID
         )
         connections.append(config)
         ConnectionStore.save(connections)
@@ -180,7 +185,8 @@ final class GrokestratorModel {
             id: config.id,
             name: name,
             status: .starting,
-            driver: LiveConversationDriver(manager: manager, instanceID: config.id)
+            driver: LiveConversationDriver(manager: manager, instanceID: config.id),
+            role: role, parentID: parentID
         )
         instances.append(item)
         selectedInstanceID = item.id
@@ -189,6 +195,46 @@ final class GrokestratorModel {
         item.conversation.startSubscription()
 
         Task { [weak self] in await self?.launchConnection(config, startingItem: item) }
+    }
+
+    // MARK: - Orchestration tree (role + parent edge)
+
+    /// Local orchestrator Connections on this Mac — the candidates a child can be
+    /// parented to. (Orchestration is host-local, so only local Connections.)
+    var localOrchestrators: [InstanceItem] {
+        instances.filter { $0.serverID == nil && $0.role == .orchestrator }
+    }
+
+    /// Set a local Connection's role. Flipping an orchestrator back to `.agent`
+    /// leaves any children pointing at it; the sidebar renders an orphaned child
+    /// at the top level, so nothing is hidden.
+    func setRole(_ role: NodeRole, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
+        connections[idx].role = role
+        ConnectionStore.save(connections)
+        item.role = role
+        syncTreeMetadataToRemotes(id: item.id, role: role, parentID: item.parentID)
+    }
+
+    /// Set (or clear, with `nil`) a local Connection's parent orchestrator. Guards
+    /// against self-parenting; deeper cycle checks wait for multi-level trees.
+    func setParent(_ parentID: UUID?, for item: InstanceItem) {
+        guard item.serverID == nil, parentID != item.id,
+              let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
+        connections[idx].parentID = parentID
+        ConnectionStore.save(connections)
+        item.parentID = parentID
+        syncTreeMetadataToRemotes(id: item.id, role: item.role, parentID: parentID)
+    }
+
+    private func syncTreeMetadataToRemotes(id: UUID, role: NodeRole, parentID: UUID?) {
+        let server = self.server
+        let manager = self.manager
+        Task {
+            await manager.updateTreeMetadata(id: id, role: role, parentID: parentID)
+            await server.broadcastInstancesIfChanged()
+        }
     }
 
     /// Launches a Connection's grok process and reflects status on its UI item.
@@ -283,7 +329,8 @@ final class GrokestratorModel {
         ConnectionStore.save(connections)
         let item = InstanceItem(
             id: connection.id, name: connection.name, status: .stopped,
-            driver: LiveConversationDriver(manager: manager, instanceID: connection.id)
+            driver: LiveConversationDriver(manager: manager, instanceID: connection.id),
+            role: connection.role, parentID: connection.parentID
         )
         instances.append(item)
         item.conversation.startSubscription()
@@ -408,11 +455,19 @@ final class GrokestratorModel {
         instances.removeAll { item in
             item.serverID == serverID && !remote.contains(where: { $0.id == item.id })
         }
+        // Reflect host-side changes (tree role/parent + rename) onto existing items.
+        for inst in remote {
+            guard let item = instances.first(where: { $0.id == inst.id && $0.serverID == serverID }) else { continue }
+            if item.role != inst.role { item.role = inst.role }
+            if item.parentID != inst.parentID { item.parentID = inst.parentID }
+            if item.name != inst.name { item.name = inst.name }
+        }
         // Add items for new remote instances.
         for inst in remote where !instances.contains(where: { $0.id == inst.id }) {
             guard let driver = await link.driver(for: inst.id) else { continue }
             let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
-                                    driver: driver, serverID: serverID)
+                                    driver: driver, serverID: serverID,
+                                    role: inst.role, parentID: inst.parentID)
             instances.append(item)
             // Subscribe immediately so this remote Connection's live transcript
             // accumulates in the background — switching away and back (or to

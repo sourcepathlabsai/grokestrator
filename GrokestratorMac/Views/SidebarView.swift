@@ -14,6 +14,9 @@ struct SidebarView: View {
     @State private var editingServer: RemoteServerConfig?
     /// Remote server awaiting a remove confirmation (nil ⇒ none).
     @State private var pendingServerRemoval: RemoteServerLink?
+    /// Orchestrator nodes the user has collapsed. Absent ⇒ expanded (the default),
+    /// so a freshly-designated orchestrator shows its children right away.
+    @State private var collapsedNodes: Set<UUID> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,22 +30,7 @@ struct SidebarView: View {
                                 .foregroundStyle(Theme.textFaint)
                                 .padding(.vertical, 4)
                         } else {
-                            ForEach(group.instances) { instance in
-                                InstanceRow(instance: instance, serverDown: group.isDown)
-                                    .tag(instance.id)
-                                    .contextMenu {
-                                        if instance.status == .running || instance.status == .starting {
-                                            Button("Stop") { model.stop(instance) }
-                                        }
-                                        // Archive + permanent delete are only meaningful for local
-                                        // Connections — remote instances are managed by their server.
-                                        if instance.serverID == nil {
-                                            Button("Archive") { model.archive(instance) }
-                                            Divider()
-                                            Button("Delete…", role: .destructive) { pendingDelete = instance }
-                                        }
-                                    }
-                            }
+                            groupBody(group)
                         }
                     } header: {
                         header(for: group)
@@ -113,6 +101,91 @@ struct SidebarView: View {
             onReconnect: (group.isDown && link != nil) ? { if let link { model.reconnectRemoteServer(link) } } : nil,
             onEdit: link != nil ? { if let link { editingServer = link.config } } : nil,
             onRemove: link != nil ? { if let link { pendingServerRemoval = link } } : nil
+        )
+    }
+
+    // MARK: - Orchestration tree rendering (one level of nesting)
+
+    /// Renders a group's instances as a one-level tree: orchestrators that have
+    /// children become `DisclosureGroup`s; everything else (roots and orphans
+    /// whose parent isn't an orchestrator) renders flat. Selection + context menu
+    /// behave identically for parent and child rows.
+    @ViewBuilder
+    private func groupBody(_ group: SidebarServerGroup) -> some View {
+        let orchestratorIDs = Set(group.instances.filter { $0.role == .orchestrator }.map(\.id))
+        let childrenByParent = Dictionary(grouping: group.instances.filter {
+            guard let p = $0.parentID else { return false }
+            return orchestratorIDs.contains(p)
+        }, by: { $0.parentID! })
+        let roots = group.instances.filter { item in
+            guard let p = item.parentID else { return true }   // no parent ⇒ root
+            return !orchestratorIDs.contains(p)                 // parent isn't a live orchestrator ⇒ surface as root
+        }
+
+        ForEach(roots) { root in
+            if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
+                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
+                    ForEach(kids) { kid in instanceRow(kid, in: group) }
+                } label: {
+                    instanceRow(root, in: group)
+                }
+            } else {
+                instanceRow(root, in: group)
+            }
+        }
+    }
+
+    /// One selectable row + its context menu, shared by parent and child rows.
+    @ViewBuilder
+    private func instanceRow(_ instance: InstanceItem, in group: SidebarServerGroup) -> some View {
+        InstanceRow(instance: instance, serverDown: group.isDown)
+            .tag(instance.id)
+            .contextMenu { rowMenu(instance) }
+    }
+
+    /// The per-row context menu, including the orchestration-tree controls for
+    /// local Connections (mark orchestrator / agent, set parent).
+    @ViewBuilder
+    private func rowMenu(_ instance: InstanceItem) -> some View {
+        if instance.status == .running || instance.status == .starting {
+            Button("Stop") { model.stop(instance) }
+        }
+        // Role + parent + archive/delete are only meaningful for local Connections
+        // — remote instances (and their tree) are managed by their own server.
+        if instance.serverID == nil {
+            Divider()
+            if instance.role == .orchestrator {
+                Button("Make Agent") { model.setRole(.agent, for: instance) }
+            } else {
+                Button("Make Orchestrator") { model.setRole(.orchestrator, for: instance) }
+            }
+            // An agent can be parented under an orchestrator (one level for now).
+            if instance.role == .agent {
+                let parents = model.localOrchestrators.filter { $0.id != instance.id }
+                Menu("Parent") {
+                    Button(instance.parentID == nil ? "✓ None" : "None") {
+                        model.setParent(nil, for: instance)
+                    }
+                    if !parents.isEmpty { Divider() }
+                    ForEach(parents) { orch in
+                        Button(instance.parentID == orch.id ? "✓ \(orch.name)" : orch.name) {
+                            model.setParent(orch.id, for: instance)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Archive") { model.archive(instance) }
+            Button("Delete…", role: .destructive) { pendingDelete = instance }
+        }
+    }
+
+    private func expansionBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedNodes.contains(id) },
+            set: { open in
+                if open { collapsedNodes.remove(id) } else { collapsedNodes.insert(id) }
+            }
         )
     }
 
@@ -245,6 +318,13 @@ private struct InstanceRow: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+            if instance.role == .orchestrator {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.accent)
+                    .help("Orchestrator")
+                    .accessibilityLabel("Orchestrator")
+            }
             Text(instance.name)
                 .font(Theme.body(13, .medium))
                 .foregroundStyle(serverDown ? Theme.textFaint : Theme.textBody)
