@@ -47,6 +47,13 @@ final class GrokestratorModel {
     /// over Tailscale. Off by default; enabled from Settings.
     let server: MacGrokestratorServer
 
+    /// In-app Orchestration MCP server (loopback) that grok Nodes connect to so an
+    /// orchestrator can `delegate` to its children. Host-local and independent of
+    /// the remote-serving toggle — it runs whenever the app is up. See
+    /// `design/11-orchestration-platform.md`. Phase 1b: the spine + a stubbed
+    /// `delegate`; Phase 1c installs the real router via `setDelegateHandler`.
+    let orchestrationMCP = OrchestrationMCPServer()
+
     /// Persistent remote-server configs + their live connection state.
     var remoteLinks: [RemoteServerLink]
 
@@ -78,6 +85,25 @@ final class GrokestratorModel {
         self.serverEnabled = UserDefaults.standard.bool(forKey: Self.serverEnabledKey)
         let storedPort = UserDefaults.standard.integer(forKey: Self.serverPortKey)
         self.serverPort = storedPort == 0 ? 7847 : UInt16(storedPort)
+        // Start the host-local Orchestration MCP server (loopback). Runs
+        // regardless of the remote-serving toggle so launched Nodes can delegate.
+        let orchestrationMCP = self.orchestrationMCP
+        let manager = self.manager
+        Task {
+            do {
+                try await orchestrationMCP.start(port: OrchestrationMCPServer.defaultPort)
+                // Install the real router (Phase 1c): delegate(child, task) sends
+                // the task to the named child Node and returns its final answer.
+                await orchestrationMCP.setDelegateHandler { child, task in
+                    await manager.delegate(toChildNamed: child, task: task)
+                }
+                OrchestrationMCPServer.isActive = true
+                NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
+            } catch {
+                // Non-fatal: sessions just won't advertise the delegate tool.
+                NSLog("[orchestration] MCP server failed to start: \(error)")
+            }
+        }
         // Start listener immediately if the user had it enabled last run; also
         // kick off auto-connect for any saved remote servers.
         if serverEnabled { applyServerToggle() }
@@ -500,6 +526,8 @@ final class GrokestratorModel {
     /// semaphore so the OS doesn't yank us before we finish.
     func shutdownAll(timeout: TimeInterval = 1.0) async {
         await server.stop()
+        await orchestrationMCP.stop()
+        OrchestrationMCPServer.isActive = false
         for link in remoteLinks { await link.disconnect() }
         await manager.terminateAll(timeout: timeout)
     }
