@@ -30,6 +30,18 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// Permanently deleting an archived Connection drops config + history.
     public var archived: Bool
 
+    /// This Connection's place in the orchestration tree: an `agent` (leaf — does
+    /// work) or an `orchestrator` (coordinates children). See
+    /// `design/11-orchestration-platform.md`. Default `.agent` so existing
+    /// Connections and older saved JSON keep behaving exactly as before.
+    public var role: NodeRole
+
+    /// Soft parent edge in the orchestration tree: the `id` of the orchestrator
+    /// Connection this one reports to, or `nil` for a root. This is *only* an edge
+    /// between sibling Connections — the "1 Connection = 1 grok instance, no nested
+    /// chats" rule (see `connection-semantics`) still holds; nothing is nested.
+    public var parentID: UUID?
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -46,6 +58,8 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         autoRestart: Bool = true,
         shared: Bool = true,
         archived: Bool = false,
+        role: NodeRole = .agent,
+        parentID: UUID? = nil,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -60,6 +74,8 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.autoRestart = autoRestart
         self.shared = shared
         self.archived = archived
+        self.role = role
+        self.parentID = parentID
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -70,7 +86,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     // still loads — `init(from:)` defaults the new fields.
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
-             autoRestart, shared, archived,
+             autoRestart, shared, archived, role, parentID,
              status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
@@ -84,11 +100,22 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.autoRestart = try c.decodeIfPresent(Bool.self, forKey: .autoRestart) ?? true
         self.shared = try c.decodeIfPresent(Bool.self, forKey: .shared) ?? true
         self.archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        self.role = try c.decodeIfPresent(NodeRole.self, forKey: .role) ?? .agent
+        self.parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)
         self.pid = try c.decodeIfPresent(Int32.self, forKey: .pid)
     }
+}
+
+/// A Connection's role in the orchestration tree. `agent` is the default and the
+/// only behavior today; `orchestrator` marks a Connection that coordinates child
+/// Connections (the `parentID` edge points up at one). See
+/// `design/11-orchestration-platform.md`.
+public enum NodeRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case agent
+    case orchestrator
 }
 
 public enum InstanceStatus: String, Codable, Hashable, Sendable, CaseIterable {

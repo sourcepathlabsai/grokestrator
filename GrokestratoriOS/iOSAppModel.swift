@@ -127,6 +127,13 @@ final class iOSAppModel {
         instances.removeAll { item in
             item.serverID == serverID && !remote.contains(where: { $0.id == item.id })
         }
+        // Reflect host-side changes (tree role/parent + rename) onto existing items.
+        for inst in remote {
+            guard let item = instances.first(where: { $0.id == inst.id && $0.serverID == serverID }) else { continue }
+            if item.role != inst.role { item.role = inst.role }
+            if item.parentID != inst.parentID { item.parentID = inst.parentID }
+            if item.name != inst.name { item.name = inst.name }
+        }
         for inst in remote where !instances.contains(where: { $0.id == inst.id }) {
             // Pull a driver for this remote instance from its link.
             Task { @MainActor [weak self] in
@@ -135,7 +142,8 @@ final class iOSAppModel {
                 // while we awaited the driver.
                 guard !self.instances.contains(where: { $0.id == inst.id }) else { return }
                 let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
-                                        driver: driver, serverID: serverID)
+                                        driver: driver, serverID: serverID,
+                                        role: inst.role, parentID: inst.parentID)
                 self.instances.append(item)
                 // Subscribe immediately so this Connection's live transcript
                 // accumulates in the background — switching Connections mid-turn

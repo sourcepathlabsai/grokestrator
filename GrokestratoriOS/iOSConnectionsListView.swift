@@ -11,6 +11,8 @@ struct iOSConnectionsListView: View {
     @State private var pendingRemoval: RemoteServerLink?
     /// Server config being edited (nil ⇒ none).
     @State private var editingServer: RemoteServerConfig?
+    /// Orchestrator nodes the user has collapsed. Absent ⇒ expanded (default).
+    @State private var collapsedNodes: Set<UUID> = []
 
     var body: some View {
         List(selection: $model.selectedInstanceID) {
@@ -22,10 +24,7 @@ struct iOSConnectionsListView: View {
                             .font(Theme.body(11))
                             .foregroundStyle(Theme.textFaint)
                     } else {
-                        ForEach(connections) { instance in
-                            ConnectionRow(instance: instance)
-                                .tag(instance.id)
-                        }
+                        connectionTree(connections)
                     }
                 } header: {
                     HStack(spacing: 6) {
@@ -103,6 +102,43 @@ struct iOSConnectionsListView: View {
         }
     }
 
+    /// Renders a server's Connections as a one-level tree mirroring the host:
+    /// orchestrators with children become `DisclosureGroup`s. Read-only here —
+    /// the tree is designated on the host Mac and arrives over the wire.
+    @ViewBuilder
+    private func connectionTree(_ connections: [InstanceItem]) -> some View {
+        let orchestratorIDs = Set(connections.filter { $0.role == .orchestrator }.map(\.id))
+        let childrenByParent = Dictionary(grouping: connections.filter {
+            guard let p = $0.parentID else { return false }
+            return orchestratorIDs.contains(p)
+        }, by: { $0.parentID! })
+        let roots = connections.filter { item in
+            guard let p = item.parentID else { return true }
+            return !orchestratorIDs.contains(p)
+        }
+
+        ForEach(roots) { root in
+            if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
+                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
+                    ForEach(kids) { kid in ConnectionRow(instance: kid).tag(kid.id) }
+                } label: {
+                    ConnectionRow(instance: root).tag(root.id)
+                }
+            } else {
+                ConnectionRow(instance: root).tag(root.id)
+            }
+        }
+    }
+
+    private func expansionBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedNodes.contains(id) },
+            set: { open in
+                if open { collapsedNodes.remove(id) } else { collapsedNodes.insert(id) }
+            }
+        )
+    }
+
     private func statusLabel(_ s: RemoteServerLink.LinkState) -> String {
         switch s {
         case .disconnected: return "Disconnected"
@@ -139,6 +175,12 @@ private struct ConnectionRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(statusColor).frame(width: 8, height: 8)
+            if instance.role == .orchestrator {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityLabel("Orchestrator")
+            }
             Text(instance.name).font(Theme.body(15, .medium)).foregroundStyle(Theme.textBody)
             Spacer(minLength: 4)
             if instance.needsAttention {
