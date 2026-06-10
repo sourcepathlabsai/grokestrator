@@ -17,6 +17,8 @@ struct SidebarView: View {
     /// Orchestrator nodes the user has collapsed. Absent ⇒ expanded (the default),
     /// so a freshly-designated orchestrator shows its children right away.
     @State private var collapsedNodes: Set<UUID> = []
+    /// The Connection we're adding a child agent under (nil ⇒ not adding).
+    @State private var addingChildFor: InstanceItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,6 +57,7 @@ struct SidebarView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
+        .sheet(item: $addingChildFor) { parent in AddConnectionView(model: model, parent: parent) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
@@ -154,6 +157,9 @@ struct SidebarView: View {
         // — remote instances (and their tree) are managed by their own server.
         if instance.serverID == nil {
             Divider()
+            // Create a child agent under this Connection — promotes it to
+            // orchestrator automatically (see GrokestratorModel.addRealConnection).
+            Button("Add Child Agent…") { addingChildFor = instance }
             if instance.role == .orchestrator {
                 Button("Make Agent") { model.setRole(.agent, for: instance) }
             } else {
