@@ -24,15 +24,17 @@ public actor OrchestrationMCPServer {
     private var listener: NWListener?
     public private(set) var port: UInt16?
 
-    /// The router that actually performs a delegation, installed in Phase 1c.
-    /// Until then `delegate` returns an explanatory stub so the tool is callable
-    /// and the spine is end-to-end testable.
-    private var delegateHandler: (@Sendable (_ child: String, _ task: String) async -> String)?
+    /// The router that performs a delegation. `callerID` is the calling Node's id
+    /// (from the per-session header), so the router can scope to *its* children.
+    private var delegateHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ task: String) async -> String)?
+
+    /// Header grok forwards on every MCP request, carrying the calling Node's id.
+    public static let nodeHeader = "X-Grokestrator-Node"
 
     public init() {}
 
     /// Install the real delegation router (Phase 1c). Safe to call before/after start.
-    public func setDelegateHandler(_ handler: @escaping @Sendable (_ child: String, _ task: String) async -> String) {
+    public func setDelegateHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ task: String) async -> String) {
         self.delegateHandler = handler
     }
 
@@ -72,8 +74,8 @@ public actor OrchestrationMCPServer {
     /// write before any session is created in practice.
     public nonisolated(unsafe) static var isActive = false
 
-    fileprivate func runDelegate(child: String, task: String) async -> String {
-        if let handler = delegateHandler { return await handler(child, task) }
+    fileprivate func runDelegate(callerID: UUID?, child: String, task: String) async -> String {
+        if let handler = delegateHandler { return await handler(callerID, child, task) }
         return "Delegation is not wired yet (orchestration Phase 1c). "
              + "Received child=\"\(child)\", task=\"\(task)\"."
     }
@@ -91,7 +93,7 @@ public actor OrchestrationMCPServer {
         }
     }
 
-    private struct Request { let method: String; let path: String; let body: Data }
+    private struct Request { let method: String; let path: String; let body: Data; let nodeID: UUID? }
 
     /// Build the HTTP response for one parsed request. Returns nil to drop the
     /// connection. Notifications get a bodyless 202; everything else a JSON body.
@@ -130,7 +132,7 @@ public actor OrchestrationMCPServer {
             if name == "delegate" {
                 let child = args["child"] as? String ?? ""
                 let task = args["task"] as? String ?? ""
-                let text = await server.runDelegate(child: child, task: task)
+                let text = await server.runDelegate(callerID: req.nodeID, child: child, task: task)
                 result = ["content": [["type": "text", "text": text]], "isError": false]
             } else {
                 result = ["content": [["type": "text", "text": "Unknown tool: \(name ?? "nil")"]], "isError": true]
@@ -189,6 +191,11 @@ public actor OrchestrationMCPServer {
         let contentLength = lines.lazy
             .first { $0.lowercased().hasPrefix("content-length:") }
             .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+        // The calling Node's id, forwarded by grok on every request, so the router
+        // can scope `delegate` to this orchestrator's children.
+        let nodeID = lines.lazy
+            .first { $0.lowercased().hasPrefix(Self.nodeHeader.lowercased() + ":") }
+            .flatMap { UUID(uuidString: $0.split(separator: ":", maxSplits: 1)[1].trimmingCharacters(in: .whitespaces)) }
 
         let total = bodyStart + contentLength
         while buffer.count < total {
@@ -197,7 +204,7 @@ public actor OrchestrationMCPServer {
         }
         let body = Data(buffer.dropFirst(bodyStart).prefix(contentLength))
         buffer = Data(buffer.dropFirst(total))    // keep leftover for the next request
-        return Request(method: method, path: path, body: body)
+        return Request(method: method, path: path, body: body, nodeID: nodeID)
     }
 
     private static func jsonResponse(_ json: Data) -> Data {

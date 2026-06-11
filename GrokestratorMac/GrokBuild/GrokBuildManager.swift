@@ -108,12 +108,20 @@ public actor GrokBuildManager {
     /// resolution is global across local Connections for now (one level; scoping
     /// to the *caller's* children waits for per-orchestrator MCP identity).
     /// See `design/11-orchestration-platform.md`.
-    public func delegate(toChildNamed name: String, task: String, timeout: TimeInterval = 120) async -> String {
+    public func delegate(callerID: UUID?, toChildNamed name: String, task: String, timeout: TimeInterval = 120) async -> String {
         let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let candidates = instanceStates.values.filter { !$0.archived }
+        // Scope to the *caller's own children* — an orchestrator can only delegate
+        // to the agents parented under it. (One level; deeper trees later.)
+        let candidates: [ManagedInstance]
+        if let callerID {
+            candidates = instanceStates.values.filter { !$0.archived && $0.parentID == callerID }
+        } else {
+            candidates = instanceStates.values.filter { !$0.archived }
+        }
         guard let target = candidates.first(where: { $0.name.lowercased() == key }) else {
             let names = candidates.map(\.name).sorted().joined(separator: ", ")
-            return "No Connection named \"\(name)\". Available: \(names.isEmpty ? "(none)" : names)."
+            let scope = callerID == nil ? "Available" : "Your child agents"
+            return "No child agent named \"\(name)\". \(scope): \(names.isEmpty ? "(none — add child agents to this orchestrator)" : names)."
         }
         do {
             // Subscribe before prompting so we don't miss the turn's events.
