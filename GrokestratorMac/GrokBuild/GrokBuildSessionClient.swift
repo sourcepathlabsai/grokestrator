@@ -241,11 +241,17 @@ public actor GrokBuildSessionClient {
         // headers (array, required). See design/11-orchestration-platform.md.
         var mcpServers: [JSONValue] = []
         if OrchestrationMCPServer.isActive {
+            // Tag the session with this Node's id (grok forwards the header on
+            // every MCP request) so the server can scope `delegate` to *this*
+            // orchestrator's own children. Header shape {name,value} verified.
             mcpServers.append(.object([
                 "name": .string("grokestrator"),
                 "type": .string("http"),
                 "url": .string(OrchestrationMCPServer.url(port: OrchestrationMCPServer.defaultPort)),
-                "headers": .array([]),
+                "headers": .array([.object([
+                    "name": .string(OrchestrationMCPServer.nodeHeader),
+                    "value": .string(handle.id.uuidString),
+                ])]),
             ]))
         }
         let result = try await request(
