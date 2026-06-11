@@ -27,6 +27,12 @@ public actor GrokBuildConversation {
     private var lastFinalAnswer: String?
     private var primed = false
 
+    /// The Node's role/system prompt, injected as a preamble ahead of the first
+    /// prompt of the session (grok `agent stdio` ignores `--system-prompt-override`,
+    /// so this is the mechanism that actually works). Editing it resets `primed` so
+    /// the next turn re-injects the new role. `nil`/empty ⇒ no role preamble.
+    private var rolePrompt: String?
+
     /// Active broadcast subscribers (local Mac UI + every remote GKSC subscribed
     /// to this Connection). Each receives a `.snapshot` on join, then `.update`
     /// for every `ConversationUpdate` the conversation produces — regardless of
@@ -44,11 +50,20 @@ public actor GrokBuildConversation {
     discrete choices to pick.
     """
 
-    public init(instanceID: UUID, sessionID: String, client: GrokBuildSessionClient, persistenceURL: URL? = nil) {
+    public init(instanceID: UUID, sessionID: String, client: GrokBuildSessionClient, persistenceURL: URL? = nil, rolePrompt: String? = nil) {
         self.instanceID = instanceID
         self.sessionID = sessionID
         self.client = client
         self.history = AgentConversationHistory(persistenceURL: persistenceURL)
+        self.rolePrompt = rolePrompt
+    }
+
+    /// Update the role/system prompt. Resets `primed` so the next turn re-injects
+    /// the new role preamble — edits take effect without restarting the process.
+    public func setRolePrompt(_ prompt: String?) {
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        rolePrompt = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        primed = false
     }
 
     /// Call after construction to load any previously persisted history.
@@ -145,8 +160,18 @@ public actor GrokBuildConversation {
         broadcast(.userPrompt(prompt))
 
         // This is the only place that talks to the raw ACP client. On the first
-        // turn, prime the agent with the choices convention (hidden from history/UI).
-        let wireText = primed ? prompt : "\(Self.choicesInstruction)\n\n\(prompt)"
+        // turn, prime the agent (hidden from history/UI) with its role/system
+        // prompt — the Observe/Orient/Decide/Act behavior — followed by the choices
+        // convention. The user's prompt is recorded/displayed unchanged.
+        let wireText: String
+        if primed {
+            wireText = prompt
+        } else {
+            var preamble = ""
+            if let role = rolePrompt, !role.isEmpty { preamble += role + "\n\n" }
+            preamble += Self.choicesInstruction
+            wireText = "\(preamble)\n\n\(prompt)"
+        }
         primed = true
         let rawStream = try await client.sendPrompt(sessionId: sessionID, prompt: wireText)
         let promptID = UUID()

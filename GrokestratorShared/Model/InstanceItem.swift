@@ -27,6 +27,10 @@ final class InstanceItem: Identifiable {
     /// sibling on the *same* server (orchestration is host-local).
     var parentID: UUID?
 
+    /// The Node's role/system prompt (see `ManagedConnection.rolePrompt`), mirrored
+    /// here so the "Edit Role…" sheet can show/edit it. `nil`/empty ⇒ none.
+    var rolePrompt: String?
+
     /// True while this Connection is waiting on the user — a pending permission or
     /// question. Because every Connection subscribes eagerly (even unopened ones),
     /// this is set for background Connections too, so the sidebar "needs you" badge
@@ -44,7 +48,7 @@ final class InstanceItem: Identifiable {
 
     init(id: UUID = UUID(), name: String, status: InstanceStatus,
                 driver: ConversationDriver, serverID: UUID? = nil,
-                role: NodeRole = .agent, parentID: UUID? = nil) {
+                role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil) {
         self.id = id
         self.name = name
         self.status = status
@@ -52,5 +56,6 @@ final class InstanceItem: Identifiable {
         self.serverID = serverID
         self.role = role
         self.parentID = parentID
+        self.rolePrompt = rolePrompt
     }
 }

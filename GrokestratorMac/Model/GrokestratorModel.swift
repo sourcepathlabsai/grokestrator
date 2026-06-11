@@ -130,7 +130,7 @@ final class GrokestratorModel {
                 InstanceItem(
                     id: conn.id, name: conn.name, status: .stopped,
                     driver: LiveConversationDriver(manager: GrokBuildManager(), instanceID: conn.id),   // re-bound below
-                    role: conn.role, parentID: conn.parentID
+                    role: conn.role, parentID: conn.parentID, rolePrompt: conn.rolePrompt
                 )
             }
         self.init(instances: seededInstances, connections: registry)
@@ -141,7 +141,7 @@ final class GrokestratorModel {
             let rebound = InstanceItem(
                 id: item.id, name: item.name, status: .stopped,
                 driver: LiveConversationDriver(manager: manager, instanceID: item.id),
-                role: item.role, parentID: item.parentID
+                role: item.role, parentID: item.parentID, rolePrompt: item.rolePrompt
             )
             instances[idx] = rebound
             // Subscribe now so the host reflects remote-driven turns even before
@@ -149,6 +149,16 @@ final class GrokestratorModel {
             rebound.conversation.startSubscription()
         }
         if selectedInstanceID == nil { selectedInstanceID = instances.first?.id }
+
+        // Push saved role prompts into the manager so each Node's conversation
+        // primes with its role. Race-free: setRolePrompt and conversation(for:)
+        // are both serialized on the manager actor, so whichever runs first, the
+        // conversation ends up with the role prompt (see GrokBuildManager).
+        let mgr = manager
+        let withRoles = registry.filter { !$0.archived && !($0.rolePrompt ?? "").isEmpty }
+        if !withRoles.isEmpty {
+            Task { for c in withRoles { await mgr.setRolePrompt(for: c.id, c.rolePrompt) } }
+        }
 
         // Auto-launch every non-archived Connection with autoRestart == true.
         for conn in registry where !conn.archived && conn.autoRestart {
@@ -193,7 +203,7 @@ final class GrokestratorModel {
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
                            autoRestart: Bool = true, shared: Bool = true,
-                           role: NodeRole = .agent, parentID: UUID? = nil) {
+                           role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil) {
         let config = ManagedConnection(
             name: name,
             command: command,
@@ -202,7 +212,8 @@ final class GrokestratorModel {
             autoRestart: autoRestart,
             shared: shared,
             role: role,
-            parentID: parentID
+            parentID: parentID,
+            rolePrompt: rolePrompt
         )
         connections.append(config)
         ConnectionStore.save(connections)
@@ -212,7 +223,7 @@ final class GrokestratorModel {
             name: name,
             status: .starting,
             driver: LiveConversationDriver(manager: manager, instanceID: config.id),
-            role: role, parentID: parentID
+            role: role, parentID: parentID, rolePrompt: rolePrompt
         )
         instances.append(item)
         selectedInstanceID = item.id
@@ -273,6 +284,82 @@ final class GrokestratorModel {
             await manager.updateTreeMetadata(id: id, role: role, parentID: parentID)
             await server.broadcastInstancesIfChanged()
         }
+    }
+
+    /// Set (or clear) a local Connection's role/system prompt. Persists it, updates
+    /// the live conversation (which re-injects the new role on the next turn — no
+    /// restart needed), and broadcasts.
+    func setRolePrompt(_ prompt: String?, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        connections[idx].rolePrompt = value
+        ConnectionStore.save(connections)
+        item.rolePrompt = value
+        let manager = self.manager
+        let server = self.server
+        let id = item.id
+        Task {
+            await manager.setRolePrompt(for: id, value)
+            await server.broadcastInstancesIfChanged()
+        }
+    }
+
+    /// Ask grok (headless, one-shot) to draft a role prompt for `item` from its name
+    /// and its team (parent + siblings, or its children). Returns "" on failure; the
+    /// caller shows it in an editable field. See `grok-stdio-system-prompt`.
+    func draftRolePrompt(for item: InstanceItem) async -> String {
+        guard let conn = connections.first(where: { $0.id == item.id }) else { return "" }
+        let active = connections.filter { !$0.archived }
+        let team: [String]
+        if item.role == .orchestrator {
+            team = active.filter { $0.parentID == item.id }.map(\.name)
+        } else if let pid = item.parentID, let parent = active.first(where: { $0.id == pid }) {
+            team = [parent.name] + active.filter { $0.parentID == pid && $0.id != item.id }.map(\.name)
+        } else {
+            team = []
+        }
+        let roleWord = item.role == .orchestrator
+            ? "an orchestrator that coordinates its child agents and decides what to do next"
+            : "a worker agent that performs one part of the team's job"
+        let teamLine = team.isEmpty ? "It has no named teammates yet."
+            : "Its teammates are: \(team.joined(separator: ", "))."
+        let meta = """
+        You are configuring a multi-agent team. Write a concise, direct role/system prompt \
+        (second person, imperative) for an agent named "\(item.name)", which is \(roleWord). \
+        \(teamLine) Infer its specific responsibility from its name and the team's shape. \
+        Keep it under ~150 words. Output ONLY the role prompt text — no preamble, no headings, no quotes.
+        """
+        let out = await Self.runGrokHeadless(command: conn.command, prompt: meta, cwd: conn.workingDirectory)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// Run `grok -p <prompt>` headless with the user's login-shell environment and
+    /// return stdout. Off the main actor; a watchdog terminates a hung run.
+    nonisolated static func runGrokHeadless(command: String, prompt: String, cwd: String?,
+                                            timeout: TimeInterval = 120) async -> String? {
+        final class Box: @unchecked Sendable { let p = Process() }
+        let box = Box()
+        return await Task.detached(priority: .userInitiated) { [box] () -> String? in
+            let p = box.p
+            p.executableURL = URL(fileURLWithPath: command)
+            p.arguments = ["-p", prompt]
+            if let cwd { p.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+            p.environment = LoginShellEnvironment.shared
+            let outPipe = Pipe()
+            p.standardOutput = outPipe
+            p.standardError = Pipe()
+            do { try p.run() } catch { return nil }
+            let watchdog = Task { [box] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if box.p.isRunning { box.p.terminate() }
+            }
+            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            watchdog.cancel()
+            return String(data: data, encoding: .utf8)
+        }.value
     }
 
     /// Launches a Connection's grok process and reflects status on its UI item.
@@ -368,7 +455,7 @@ final class GrokestratorModel {
         let item = InstanceItem(
             id: connection.id, name: connection.name, status: .stopped,
             driver: LiveConversationDriver(manager: manager, instanceID: connection.id),
-            role: connection.role, parentID: connection.parentID
+            role: connection.role, parentID: connection.parentID, rolePrompt: connection.rolePrompt
         )
         instances.append(item)
         item.conversation.startSubscription()
@@ -498,6 +585,7 @@ final class GrokestratorModel {
             guard let item = instances.first(where: { $0.id == inst.id && $0.serverID == serverID }) else { continue }
             if item.role != inst.role { item.role = inst.role }
             if item.parentID != inst.parentID { item.parentID = inst.parentID }
+            if item.rolePrompt != inst.rolePrompt { item.rolePrompt = inst.rolePrompt }
             if item.name != inst.name { item.name = inst.name }
         }
         // Add items for new remote instances.
@@ -505,7 +593,7 @@ final class GrokestratorModel {
             guard let driver = await link.driver(for: inst.id) else { continue }
             let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
                                     driver: driver, serverID: serverID,
-                                    role: inst.role, parentID: inst.parentID)
+                                    role: inst.role, parentID: inst.parentID, rolePrompt: inst.rolePrompt)
             instances.append(item)
             // Subscribe immediately so this remote Connection's live transcript
             // accumulates in the background — switching away and back (or to

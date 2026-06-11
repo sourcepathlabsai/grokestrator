@@ -132,6 +132,7 @@ final class iOSAppModel {
             guard let item = instances.first(where: { $0.id == inst.id && $0.serverID == serverID }) else { continue }
             if item.role != inst.role { item.role = inst.role }
             if item.parentID != inst.parentID { item.parentID = inst.parentID }
+            if item.rolePrompt != inst.rolePrompt { item.rolePrompt = inst.rolePrompt }
             if item.name != inst.name { item.name = inst.name }
         }
         for inst in remote where !instances.contains(where: { $0.id == inst.id }) {
@@ -143,7 +144,7 @@ final class iOSAppModel {
                 guard !self.instances.contains(where: { $0.id == inst.id }) else { return }
                 let item = InstanceItem(id: inst.id, name: inst.name, status: inst.status,
                                         driver: driver, serverID: serverID,
-                                        role: inst.role, parentID: inst.parentID)
+                                        role: inst.role, parentID: inst.parentID, rolePrompt: inst.rolePrompt)
                 self.instances.append(item)
                 // Subscribe immediately so this Connection's live transcript
                 // accumulates in the background — switching Connections mid-turn

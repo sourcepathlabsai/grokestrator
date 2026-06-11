@@ -61,6 +61,19 @@ public actor GrokBuildManager {
         instanceStates[id] = state
     }
 
+    /// Update a Node's role/system prompt. Updates the tracked state (so a future
+    /// session primes with it) and the live conversation (which resets `primed`, so
+    /// the next turn re-injects the new role without restarting the process).
+    public func setRolePrompt(for id: UUID, _ prompt: String?) async {
+        if var state = instanceStates[id] {
+            state.rolePrompt = prompt
+            instanceStates[id] = state
+        }
+        if let convo = activeConversations[id] {
+            await convo.setRolePrompt(prompt)
+        }
+    }
+
     /// Advanced escape hatch. Most Mac app code should never call this.
     internal func _client(for id: UUID) async -> GrokBuildSessionClient? {
         await server.getClient(for: id)
@@ -175,7 +188,8 @@ public actor GrokBuildManager {
             instanceID: instanceID,
             sessionID: "default",
             client: client,
-            persistenceURL: historyURL
+            persistenceURL: historyURL,
+            rolePrompt: instanceStates[instanceID]?.rolePrompt ?? config?.rolePrompt
         )
 
         try await convo.loadHistoryIfAvailable()
