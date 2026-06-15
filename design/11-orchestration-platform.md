@@ -309,6 +309,21 @@ Two small features were queued just before this pivot — they aren't lost; they
 
 ---
 
+## 7b. The brain is swappable (model-agnostic Nodes)
+
+A Node's LLM is a **swappable brain**; this platform is the **body** — it decides what
+the brain may *do*, executes it, observes it, and coordinates many brains. The brain
+can be grok, an OpenAI-compatible host (Groq, Cerebras, local llama.cpp/Ollama),
+Gemini, or onboard. Two choices here already enable this: coordination lives in the
+app (the `delegate` tool, not grok-native subagents), and capabilities are enforced at
+our boundary (granted tools + per-action gating), not by trusting the model. The seam
+is `AgentSession` (the ~10-method contract `GrokBuildConversation` already uses) with
+`ACPEvent` as the universal event language: grok speaks it natively, other backends
+synthesize it. This promotes the "keep ACP generic so the runtime isn't grok-locked"
+footnote to a first-class plan — see **`12-model-agnostic-runtime.md`** for the seam,
+capability model, and phased roadmap (Phase A: formalize the seam; Phase B: an
+OpenAI-compatible backend — the 80/20 unlock).
+
 ## 8. Relationship to other documents
 
 - `10-agent-orchestration.md` — this **commits to and extends rung 3**; the rungs
