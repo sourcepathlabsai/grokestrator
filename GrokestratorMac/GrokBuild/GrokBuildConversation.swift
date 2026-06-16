@@ -17,7 +17,7 @@ public actor GrokBuildConversation {
     public let instanceID: UUID
     public let sessionID: String
 
-    private let client: GrokBuildSessionClient
+    private let client: any AgentSession
     private let history: AgentConversationHistory
 
     // High-level pending state (tracked so callers never need to parse raw events)
@@ -50,7 +50,7 @@ public actor GrokBuildConversation {
     discrete choices to pick.
     """
 
-    public init(instanceID: UUID, sessionID: String, client: GrokBuildSessionClient, persistenceURL: URL? = nil, rolePrompt: String? = nil) {
+    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil) {
         self.instanceID = instanceID
         self.sessionID = sessionID
         self.client = client
