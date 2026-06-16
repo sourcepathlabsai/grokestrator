@@ -90,49 +90,57 @@ the loop ourselves, so the tool registry + policy are enforced directly and tota
 the cleaner case. Long-term, prefer app-implemented tools over model-native ones so
 enforcement is uniform.
 
-## Brain binding: pinned vs dynamic (tier routing)
+## Brain binding: pinned vs dynamic (evidence-driven escalation)
 
 A Node's brain can be bound two ways:
 
 - **Pinned (hard-wired).** The Node always runs on one backend. Deterministic,
-  predictable cost, the default for a Node you've tuned to a specific model.
-- **Dynamic (tiered).** The brain is chosen *per task*, so an agent runs on a model
-  **commensurate with the work** — the orchestrator sizes the job and routes a
-  trivial step to a fast/cheap brain and a hard step to a deep/expensive one.
+  predictable cost, the default — and the right choice for most quality work.
+- **Dynamic.** The brain *can* change per task. But **not** by an automatic
+  task-sizer (see the correction below); only by conservative, evidence-driven
+  escalation.
 
-### Tiers, not model strings
+### Why "route by task size" is wrong (correction, 2026-06-16)
 
-The orchestrator reasons about **level of work, not API endpoints.** Define abstract
-tiers — e.g. `fast` / `balanced` / `deep` — and a deployment-level **tier map**
-resolving each tier to a concrete `AgentBackend`. The user configures *which model
-backs each tier*; the orchestrator just picks a tier. This keeps an orchestrator's
-choices portable across deployments and is itself a guardrail surface (the app
-decides what `deep` costs).
+The earlier framing — *the orchestrator sizes the job and routes trivial→fast,
+hard→deep* — sacrifices quality for management convenience, which is backwards:
+
+- **You can't cheaply know when a task needs more capability**, and a weaker model
+  handed a task beyond it doesn't fail loudly — it produces *confident, plausible
+  wrong*, exactly where you can least afford it.
+- **Escalation is a quality move; downgrade is a management move.** Conflating them
+  is the error.
+- **The dominant quality lever is *orientation*, not model size.** A smaller model
+  *with* the project's design oracle (see `13-design-oracle.md`) routinely beats a
+  bigger model *without* it. Spend the effort there before reaching for a bigger
+  brain.
+
+So dynamic binding survives only in this disciplined form:
+
+1. **Default to the capable model.** Never downgrade a Node by guessing a task is
+   easy.
+2. **Downgrade only for explicitly narrow, mechanical work** the operator has marked
+   as such (fetch, format, run-tests-and-report) — "earn the cheap model," don't
+   assume it.
+3. **Escalate on *evidence*, not pre-judgment:** an output oracle rejects the result,
+   tests fail, or the model itself signals uncertainty → re-run the step on a more
+   capable backend. Try-then-escalate, never assume-then-downgrade.
+
+### Tiers + map (kept, for the escalation case)
+
+Tiers stay abstract (`fast`/`balanced`/`deep`) resolved by a host-level tier map, so
+escalation targets are portable and the app caps cost. `delegate(child, task, tier?)`
+carries an *explicit* hint when the operator/orchestrator knows a step is cheap; the
+router resolves it, **clamps to the child's `allowed` tiers**, and swaps the
+`AgentSession`. The default path passes no tier and uses the child's pinned brain.
 
 ```
 enum Tier: String, Codable { case fast, balanced, deep }      // extensible
 typealias TierMap = [Tier: AgentBackend]                       // host/server config
 ```
 
-### How the orchestrator switches a child's brain
-
-Extend the `delegate` tool with an optional tier:
-
-```
-delegate(child, task, tier?)     // tier omitted ⇒ the child's default brain
-```
-
-The orchestrator's role prompt instructs it to **assess effort and pass a tier**
-("simple lookup → fast; multi-file reasoning or final decision → deep"). The router:
-1. resolves `tier` → backend via the tier map,
-2. **clamps to the child's `allowed` tiers** (a Node can't be escalated past its
-   policy — model selection is a *guarded capability*, and a cost ceiling applies),
-3. switches the child's `AgentSession` to that backend for the task (and onward until
-   changed), then runs the turn as today.
-
-A standalone `set_child_model(child, tier)` can exist too, but routing per-`delegate`
-is the ergonomic path. An **app-side auto-policy** (default tier, caps, optional
-heuristic by task size) backstops or overrides the orchestrator's pick.
+There is **no automatic task-size router.** Escalation is triggered by failure/oracle
+signals; downgrade is explicit and narrow.
 
 ### Switch mechanics (cheap vs heavy)
 
@@ -142,7 +150,8 @@ swapping the Node's `AgentSession`:
 - **API / onboard backends: near-instant.** We hold the conversation context
   app-side and pass it on each call, so a switch is just a new session object hitting
   a different endpoint with the same messages. Mid-conversation switching is trivial —
-  this is the case that makes dynamic routing practical.
+  this is what makes *evidence-driven escalation* cheap (re-run a failed step on a
+  bigger brain with the same context).
 - **grok (stateful process): heavier.** Switching means a new `grok agent stdio`
   process; the new session is re-primed from persisted history (and `/compact` for
   long ones). Fine for occasional escalation, not per-turn flapping. Lean toward
@@ -257,11 +266,12 @@ more capable tool.
 - **Phase C — app-owned tool registry + capability policy.** Formalize the registry,
   per-Node grants, and per-action gating (the `11` guardrails). Bridge MCP tools
   (including `delegate`) into it so API-model Nodes orchestrate too.
-- **Phase D — dynamic tier routing.** Add `Tier` + the host tier map + `BrainBinding`
-  (pinned vs dynamic). Extend `delegate(child, task, tier?)`; the router resolves +
-  clamps to allowed tiers + swaps the child's `AgentSession`. Record the brain per
-  turn. Cheapest over API/onboard backends (app-held context); pin grok Nodes. This
-  is "switch an agent to a model commensurate with the task."
+- **Phase D — evidence-driven escalation** (not a task-size router; see the
+  correction above). Add `Tier` + host tier map + `BrainBinding`; default capable,
+  downgrade only for explicitly-marked mechanical work, **escalate on failure/oracle
+  signals**. `delegate(child, task, tier?)` carries an explicit hint; the router
+  clamps to allowed tiers + swaps the `AgentSession`. Record the brain per turn.
+  Lower priority than the design oracle (`13`), which is the real quality lever.
 - **Phase E — more brains.** Native Gemini shape if its compat endpoint is limiting;
   an onboard runtime (MLX / llama.cpp) for fully-local Nodes.
 - **Phase F — UI.** Per-Node binding editor (pinned model **or** dynamic: default +
@@ -302,8 +312,11 @@ more capable tool.
 ---
 
 *Created 2026-06-15. Revised 2026-06-15: added **brain binding** (pinned vs dynamic)
-and **tier routing** — a Node can be hard-wired to one LLM, or run dynamic so the
-orchestrator routes each task to a model commensurate with the work (Phase D). Status:
+and **tier routing**. Revised 2026-06-16: corrected dynamic routing — *no automatic
+task-size router*; default to the capable model, downgrade only for explicitly narrow
+mechanical work, and **escalate on evidence** (oracle reject / test fail / model
+uncertainty). The real quality lever is **orientation**, not model size — see the new
+`13-design-oracle.md`. Status:
 implementation plan; not started. Phase A (formalize the seam) is the first,
 behavior-preserving step; Phase B (OpenAI-compatible backend) is the first real
 brain-swap and the biggest single unlock; Phase D adds dynamic, task-sized routing.*
