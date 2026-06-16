@@ -25,9 +25,9 @@ public actor GrokBuildServer {
             let handle = try await launcher.launch(config)
             session = GrokBuildSessionClient(handle: handle)
         case .openAICompatible(let baseURL, let model, let apiKeyRef):
-            // Secrets are referenced by env-var name, never stored inline (Keychain
-            // lookup lands with the config UI in a later phase). LM Studio needs none.
-            let key = apiKeyRef.flatMap { ProcessInfo.processInfo.environment[$0] }
+            // Secrets are referenced by name, never stored inline. Resolved from the
+            // process env or the host-local gitignored .env.local_llm (LM Studio needs none).
+            let key = apiKeyRef.flatMap { Secrets.value(for: $0) }
             session = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
                                           model: model, apiKey: key, cwd: config.workingDirectory,
                                           policy: config.toolPolicy)
