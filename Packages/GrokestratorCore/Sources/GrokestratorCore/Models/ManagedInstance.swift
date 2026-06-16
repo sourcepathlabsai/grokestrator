@@ -52,9 +52,14 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// Which LLM ("brain") runs this Node, and whether it's hard-wired or
     /// dynamically routed per task. Default `.pinned(.grokACP)` — the existing grok
     /// path via `command`/`arguments`, so nothing regresses. See
-    /// `design/12-model-agnostic-runtime.md`. (Phase A: config only; the runtime
-    /// still always launches grok until later phases add other backends.)
+    /// `design/12-model-agnostic-runtime.md`.
     public var brain: BrainBinding
+
+    /// What this Node's brain is allowed to *do* — the app-owned capability layer
+    /// (design/11 guardrails, design/12 Phase C). Enforced for model-agnostic
+    /// backends (where the app runs the tool loop); grok manages its own tools.
+    /// Default `.unrestricted`, so nothing regresses.
+    public var toolPolicy: ToolPolicy
 
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
@@ -76,6 +81,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         parentID: UUID? = nil,
         rolePrompt: String? = nil,
         brain: BrainBinding = .pinned(.grokACP),
+        toolPolicy: ToolPolicy = .unrestricted,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -94,6 +100,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.parentID = parentID
         self.rolePrompt = rolePrompt
         self.brain = brain
+        self.toolPolicy = toolPolicy
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -104,7 +111,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     // still loads — `init(from:)` defaults the new fields.
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
-             autoRestart, shared, archived, role, parentID, rolePrompt, brain,
+             autoRestart, shared, archived, role, parentID, rolePrompt, brain, toolPolicy,
              status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
@@ -122,6 +129,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         self.rolePrompt = try c.decodeIfPresent(String.self, forKey: .rolePrompt)
         self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .pinned(.grokACP)
+        self.toolPolicy = try c.decodeIfPresent(ToolPolicy.self, forKey: .toolPolicy) ?? .unrestricted
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)
@@ -188,6 +196,27 @@ public enum AgentBackend: Codable, Hashable, Sendable {
 /// host-level tier map resolves each to a concrete `AgentBackend`.
 public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
     case fast, balanced, deep
+}
+
+/// What a Node's brain may *do* — the app-owned capability layer (design/11
+/// guardrails, design/12 Phase C). `capability` bounds the kind of action;
+/// `allowed` optionally narrows to specific tool names within that bound.
+public struct ToolPolicy: Codable, Hashable, Sendable {
+    public enum Capability: String, Codable, Hashable, Sendable {
+        case readOnly      // read/list only
+        case readWrite     // + write files
+        case execute       // + run commands
+    }
+    public var capability: Capability
+    /// Tool-name allowlist within the capability; `nil` = all tools the capability permits.
+    public var allowed: [String]?
+
+    public init(capability: Capability = .execute, allowed: [String]? = nil) {
+        self.capability = capability
+        self.allowed = allowed
+    }
+    /// The default: full capability, no allowlist — preserves prior behavior.
+    public static let unrestricted = ToolPolicy()
 }
 
 /// How a Node's brain is chosen. `pinned` hard-wires one backend; `dynamic` lets the
