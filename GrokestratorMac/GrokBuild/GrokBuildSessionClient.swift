@@ -254,6 +254,30 @@ public actor GrokBuildSessionClient {
                 ])]),
             ]))
         }
+        // Advertise the host MCP registry servers this Node is granted (Grokestrator
+        // owns the registry; the grant filters it — see `MCPRegistry`). Read fresh so
+        // registry/grant edits apply on the next session. grok connects to each as a
+        // normal MCP client; its tools then appear over ACP like any other.
+        let grant = ConnectionStore.load().first { $0.id == handle.id }?.grantedMCPServerIDs
+        for server in ConnectionStore.loadMCPRegistry().granted(to: grant) {
+            switch server.transport {
+            case .stdio(let command, let args, let env):
+                mcpServers.append(.object([
+                    "name": .string(server.name),
+                    "command": .string(command),
+                    "args": .array(args.map { .string($0) }),
+                    "env": .array(env.map { .object(["name": .string($0.key), "value": .string($0.value)]) }),
+                ]))
+            case .http(let url, let headers):
+                mcpServers.append(.object([
+                    "name": .string(server.name),
+                    "type": .string("http"),
+                    "url": .string(url),
+                    "headers": .array(headers.map { .object(["name": .string($0.key), "value": .string($0.value)]) }),
+                ]))
+            }
+        }
+
         let result = try await request(
             method: "session/new",
             params: .object(["cwd": .string(cwd), "mcpServers": .array(mcpServers)]),

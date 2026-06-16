@@ -269,6 +269,17 @@ more capable tool.
 - **Phase C — app-owned tool registry + capability policy.** Formalize the registry,
   per-Node grants, and per-action gating (the `11` guardrails). Bridge MCP tools
   (including `delegate`) into it so API-model Nodes orchestrate too.
+- **Phase G — host-owned MCP registry (model-agnostic tool servers).** Grokestrator
+  owns the MCP server list (`mcp.json`, `MCPRegistry`) rather than relying on grok's
+  config — `MCPServerConfig {id, name, transport: stdio|http}` curated in Settings ▸
+  MCP. Each Node carries a **grant** (`grantedMCPServerIDs`, `nil`=all) over the
+  registry, edited from its "MCP Access…" menu. *Slice 1 (done):* grok Nodes get
+  their granted servers injected into `session/new` (reusing the existing path), so
+  grok connects to them like any MCP server. *Slice 2 (next):* a minimal in-app MCP
+  **client** (stdio first — `initialize`/`tools/list`/`tools/call`) so **API brains**
+  query the granted servers' tools and the app proxies calls/returns into the
+  `OpenAICompatSession` loop, gated by `ToolPolicy`. This completes Phase C's
+  "bridge MCP tools so API-model Nodes orchestrate too" beyond `delegate`.
 - **Phase D — evidence-driven escalation** (not a task-size router; see the
   correction above). Add `Tier` + host tier map + `BrainBinding`; default capable,
   downgrade only for explicitly-marked mechanical work, **escalate on failure/oracle

@@ -66,6 +66,11 @@ final class GrokestratorModel {
     /// the tier map reference these by id. Curated in Settings ▸ Brains.
     var brainCatalog: BrainCatalog = ConnectionStore.loadBrainCatalog()
 
+    /// Host-local MCP server registry (machine config). grok Nodes get their granted
+    /// subset injected into `session/new`; API brains reach them via the in-app MCP
+    /// client. Curated in Settings ▸ MCP. See `design/12` Phase C (MCP bridge).
+    var mcpRegistry: MCPRegistry = ConnectionStore.loadMCPRegistry()
+
     // MARK: - Server settings (mirrored to UserDefaults)
 
     private static let serverEnabledKey = "grokestrator.server.enabled.v1"
@@ -438,6 +443,64 @@ final class GrokestratorModel {
         if connectionsChanged {
             ConnectionStore.saveBrainCatalog(brainCatalog)
             ConnectionStore.save(connections)
+        }
+    }
+
+    // MARK: - MCP server registry + per-Node grants
+
+    /// Add an MCP server to the registry and persist. Returns its id.
+    @discardableResult
+    func addMCPServer(name: String, transport: MCPTransport) -> UUID {
+        let server = MCPServerConfig(name: name, transport: transport)
+        mcpRegistry.servers.append(server)
+        ConnectionStore.saveMCPRegistry(mcpRegistry)
+        return server.id
+    }
+
+    /// Update an MCP server in place, persist, and restart any **running** Node that
+    /// grants it (the new transport/args take effect on the next session).
+    func updateMCPServer(_ server: MCPServerConfig) {
+        guard let idx = mcpRegistry.servers.firstIndex(where: { $0.id == server.id }),
+              mcpRegistry.servers[idx] != server else { return }
+        mcpRegistry.servers[idx] = server
+        ConnectionStore.saveMCPRegistry(mcpRegistry)
+        restartNodesGranting(serverID: server.id)
+    }
+
+    /// Remove an MCP server from the registry. Per-Node grants that named it become
+    /// no-ops (the id is filtered out at use); running Nodes that granted it restart.
+    func removeMCPServer(_ id: UUID) {
+        guard mcpRegistry.servers.contains(where: { $0.id == id }) else { return }
+        mcpRegistry.servers.removeAll { $0.id == id }
+        ConnectionStore.saveMCPRegistry(mcpRegistry)
+        restartNodesGranting(serverID: id)
+    }
+
+    /// The MCP servers a local Connection currently grants (`nil` ⇒ all). Read by the
+    /// per-Node MCP access sheet.
+    func mcpGrant(for item: InstanceItem) -> [UUID]? {
+        connections.first(where: { $0.id == item.id })?.grantedMCPServerIDs
+    }
+
+    /// Set a local Connection's MCP access grant (`nil` = all, `[]` = none, `[ids]` =
+    /// subset). Persists and restarts a running Node so the new set is injected into
+    /// its next session. No-op for remote items or a no-change update.
+    func setMCPGrant(_ ids: [UUID]?, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }),
+              connections[idx].grantedMCPServerIDs != ids else { return }
+        connections[idx].grantedMCPServerIDs = ids
+        persistAndRestartIfLive(idx: idx, item: item)
+    }
+
+    /// Restart every running local Node whose grant includes `serverID` (or grants
+    /// all, `nil`) so a registry change to that server takes effect now.
+    private func restartNodesGranting(serverID: UUID) {
+        for item in instances where item.serverID == nil {
+            guard let conn = connections.first(where: { $0.id == item.id }),
+                  item.status == .running || item.status == .starting else { continue }
+            let grantsIt = conn.grantedMCPServerIDs == nil || conn.grantedMCPServerIDs!.contains(serverID)
+            if grantsIt { restartLive(config: conn, item: item) }
         }
     }
 

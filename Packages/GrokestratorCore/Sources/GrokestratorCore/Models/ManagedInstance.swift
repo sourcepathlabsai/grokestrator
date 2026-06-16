@@ -61,6 +61,12 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// Default `.unrestricted`, so nothing regresses.
     public var toolPolicy: ToolPolicy
 
+    /// Which host MCP servers (`MCPRegistry`) this Node may reach. `nil` ⇒ all
+    /// (unrestricted, like `ToolPolicy.allowed`); `[]` ⇒ none; `[ids]` ⇒ a subset.
+    /// grok Nodes get the granted set injected into `session/new`; API-brain Nodes
+    /// reach them via the in-app MCP client. Default `nil` keeps parity.
+    public var grantedMCPServerIDs: [UUID]?
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -82,6 +88,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         rolePrompt: String? = nil,
         brain: BrainBinding = .grok,
         toolPolicy: ToolPolicy = .unrestricted,
+        grantedMCPServerIDs: [UUID]? = nil,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -101,6 +108,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.rolePrompt = rolePrompt
         self.brain = brain
         self.toolPolicy = toolPolicy
+        self.grantedMCPServerIDs = grantedMCPServerIDs
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -112,7 +120,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
              autoRestart, shared, archived, role, parentID, rolePrompt, brain, toolPolicy,
-             status, lastStartedAt, lastExitCode, pid
+             grantedMCPServerIDs, status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -130,6 +138,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.rolePrompt = try c.decodeIfPresent(String.self, forKey: .rolePrompt)
         self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .grok
         self.toolPolicy = try c.decodeIfPresent(ToolPolicy.self, forKey: .toolPolicy) ?? .unrestricted
+        self.grantedMCPServerIDs = try c.decodeIfPresent([UUID].self, forKey: .grantedMCPServerIDs)
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)

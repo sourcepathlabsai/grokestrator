@@ -15,6 +15,9 @@ struct SettingsView: View {
     @State private var addingProfile = false
     @State private var editingProfile: BrainProfile?
 
+    @State private var addingMCPServer = false
+    @State private var editingMCPServer: MCPServerConfig?
+
     var body: some View {
         TabView {
             serverTab
@@ -22,6 +25,9 @@ struct SettingsView: View {
                 .frame(minWidth: 520, minHeight: 320)
             brainsTab
                 .tabItem { Label("Brains", systemImage: "brain") }
+                .frame(minWidth: 560, minHeight: 420)
+            mcpTab
+                .tabItem { Label("MCP", systemImage: "shippingbox") }
                 .frame(minWidth: 560, minHeight: 420)
         }
         .onAppear {
@@ -31,6 +37,59 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $addingProfile) { BrainProfileEditorView(model: model) }
         .sheet(item: $editingProfile) { p in BrainProfileEditorView(model: model, existing: p) }
+        .sheet(isPresented: $addingMCPServer) { MCPServerEditorView(model: model) }
+        .sheet(item: $editingMCPServer) { s in MCPServerEditorView(model: model, existing: s) }
+    }
+
+    // MARK: MCP registry
+
+    private var mcpTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("MCP Servers").font(Theme.display(12, .semibold))
+                    Spacer()
+                    Button { addingMCPServer = true } label: { Label("Add Server", systemImage: "plus") }
+                }
+                Text("Tool servers Grokestrator owns (model-agnostic). grok Nodes get the servers they're granted injected into their session; API brains reach them via the in-app MCP client. Per-Node access is set from a Node's “MCP Access…” menu.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if model.mcpRegistry.servers.isEmpty {
+                    Text("No servers yet. **Add Server** to register one (stdio subprocess or http).")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textMuted).padding(.vertical, 6)
+                } else {
+                    ForEach(model.mcpRegistry.servers) { server in
+                        GroupBox {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(server.name).font(Theme.body(12, .semibold))
+                                    Text(summary(server.transport)).font(Theme.mono(10))
+                                        .foregroundStyle(Theme.textMuted).lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer()
+                                Button("Edit") { editingMCPServer = server }
+                                Button(role: .destructive) { model.removeMCPServer(server.id) } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .help("Remove this server")
+                            }
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func summary(_ transport: MCPTransport) -> String {
+        switch transport {
+        case .stdio(let command, let args, let env):
+            let base = ([command] + args).joined(separator: " ")
+            return env.isEmpty ? base : "\(base)  · \(env.count) env"
+        case .http(let url, let headers):
+            return headers.isEmpty ? url : "\(url)  · \(headers.count) headers"
+        }
     }
 
     // MARK: Brains (catalog + tier map)

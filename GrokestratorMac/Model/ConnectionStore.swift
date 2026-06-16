@@ -100,6 +100,28 @@ public enum ConnectionStore {
         try? data.write(to: brainCatalogURL, options: .atomic)
     }
 
+    // MARK: - MCP server registry I/O
+
+    /// Host-local MCP server registry (machine config; lives in the support dir, so
+    /// outside any repo). The harness owns it — one source of truth for grok and API
+    /// brains alike. May hold env values for stdio servers, so it stays host-local.
+    public static var mcpRegistryURL: URL { supportDir.appendingPathComponent("mcp.json") }
+
+    public static func loadMCPRegistry() -> MCPRegistry {
+        guard let data = try? Data(contentsOf: mcpRegistryURL),
+              let registry = try? JSONDecoder().decode(MCPRegistry.self, from: data) else {
+            return MCPRegistry()
+        }
+        return registry
+    }
+
+    public static func saveMCPRegistry(_ registry: MCPRegistry) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(registry) else { return }
+        try? data.write(to: mcpRegistryURL, options: .atomic)
+    }
+
     // MARK: - Host tier map I/O
 
     /// Host-local `Tier → BrainRef` map (gitignored; machine config, not synced).
