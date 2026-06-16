@@ -94,8 +94,8 @@ final class GrokestratorModel {
                 try await orchestrationMCP.start(port: OrchestrationMCPServer.defaultPort)
                 // Install the real router (Phase 1c): delegate(child, task) sends
                 // the task to the named child Node and returns its final answer.
-                await orchestrationMCP.setDelegateHandler { child, task in
-                    await manager.delegate(toChildNamed: child, task: task)
+                await orchestrationMCP.setDelegateHandler { caller, child, task in
+                    await manager.delegate(callerID: caller, toChildNamed: child, task: task)
                 }
                 OrchestrationMCPServer.isActive = true
                 NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
