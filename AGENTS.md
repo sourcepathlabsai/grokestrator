@@ -41,6 +41,9 @@ repo's `design/` docs. The test: *would a fresh intelligence need this to unders
 what the system is trying to do and why?* If yes → strategic → Obsidian. If it's just
 how a particular change was carried out → operational → stays in the repo.
 
+> Canonical cross-project convention: `~/dev/.agents/COMMON_STRATEGIC_RECORD.md`
+> (shared by every project so the strategic record stays aligned across all of them).
+
 ## 3. The working rhythm
 
 Talk → work out the details → write it down → maintain the low-level oracle of design
