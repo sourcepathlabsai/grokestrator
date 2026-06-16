@@ -7,25 +7,40 @@ import GrokestratorCore
 /// Higher-level code should usually go through `GrokBuildManager` instead.
 public actor GrokBuildServer {
     let launcher = GrokBuildInstanceLauncher()
-    private var clients: [UUID: GrokBuildSessionClient] = [:]
+    // Holds whichever brain backs a Node (`any AgentSession`) — grok over ACP/stdio,
+    // or a model-agnostic backend (OpenAI-compatible, …). See design/12.
+    private var clients: [UUID: any AgentSession] = [:]
     private var instances: [UUID: ManagedInstance] = [:]
 
     public init() {}
 
-    /// Starts a ManagedInstance and returns a client ready for communication.
-    /// Also returns an updated `ManagedInstance` with running status.
-    public func startInstance(_ config: ManagedInstance) async throws -> (GrokBuildSessionClient, ManagedInstance) {
-        let handle = try await launcher.launch(config)
-
-        let client = GrokBuildSessionClient(handle: handle)
-        clients[config.id] = client
+    /// Starts a ManagedInstance and returns its brain (an `AgentSession`) ready for
+    /// communication, plus an updated `ManagedInstance` with running status. The
+    /// brain is chosen by `config.brain`: `.grokACP` launches a grok process;
+    /// `.openAICompatible` opens an in-process API session (no child process).
+    public func startInstance(_ config: ManagedInstance) async throws -> (any AgentSession, ManagedInstance) {
+        let session: any AgentSession
+        switch config.brain.currentBackend {
+        case .grokACP:
+            let handle = try await launcher.launch(config)
+            session = GrokBuildSessionClient(handle: handle)
+        case .openAICompatible(let baseURL, let model, let apiKeyRef):
+            // Secrets are referenced by env-var name, never stored inline (Keychain
+            // lookup lands with the config UI in a later phase). LM Studio needs none.
+            let key = apiKeyRef.flatMap { ProcessInfo.processInfo.environment[$0] }
+            session = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
+                                          model: model, apiKey: key, cwd: config.workingDirectory)
+        case .gemini, .onboard:
+            throw GrokBuildError.instanceManagementError("backend not implemented yet for \(config.name)")
+        }
+        clients[config.id] = session
 
         var updated = config
         updated.status = .running
         updated.lastStartedAt = Date()
         instances[config.id] = updated
 
-        return (client, updated)
+        return (session, updated)
     }
 
     public func stopInstance(id: UUID) async {
@@ -47,7 +62,7 @@ public actor GrokBuildServer {
         }
     }
 
-    public func getClient(for id: UUID) -> GrokBuildSessionClient? {
+    public func getClient(for id: UUID) -> (any AgentSession)? {
         clients[id]
     }
 
