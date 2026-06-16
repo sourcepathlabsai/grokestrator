@@ -117,6 +117,16 @@ public actor GrokBuildConversation {
         subscribers.removeValue(forKey: token)
     }
 
+    /// Cleanly end every broadcast subscription, then forget them. Used when this
+    /// conversation is being retired (e.g. a brain swap restarts the Node — see
+    /// `GrokBuildManager.restartInstance`): finishing the streams lets resilient
+    /// subscribers (`LiveConversationDriver`) re-subscribe and re-bind to the
+    /// fresh conversation, which replays a `.snapshot` of the reloaded history.
+    public func finishSubscribers() {
+        for (_, cont) in subscribers { cont.finish() }
+        subscribers.removeAll()
+    }
+
     /// Wipes this Connection's chat history and tells every subscriber to reset.
     /// Reuses the broadcast `.snapshot` channel: a fresh empty snapshot flows to
     /// the local Mac UI and every remote GKSC (via the server's snapshot

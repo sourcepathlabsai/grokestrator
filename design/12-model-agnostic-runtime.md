@@ -281,9 +281,17 @@ more capable tool.
   (tool-calling works — no native adapter needed), plus xAI (`api.x.ai/v1`). Verified
   live (each returns through the same seam). Remaining: an **onboard** runtime (MLX /
   llama.cpp) for fully in-process local Nodes — the only genuinely new backend.
-- **Phase F — UI.** Per-Node binding editor (pinned model **or** dynamic: default +
-  allowed tiers), the host tier map, and the capability/permission editor in the Node
-  settings sheet.
+- **Phase F — UI. Done.** Per-Node **brain editor** ("Edit Brain…": pinned backend
+  via the shared `BackendEditor`, **or** dynamic — default tier + allowed tiers) and
+  **tool/capability editor** ("Edit Tools…": capability tier + per-tool allowlist,
+  mirroring `OpenAICompatSession.isPermitted`) in the sidebar row menu; the **host
+  tier map** editor in **Settings ▸ Brains** (`Tier → AgentBackend`, persisted
+  host-local in `tiermap.json`). Saving a change restarts a running Node so it
+  rebinds (`GrokBuildManager.restartInstance` ends the old broadcast streams;
+  `LiveConversationDriver` re-subscribes — the live UI follows without a reopen). A
+  `dynamic` binding now resolves its **default tier** through the host map at
+  (re)start; per-task tier *selection/escalation* across the allowed set is still
+  Phase D.
 
 ## Risks / notes
 

@@ -33,6 +33,23 @@ public actor GrokBuildManager {
         }
     }
 
+    /// Restart a Node against a (possibly changed) config — e.g. after switching its
+    /// brain. Drops the cached conversation so the next `conversation(for:)` rebinds
+    /// to the **new** backend session; the transcript reloads from persisted history.
+    public func restartInstance(_ config: ManagedInstance) async throws -> ManagedInstance {
+        // End the old conversation's broadcast streams first: resilient subscribers
+        // (LiveConversationDriver) re-subscribe and re-bind to the rebuilt
+        // conversation, so the live UI follows the brain swap without a reopen.
+        await activeConversations[config.id]?.finishSubscribers()
+        await server.stopInstance(id: config.id)
+        activeConversations.removeValue(forKey: config.id)
+        let updated = try await startInstance(config)
+        // Eagerly rebuild the conversation so it's live before any subscriber races
+        // back in (and so a fresh `.snapshot` of reloaded history is ready to replay).
+        _ = try? await conversation(for: config.id)
+        return updated
+    }
+
     /// Terminates every running grok process this Mac is hosting. Drains the
     /// active-conversation table so callers don't hand back dead handles after
     /// a shutdown. Used by app-quit cleanup.

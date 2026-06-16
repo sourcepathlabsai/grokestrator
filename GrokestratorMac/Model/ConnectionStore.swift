@@ -78,6 +78,27 @@ public enum ConnectionStore {
         try? data.write(to: registryURL, options: .atomic)
     }
 
+    // MARK: - Host tier map I/O
+
+    /// Host-local `Tier → AgentBackend` map (gitignored; machine config, not synced).
+    public static var tierMapURL: URL { supportDir.appendingPathComponent("tiermap.json") }
+
+    /// The host tier map, or `.default` (every tier → grok) if absent/unreadable.
+    public static func loadTierMap() -> HostTierMap {
+        guard let data = try? Data(contentsOf: tierMapURL),
+              let map = try? JSONDecoder().decode(HostTierMap.self, from: data) else {
+            return .default
+        }
+        return map
+    }
+
+    public static func saveTierMap(_ map: HostTierMap) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(map) else { return }
+        try? data.write(to: tierMapURL, options: .atomic)
+    }
+
     /// Permanently deletes a Connection's history directory. Caller is
     /// responsible for removing the registry entry separately.
     public static func deleteHistoryDirectory(for id: UUID) {

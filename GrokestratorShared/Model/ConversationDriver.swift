@@ -100,9 +100,17 @@ public struct LiveConversationDriver: ConversationDriver {
                             if Task.isCancelled { break }
                             continuation.yield(event)
                         }
-                        break    // inner stream ended cleanly
+                        // Inner stream ended cleanly. This is NOT a teardown signal:
+                        // when the view goes away the outer Task is cancelled (see
+                        // onTermination), so we'd already have exited the loop. A
+                        // clean end here means the conversation was retired — e.g. a
+                        // brain swap restarted the Node (manager.restartInstance →
+                        // finishSubscribers). Loop back and re-subscribe so we
+                        // re-bind to the rebuilt conversation, which replays a fresh
+                        // `.snapshot`. The sleep below paces the retry while the new
+                        // instance comes up.
                     }
-                    try? await Task.sleep(nanoseconds: 300_000_000)   // retry until the instance is alive
+                    try? await Task.sleep(nanoseconds: 300_000_000)   // retry until the (re)started instance is alive
                 }
                 continuation.finish()
             }

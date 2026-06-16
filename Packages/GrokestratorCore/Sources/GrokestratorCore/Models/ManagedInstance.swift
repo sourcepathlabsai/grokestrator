@@ -198,6 +198,63 @@ public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
     case fast, balanced, deep
 }
 
+/// Host-local resolution of each abstract `Tier` to a concrete `AgentBackend`.
+/// Lives on the host (gitignored `tiermap.json`, like API secrets) — it's machine
+/// config, not per-Node and not synced. A `dynamic` `BrainBinding` resolves its
+/// tier through this map; per-task tier *selection/escalation* lands in Phase D
+/// (design/12), but the map and its editor are Phase F. Unmapped tiers fall back
+/// to grok, so an empty/missing map preserves today's behavior.
+public struct HostTierMap: Codable, Hashable, Sendable {
+    /// Concrete backend per tier. A missing entry ⇒ grok (the safe default).
+    public var entries: [Tier: AgentBackend]
+
+    public init(entries: [Tier: AgentBackend] = [:]) { self.entries = entries }
+
+    /// Every tier mapped to grok — the behavior-preserving default.
+    public static let `default` = HostTierMap(
+        entries: [.fast: .grokACP, .balanced: .grokACP, .deep: .grokACP]
+    )
+
+    // Encode as a plain `{ "fast": {…}, "balanced": {…} }` object (keyed by tier
+    // rawValue) so `tiermap.json` stays hand-editable — Swift's default would emit
+    // a positional array for a non-String-keyed dictionary.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: TierKey.self)
+        var out: [Tier: AgentBackend] = [:]
+        for tier in Tier.allCases {
+            if let backend = try c.decodeIfPresent(AgentBackend.self, forKey: TierKey(tier)) {
+                out[tier] = backend
+            }
+        }
+        self.entries = out
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: TierKey.self)
+        for (tier, backend) in entries { try c.encode(backend, forKey: TierKey(tier)) }
+    }
+    private struct TierKey: CodingKey {
+        let stringValue: String
+        init(_ tier: Tier) { self.stringValue = tier.rawValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    /// The concrete backend for a tier (grok if unmapped).
+    public func backend(for tier: Tier) -> AgentBackend { entries[tier] ?? .grokACP }
+
+    /// Resolve a binding to the backend to run *now*: a `pinned` binding is its own
+    /// backend; a `dynamic` binding resolves its **default tier** through the map.
+    /// (Per-task routing across the `allowed` tiers is Phase D — until then a
+    /// dynamic Node runs on its default tier's backend.)
+    public func backend(for binding: BrainBinding) -> AgentBackend {
+        switch binding {
+        case .pinned(let backend):        return backend
+        case .dynamic(let defaultTier, _): return backend(for: defaultTier)
+        }
+    }
+}
+
 /// What a Node's brain may *do* — the app-owned capability layer (design/11
 /// guardrails, design/12 Phase C). `capability` bounds the kind of action;
 /// `allowed` optionally narrows to specific tool names within that bound.
