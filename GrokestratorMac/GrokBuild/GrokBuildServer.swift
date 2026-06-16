@@ -29,7 +29,8 @@ public actor GrokBuildServer {
             // lookup lands with the config UI in a later phase). LM Studio needs none.
             let key = apiKeyRef.flatMap { ProcessInfo.processInfo.environment[$0] }
             session = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
-                                          model: model, apiKey: key, cwd: config.workingDirectory)
+                                          model: model, apiKey: key, cwd: config.workingDirectory,
+                                          policy: config.toolPolicy)
         case .gemini, .onboard:
             throw GrokBuildError.instanceManagementError("backend not implemented yet for \(config.name)")
         }

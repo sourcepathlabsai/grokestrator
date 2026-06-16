@@ -20,6 +20,7 @@ public actor OpenAICompatSession: AgentSession {
     private let model: String
     private let apiKey: String?
     private let cwd: String
+    private let policy: ToolPolicy
     private var messages: [[String: Any]] = []
     private var sessionId: String?
     private var usage = SessionUsage.empty
@@ -27,12 +28,29 @@ public actor OpenAICompatSession: AgentSession {
     private let maxIterations = 12
     private let outputCap = 8000        // lossless context discipline: cap tool output
 
-    public init(instanceID: UUID, baseURL: String, model: String, apiKey: String?, cwd: String?) {
+    public init(instanceID: UUID, baseURL: String, model: String, apiKey: String?, cwd: String?,
+                policy: ToolPolicy = .unrestricted) {
         self.instanceID = instanceID
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.model = model
         self.apiKey = apiKey
         self.cwd = cwd ?? FileManager.default.currentDirectoryPath
+        self.policy = policy
+    }
+
+    /// Whether the policy permits a tool: the capability must cover its action class,
+    /// and the optional allowlist must include it. The model is only *offered* tools
+    /// that pass this, and `executeTool` re-checks (defense in depth).
+    private func isPermitted(_ name: String) -> Bool {
+        let capOK: Bool
+        switch name {
+        case "read_file", "list_dir": capOK = true
+        case "write_file":            capOK = policy.capability != .readOnly
+        case "run_command":           capOK = policy.capability == .execute
+        default:                      capOK = false
+        }
+        let allowOK = policy.allowed?.contains(name) ?? true
+        return capOK && allowOK
     }
 
     // MARK: - AgentSession
@@ -148,8 +166,13 @@ public actor OpenAICompatSession: AgentSession {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey, !apiKey.isEmpty { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         req.timeoutInterval = 120
+        // Only offer the model the tools its policy permits.
+        let tools = Self.toolSchemas.filter { schema in
+            guard let fn = schema["function"] as? [String: Any], let name = fn["name"] as? String else { return false }
+            return isPermitted(name)
+        }
         let body: [String: Any] = [
-            "model": model, "messages": messages, "tools": Self.toolSchemas,
+            "model": model, "messages": messages, "tools": tools,
             "tool_choice": "auto", "stream": false,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -201,6 +224,7 @@ public actor OpenAICompatSession: AgentSession {
     }
 
     private func executeTool(name: String, argumentsJSON: String) async -> (String, Bool) {
+        guard isPermitted(name) else { return ("denied by policy: \(name) is not permitted for this node", true) }
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
         switch name {
         case "read_file":
