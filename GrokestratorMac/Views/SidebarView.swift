@@ -25,6 +25,8 @@ struct SidebarView: View {
     @State private var editingBrainFor: InstanceItem?
     /// The Connection whose tool/capability policy we're editing (nil ⇒ not editing).
     @State private var editingToolsFor: InstanceItem?
+    /// The Connection whose MCP-server access we're editing (nil ⇒ not editing).
+    @State private var editingMCPFor: InstanceItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,6 +69,7 @@ struct SidebarView: View {
         .sheet(item: $editingRoleFor) { item in EditRoleView(model: model, item: item) }
         .sheet(item: $editingBrainFor) { item in EditBrainView(model: model, item: item) }
         .sheet(item: $editingToolsFor) { item in EditToolPolicyView(model: model, item: item) }
+        .sheet(item: $editingMCPFor) { item in EditMCPAccessView(model: model, item: item) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
@@ -169,6 +172,7 @@ struct SidebarView: View {
             Button("Edit Role…") { editingRoleFor = instance }
             Button("Edit Brain…") { editingBrainFor = instance }
             Button("Edit Tools…") { editingToolsFor = instance }
+            Button("MCP Access…") { editingMCPFor = instance }
             // Create a child agent under this Connection — promotes it to
             // orchestrator automatically (see GrokestratorModel.addRealConnection).
             Button("Add Child Agent…") { addingChildFor = instance }
