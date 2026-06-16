@@ -20,6 +20,10 @@ struct AddConnectionView: View {
     var parent: InstanceItem? = nil
 
     @State private var name = ""
+    /// The brain backing this Connection. `grokACP` (default) launches a grok
+    /// process via `command`/`arguments`; an OpenAI-compatible brain runs in-process
+    /// (no child) and ignores them. Editable later via "Edit Brain…".
+    @State private var backend: AgentBackend = .grokACP
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
     @State private var workingDirectory = ""
@@ -55,10 +59,18 @@ struct AddConnectionView: View {
                     }
                 }
 
-                TextField("Command", text: $command)
-                    .font(.system(.body, design: .monospaced))
-                TextField("Arguments", text: $argumentsText)
-                    .font(.system(.body, design: .monospaced))
+                Section {
+                    BackendEditor(backend: $backend)
+                } header: {
+                    Text("Brain").font(.caption).foregroundStyle(.secondary)
+                }
+
+                if isGrok {
+                    TextField("Command", text: $command)
+                        .font(.system(.body, design: .monospaced))
+                    TextField("Arguments", text: $argumentsText)
+                        .font(.system(.body, design: .monospaced))
+                }
                 LabeledContent("Working directory (optional)") {
                     HStack(spacing: 4) {
                         TextField("", text: $workingDirectory, prompt: Text("optional"))
@@ -82,7 +94,9 @@ struct AddConnectionView: View {
                             .font(.caption).foregroundStyle(.red)
                     }
                 }
-                Text("`grok agent stdio` runs the agent over stdio — the mode this app talks to.")
+                Text(isGrok
+                     ? "`grok agent stdio` runs the agent over stdio — the mode this app talks to."
+                     : "The working directory is this brain's tool sandbox — its file/shell tools run there.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -135,8 +149,21 @@ struct AddConnectionView: View {
         model.activeConnection(named: finalName)
     }
 
+    /// Whether the chosen brain launches grok (needs a `command`) vs. an in-process
+    /// API brain (command/arguments are unused).
+    private var isGrok: Bool { if case .grokACP = backend { return true }; return false }
+
+    /// An OpenAI-compatible brain needs a base URL and a model; grok needs neither.
+    private var backendIsValid: Bool {
+        if case .openAICompatible(let url, let model, _) = backend {
+            return !url.trimmed.isEmpty && !model.trimmed.isEmpty
+        }
+        return true
+    }
+
     private var isAddDisabled: Bool {
-        if command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        if !backendIsValid { return true }
         if activeCollision != nil { return true }
         if !workingDirectoryIsValid { return true }
         return false
@@ -199,7 +226,7 @@ struct AddConnectionView: View {
         let args = argumentsText.split(separator: " ").map(String.init)
         model.addRealConnection(name: finalName, command: command, arguments: args,
                                 workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
-                                parentID: parent?.id)
+                                parentID: parent?.id, brain: .pinned(backend))
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not

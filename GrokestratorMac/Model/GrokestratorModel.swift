@@ -208,7 +208,8 @@ final class GrokestratorModel {
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
                            autoRestart: Bool = true, shared: Bool = true,
-                           role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil) {
+                           role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil,
+                           brain: BrainBinding = .pinned(.grokACP)) {
         let config = ManagedConnection(
             name: name,
             command: command,
@@ -218,7 +219,8 @@ final class GrokestratorModel {
             shared: shared,
             role: role,
             parentID: parentID,
-            rolePrompt: rolePrompt
+            rolePrompt: rolePrompt,
+            brain: brain
         )
         connections.append(config)
         ConnectionStore.save(connections)
