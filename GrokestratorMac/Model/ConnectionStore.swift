@@ -78,9 +78,31 @@ public enum ConnectionStore {
         try? data.write(to: registryURL, options: .atomic)
     }
 
+    // MARK: - Brain catalog I/O
+
+    /// Host-local library of named brains (gitignored; machine config). Holds model
+    /// + key *names* only — no secrets. Referenced by id from Nodes and the tier map.
+    public static var brainCatalogURL: URL { supportDir.appendingPathComponent("brains.json") }
+
+    /// The brain catalog, or an empty one if absent/unreadable.
+    public static func loadBrainCatalog() -> BrainCatalog {
+        guard let data = try? Data(contentsOf: brainCatalogURL),
+              let catalog = try? JSONDecoder().decode(BrainCatalog.self, from: data) else {
+            return BrainCatalog()
+        }
+        return catalog
+    }
+
+    public static func saveBrainCatalog(_ catalog: BrainCatalog) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(catalog) else { return }
+        try? data.write(to: brainCatalogURL, options: .atomic)
+    }
+
     // MARK: - Host tier map I/O
 
-    /// Host-local `Tier → AgentBackend` map (gitignored; machine config, not synced).
+    /// Host-local `Tier → BrainRef` map (gitignored; machine config, not synced).
     public static var tierMapURL: URL { supportDir.appendingPathComponent("tiermap.json") }
 
     /// The host tier map, or `.default` (every tier → grok) if absent/unreadable.

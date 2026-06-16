@@ -50,7 +50,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     public var rolePrompt: String?
 
     /// Which LLM ("brain") runs this Node, and whether it's hard-wired or
-    /// dynamically routed per task. Default `.pinned(.grokACP)` — the existing grok
+    /// dynamically routed per task. Default `.grok` — the existing grok
     /// path via `command`/`arguments`, so nothing regresses. See
     /// `design/12-model-agnostic-runtime.md`.
     public var brain: BrainBinding
@@ -80,7 +80,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         role: NodeRole = .agent,
         parentID: UUID? = nil,
         rolePrompt: String? = nil,
-        brain: BrainBinding = .pinned(.grokACP),
+        brain: BrainBinding = .grok,
         toolPolicy: ToolPolicy = .unrestricted,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
@@ -128,7 +128,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.role = try c.decodeIfPresent(NodeRole.self, forKey: .role) ?? .agent
         self.parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         self.rolePrompt = try c.decodeIfPresent(String.self, forKey: .rolePrompt)
-        self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .pinned(.grokACP)
+        self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .grok
         self.toolPolicy = try c.decodeIfPresent(ToolPolicy.self, forKey: .toolPolicy) ?? .unrestricted
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
@@ -198,39 +198,100 @@ public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
     case fast, balanced, deep
 }
 
-/// Host-local resolution of each abstract `Tier` to a concrete `AgentBackend`.
-/// Lives on the host (gitignored `tiermap.json`, like API secrets) — it's machine
-/// config, not per-Node and not synced. A `dynamic` `BrainBinding` resolves its
-/// tier through this map; per-task tier *selection/escalation* lands in Phase D
-/// (design/12), but the map and its editor are Phase F. Unmapped tiers fall back
-/// to grok, so an empty/missing map preserves today's behavior.
-public struct HostTierMap: Codable, Hashable, Sendable {
-    /// Concrete backend per tier. A missing entry ⇒ grok (the safe default).
-    public var entries: [Tier: AgentBackend]
+/// A named, reusable "brain" in the host-local catalog — a concrete `AgentBackend`
+/// (provider + model + key *name*) the user has curated and can point Nodes/tiers
+/// at. Multiple profiles per service are the point: "Cerebras · GPT-OSS 120B" and
+/// "Cerebras · Llama-4 Scout" are two profiles, so a Node/tier can pick the model
+/// most appropriate for its task. No secrets here — only an `apiKeyRef` name (the
+/// value lives in `.env.local_llm`). See `design/12-model-agnostic-runtime.md`.
+public struct BrainProfile: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var backend: AgentBackend
+    public init(id: UUID = UUID(), name: String, backend: AgentBackend) {
+        self.id = id; self.name = name; self.backend = backend
+    }
+}
 
-    public init(entries: [Tier: AgentBackend] = [:]) { self.entries = entries }
+/// The host-local library of `BrainProfile`s (gitignored `brains.json`). Curated by
+/// the user; referenced by id from Nodes (`BrainBinding.profile`) and the tier map
+/// (`BrainRef.profile`). A reference to a missing profile resolves to grok.
+public struct BrainCatalog: Codable, Hashable, Sendable {
+    public var profiles: [BrainProfile]
+    public init(profiles: [BrainProfile] = []) { self.profiles = profiles }
+
+    public func profile(_ id: UUID) -> BrainProfile? { profiles.first { $0.id == id } }
+
+    /// The backend for a profile id — grok if the id is dangling (profile deleted).
+    public func backend(for id: UUID) -> AgentBackend { profile(id)?.backend ?? .grokACP }
+
+    /// Find an existing profile whose backend matches, else append a new one with
+    /// `name`, returning its id. Used by migration to absorb legacy inline backends.
+    public mutating func findOrCreate(backend: AgentBackend, name: @autoclosure () -> String) -> UUID {
+        if let existing = profiles.first(where: { $0.backend == backend }) { return existing.id }
+        let profile = BrainProfile(name: name(), backend: backend)
+        profiles.append(profile)
+        return profile.id
+    }
+}
+
+/// A reference to a brain: grok (the Node's own command) or a catalog profile by id.
+/// Used by the tier map so a tier can resolve to either. Lenient decode: anything
+/// that isn't an explicit `profile` resolves to grok (legacy/forward-compatible).
+public enum BrainRef: Codable, Hashable, Sendable {
+    case grok
+    case profile(UUID)
+
+    private enum CodingKeys: String, CodingKey { case kind, id }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .grok: try c.encode("grok", forKey: .kind)
+        case .profile(let id): try c.encode("profile", forKey: .kind); try c.encode(id, forKey: .id)
+        }
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if try c.decodeIfPresent(String.self, forKey: .kind) == "profile",
+           let id = try c.decodeIfPresent(UUID.self, forKey: .id) {
+            self = .profile(id)
+        } else {
+            self = .grok
+        }
+    }
+}
+
+/// Host-local resolution of each abstract `Tier` to a `BrainRef`. Lives on the host
+/// (gitignored `tiermap.json`) — machine config, not per-Node and not synced. A
+/// `dynamic` `BrainBinding` resolves its tier through this map; per-task tier
+/// *selection/escalation* lands in Phase D. Unmapped tiers fall back to grok.
+public struct HostTierMap: Codable, Hashable, Sendable {
+    /// Brain reference per tier. A missing entry ⇒ grok (the safe default).
+    public var entries: [Tier: BrainRef]
+
+    public init(entries: [Tier: BrainRef] = [:]) { self.entries = entries }
 
     /// Every tier mapped to grok — the behavior-preserving default.
     public static let `default` = HostTierMap(
-        entries: [.fast: .grokACP, .balanced: .grokACP, .deep: .grokACP]
+        entries: [.fast: .grok, .balanced: .grok, .deep: .grok]
     )
 
-    // Encode as a plain `{ "fast": {…}, "balanced": {…} }` object (keyed by tier
-    // rawValue) so `tiermap.json` stays hand-editable — Swift's default would emit
-    // a positional array for a non-String-keyed dictionary.
+    // Encode as `{ "fast": {…}, "balanced": {…} }` keyed by tier rawValue so
+    // `tiermap.json` stays hand-editable (Swift would otherwise emit a positional
+    // array for a non-String-keyed dictionary).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: TierKey.self)
-        var out: [Tier: AgentBackend] = [:]
+        var out: [Tier: BrainRef] = [:]
         for tier in Tier.allCases {
-            if let backend = try c.decodeIfPresent(AgentBackend.self, forKey: TierKey(tier)) {
-                out[tier] = backend
+            if let ref = try c.decodeIfPresent(BrainRef.self, forKey: TierKey(tier)) {
+                out[tier] = ref
             }
         }
         self.entries = out
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: TierKey.self)
-        for (tier, backend) in entries { try c.encode(backend, forKey: TierKey(tier)) }
+        for (tier, ref) in entries { try c.encode(ref, forKey: TierKey(tier)) }
     }
     private struct TierKey: CodingKey {
         let stringValue: String
@@ -240,17 +301,26 @@ public struct HostTierMap: Codable, Hashable, Sendable {
         init?(intValue: Int) { nil }
     }
 
-    /// The concrete backend for a tier (grok if unmapped).
-    public func backend(for tier: Tier) -> AgentBackend { entries[tier] ?? .grokACP }
+    public func ref(for tier: Tier) -> BrainRef { entries[tier] ?? .grok }
 
-    /// Resolve a binding to the backend to run *now*: a `pinned` binding is its own
-    /// backend; a `dynamic` binding resolves its **default tier** through the map.
-    /// (Per-task routing across the `allowed` tiers is Phase D — until then a
-    /// dynamic Node runs on its default tier's backend.)
-    public func backend(for binding: BrainBinding) -> AgentBackend {
+    /// The concrete backend for a brain reference, resolved through the catalog.
+    public func backend(for ref: BrainRef, catalog: BrainCatalog) -> AgentBackend {
+        switch ref {
+        case .grok:             return .grokACP
+        case .profile(let id):  return catalog.backend(for: id)
+        }
+    }
+
+    /// Resolve a binding to the backend to run *now*: grok → grok; a profile binding
+    /// → its catalog backend; a dynamic binding → its **default tier**'s ref through
+    /// the map. (Per-task routing across `allowed` is Phase D.) `inlineLegacy` is a
+    /// pre-migration safety net — it returns the embedded backend directly.
+    public func backend(for binding: BrainBinding, catalog: BrainCatalog) -> AgentBackend {
         switch binding {
-        case .pinned(let backend):        return backend
-        case .dynamic(let defaultTier, _): return backend(for: defaultTier)
+        case .grok:                        return .grokACP
+        case .profile(let id):             return catalog.backend(for: id)
+        case .dynamic(let defaultTier, _): return backend(for: ref(for: defaultTier), catalog: catalog)
+        case .inlineLegacy(let backend):   return backend
         }
     }
 }
@@ -276,39 +346,54 @@ public struct ToolPolicy: Codable, Hashable, Sendable {
     public static let unrestricted = ToolPolicy()
 }
 
-/// How a Node's brain is chosen. `pinned` hard-wires one backend; `dynamic` lets the
-/// orchestrator route each task to a tier (resolved + clamped to `allowed`).
+/// How a Node's brain is chosen: `grok` (its own command), a catalog `profile` by
+/// id, or `dynamic` (the orchestrator routes each task to a tier, resolved + clamped
+/// to `allowed`). `inlineLegacy` is produced only when decoding a pre-catalog config
+/// that pinned an inline API backend — the model migrates it into a catalog profile
+/// at load (`migrateBrainsIfNeeded`); it is never encoded.
 public enum BrainBinding: Codable, Hashable, Sendable {
-    case pinned(AgentBackend)
+    case grok
+    case profile(UUID)
     case dynamic(defaultTier: Tier, allowed: [Tier])
+    case inlineLegacy(AgentBackend)
 
-    private enum CodingKeys: String, CodingKey { case mode, backend, defaultTier, allowed }
+    /// The catalog profile this binding references, if any.
+    public var profileID: UUID? { if case .profile(let id) = self { return id }; return nil }
+
+    private enum CodingKeys: String, CodingKey { case mode, id, backend, defaultTier, allowed }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .pinned(let backend):
-            try c.encode("pinned", forKey: .mode); try c.encode(backend, forKey: .backend)
+        case .grok:
+            try c.encode("grok", forKey: .mode)
+        case .profile(let id):
+            try c.encode("profile", forKey: .mode); try c.encode(id, forKey: .id)
         case .dynamic(let defaultTier, let allowed):
             try c.encode("dynamic", forKey: .mode)
             try c.encode(defaultTier, forKey: .defaultTier); try c.encode(allowed, forKey: .allowed)
+        case .inlineLegacy(let backend):
+            // Should be migrated before any save; encode as grok as a safety net so a
+            // stray inline binding can never break resolution.
+            _ = backend
+            try c.encode("grok", forKey: .mode)
         }
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        switch try c.decodeIfPresent(String.self, forKey: .mode) ?? "pinned" {
+        switch try c.decodeIfPresent(String.self, forKey: .mode) ?? "grok" {
+        case "profile":
+            self = .profile(try c.decode(UUID.self, forKey: .id))
         case "dynamic":
             self = .dynamic(defaultTier: try c.decode(Tier.self, forKey: .defaultTier),
                             allowed: try c.decode([Tier].self, forKey: .allowed))
+        case "pinned":
+            // Legacy: `.pinned(AgentBackend)`. grok stays grok; an inline API backend
+            // becomes `.inlineLegacy` for the load-time migration to absorb.
+            let backend = (try? c.decode(AgentBackend.self, forKey: .backend)) ?? .grokACP
+            self = (backend == .grokACP) ? .grok : .inlineLegacy(backend)
         default:
-            self = .pinned((try? c.decode(AgentBackend.self, forKey: .backend)) ?? .grokACP)
+            self = .grok
         }
-    }
-
-    /// The backend to run *now* (Phase B): pinned → its backend; dynamic → its
-    /// default tier's backend, resolved against the host tier map (none yet ⇒ grok).
-    public var currentBackend: AgentBackend {
-        if case .pinned(let b) = self { return b }
-        return .grokACP   // dynamic resolution lands in Phase D
     }
 }
 

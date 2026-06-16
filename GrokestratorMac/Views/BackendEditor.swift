@@ -1,88 +1,110 @@
 import SwiftUI
 import GrokestratorCore
 
-/// Reusable editor for a single concrete `AgentBackend` — grok (the Node's own
-/// command) or any OpenAI-compatible endpoint (Groq / Cerebras / xAI / Gemini /
-/// local, via the provider presets). Binds to an `AgentBackend` and writes changes
-/// back as the user edits. Used by the per-Node brain editor (`EditBrainView`) and
-/// the host tier-map editor (`Settings ▸ Brains`).
+/// Editor for an OpenAI-compatible backend (provider + model + key name) — the body
+/// of a catalog `BrainProfile`. Binds to an `AgentBackend` and always produces
+/// `.openAICompatible`. Provider presets fill base URL + key name + a starter model;
+/// "Fetch models" lists the provider's live models so the choice is never stale.
 ///
-/// API keys are referenced by *name* only; the value is resolved host-locally from
-/// `.env.local_llm` and never written to config.
+/// API keys are referenced by *name* only; the value is entered here and stored
+/// host-locally in `.env.local_llm` via `Secrets` — never in config.
 struct BackendEditor: View {
     @Binding var backend: AgentBackend
 
-    private enum Kind: String, CaseIterable, Identifiable { case grok, api; var id: String { rawValue } }
-
-    @State private var kind: Kind
     @State private var baseURL: String
     @State private var model: String
     @State private var keyRef: String
-    /// In-app key entry: the value the user pastes for `keyRef`, written to
-    /// `.env.local_llm` via `Secrets.set`. Never stored in the binding/config.
     @State private var newKeyValue: String = ""
-    /// Bumped after a key write so the "key found?" status re-evaluates.
     @State private var keyStatusTick = 0
-    /// True while replacing an existing on-file key (reveals the entry field).
     @State private var keyReplaceMode = false
+
+    @State private var fetchedModels: [String] = []
+    @State private var fetching = false
+    @State private var fetchError: String?
 
     init(backend: Binding<AgentBackend>) {
         _backend = backend
         switch backend.wrappedValue {
-        case .grokACP:
-            _kind = State(initialValue: .grok)
-            _baseURL = State(initialValue: ""); _model = State(initialValue: ""); _keyRef = State(initialValue: "")
         case .openAICompatible(let url, let m, let ref):
-            _kind = State(initialValue: .api)
             _baseURL = State(initialValue: url); _model = State(initialValue: m); _keyRef = State(initialValue: ref ?? "")
         case .gemini(let m, let ref):
-            // Legacy/native shape — surface via the compat editor so it's editable.
-            _kind = State(initialValue: .api)
             _baseURL = State(initialValue: BackendPreset.geminiBaseURL)
             _model = State(initialValue: m); _keyRef = State(initialValue: ref ?? "GEMINI_API_KEY")
-        case .onboard:
-            // Not yet runnable; show as grok so the editor never offers a dead backend.
-            _kind = State(initialValue: .grok)
+        case .grokACP, .onboard:
+            // Catalog brains are API brains; start from a blank OpenAI-compatible shape.
             _baseURL = State(initialValue: ""); _model = State(initialValue: ""); _keyRef = State(initialValue: "")
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Backend", selection: $kind) {
-                Text("grok").tag(Kind.grok)
-                Text("OpenAI-compatible").tag(Kind.api)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .onChange(of: kind) { _, _ in push() }
-
-            if kind == .grok {
-                Text("Runs grok via the Node's command — the default. No API key needed.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    Text("Provider").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
-                    Menu(currentPresetName) {
-                        ForEach(BackendPreset.all) { p in Button(p.name) { apply(p) } }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("Provider").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
+                Menu(currentPresetName) {
+                    ForEach(BackendPreset.all) { p in Button(p.name) { apply(p) } }
                 }
-                field("Base URL", text: $baseURL, placeholder: "https://api.groq.com/openai/v1")
-                field("Model", text: $model, placeholder: "llama-3.3-70b-versatile")
-                field("API key name", text: $keyRef, placeholder: "GROQ_API_KEY")
-                keyStatusRow
-                Text("The key *name* points at a host-local secret in .env.local_llm. Enter the value below and the app stores it there (0600, gitignored) — never in config. Leave the name empty for keyless local servers.")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            field("Base URL", text: $baseURL, placeholder: "https://api.groq.com/openai/v1")
+            modelRow
+            field("API key name", text: $keyRef, placeholder: "GROQ_API_KEY")
+            keyStatusRow
+            Text("The key *name* points at a host-local secret in .env.local_llm. Enter the value below and the app stores it there (0600, gitignored) — never in config. Leave the name empty for keyless local servers.")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: Model row (+ live fetch)
+
+    private var modelRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Model").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
+                TextField("llama-3.3-70b-versatile", text: $model)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: model) { _, _ in push() }
+                if !fetchedModels.isEmpty {
+                    Menu("Pick") {
+                        ForEach(fetchedModels, id: \.self) { m in
+                            Button(m) { model = m; push() }
+                        }
+                    }
+                    .frame(width: 64)
+                }
+                Button {
+                    Task { await fetchModels() }
+                } label: {
+                    if fetching { ProgressView().controlSize(.small) } else { Text("Fetch") }
+                }
+                .disabled(fetching || baseURL.trimmed.isEmpty)
+                .help("List the provider's available models")
+            }
+            if let fetchError {
+                Text(fetchError).font(.caption2).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
 
-    /// Shows whether a key is on file for the current `keyRef`, and — when it isn't —
-    /// a secure field to paste one. Writing it persists to `.env.local_llm`.
+    private func fetchModels() async {
+        fetching = true; fetchError = nil
+        defer { fetching = false }
+        do {
+            let models = try await BrainModelList.fetch(baseURL: baseURL.trimmed, apiKeyRef: keyRef.trimmed)
+            fetchedModels = models
+            if models.isEmpty { fetchError = "No models returned." }
+        } catch {
+            fetchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            fetchedModels = []
+        }
+    }
+
+    // MARK: Key entry
+
     @ViewBuilder private var keyStatusRow: some View {
         let ref = keyRef.trimmed
-        let _ = keyStatusTick   // re-evaluate after a save
+        let _ = keyStatusTick
         if !ref.isEmpty {
             if Secrets.hasValue(for: ref) {
                 HStack(spacing: 6) {
@@ -134,24 +156,21 @@ struct BackendEditor: View {
         baseURL = p.baseURL
         if model.trimmed.isEmpty { model = p.model }
         keyRef = p.keyRef
+        fetchedModels = []; fetchError = nil
         push()
     }
 
-    /// Write the current fields back to the bound `AgentBackend`.
+    /// Write the current fields back to the bound `AgentBackend` (always API-shaped).
     private func push() {
-        switch kind {
-        case .grok:
-            backend = .grokACP
-        case .api:
-            let ref = keyRef.trimmed.isEmpty ? nil : keyRef.trimmed
-            backend = .openAICompatible(baseURL: baseURL.trimmed, model: model.trimmed, apiKeyRef: ref)
-        }
+        let ref = keyRef.trimmed.isEmpty ? nil : keyRef.trimmed
+        backend = .openAICompatible(baseURL: baseURL.trimmed, model: model.trimmed, apiKeyRef: ref)
     }
 }
 
 /// A convenience preset for an OpenAI-compatible provider — fills base URL, a
-/// sensible default model, and the host-local key name. Shared by every backend
-/// editor so the provider list never drifts.
+/// starter model, and the host-local key name. Shared so the provider list and key
+/// names never drift across editors. The starter model is just a seed; users curate
+/// their own via "Fetch models" / the catalog.
 struct BackendPreset: Identifiable {
     let name: String
     let baseURL: String
@@ -166,7 +185,7 @@ struct BackendPreset: Identifiable {
         BackendPreset(name: "Cerebras",        baseURL: "https://api.cerebras.ai/v1",     model: "gpt-oss-120b",            keyRef: "CEREBRAS_API_KEY"),
         BackendPreset(name: "xAI (Grok API)",  baseURL: "https://api.x.ai/v1",            model: "grok-4.3",                keyRef: "GROK_API_KEY"),
         BackendPreset(name: "Gemini",          baseURL: geminiBaseURL,                    model: "gemini-2.5-flash",        keyRef: "GEMINI_API_KEY"),
-        BackendPreset(name: "Local (LM Studio)", baseURL: "http://localhost:1234/v1",     model: "local-model",             keyRef: ""),
+        BackendPreset(name: "Local (LM Studio)", baseURL: "http://localhost:1234/v1",     model: "",                        keyRef: ""),
     ]
 }
 

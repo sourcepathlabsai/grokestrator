@@ -20,10 +20,11 @@ struct AddConnectionView: View {
     var parent: InstanceItem? = nil
 
     @State private var name = ""
-    /// The brain backing this Connection. `grokACP` (default) launches a grok
-    /// process via `command`/`arguments`; an OpenAI-compatible brain runs in-process
-    /// (no child) and ignores them. Editable later via "Edit Brain…".
-    @State private var backend: AgentBackend = .grokACP
+    /// The brain backing this Connection: grok (default — launches a grok process via
+    /// `command`/`arguments`) or a catalog brain (in-process API; ignores them).
+    /// Editable later via "Edit Brain…".
+    @State private var brain: BrainBinding = .grok
+    @State private var addingProfile = false
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
     @State private var workingDirectory = ""
@@ -60,7 +61,14 @@ struct AddConnectionView: View {
                 }
 
                 Section {
-                    BackendEditor(backend: $backend)
+                    Picker("Brain", selection: brainSelection) {
+                        Text("grok").tag(BrainSelection.grok)
+                        ForEach(model.brainCatalog.profiles) { p in
+                            Text(p.name).tag(BrainSelection.profile(p.id))
+                        }
+                    }
+                    Button { addingProfile = true } label: { Label("Add Brain to Catalog…", systemImage: "plus") }
+                        .buttonStyle(.borderless).font(.caption)
                 } header: {
                     Text("Brain").font(.caption).foregroundStyle(.secondary)
                 }
@@ -135,6 +143,7 @@ struct AddConnectionView: View {
         } message: { _ in
             Text("You can bring back its config + transcript, or keep it archived and create a new one. The archived entry will be renamed so the two are easy to tell apart.")
         }
+        .sheet(isPresented: $addingProfile) { BrainProfileEditorView(model: model) }
     }
 
     // MARK: - Validation
@@ -149,21 +158,29 @@ struct AddConnectionView: View {
         model.activeConnection(named: finalName)
     }
 
-    /// Whether the chosen brain launches grok (needs a `command`) vs. an in-process
-    /// API brain (command/arguments are unused).
-    private var isGrok: Bool { if case .grokACP = backend { return true }; return false }
+    /// A grok brain launches a process (needs `command`); a catalog brain runs
+    /// in-process and ignores command/arguments.
+    private var isGrok: Bool { if case .grok = brain { return true }; return false }
 
-    /// An OpenAI-compatible brain needs a base URL and a model; grok needs neither.
-    private var backendIsValid: Bool {
-        if case .openAICompatible(let url, let model, _) = backend {
-            return !url.trimmed.isEmpty && !model.trimmed.isEmpty
-        }
-        return true
+    /// Picker selection mapped to/from `brain` (only grok or a catalog profile are
+    /// selectable at creation; dynamic/edit comes later via "Edit Brain…").
+    private enum BrainSelection: Hashable { case grok, profile(UUID) }
+    private var brainSelection: Binding<BrainSelection> {
+        Binding(
+            get: { if case .profile(let id) = brain { return .profile(id) }; return .grok },
+            set: { sel in
+                switch sel {
+                case .grok: brain = .grok
+                case .profile(let id): brain = .profile(id)
+                }
+            }
+        )
     }
 
     private var isAddDisabled: Bool {
         if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
-        if !backendIsValid { return true }
+        // A catalog brain must reference a profile that still exists.
+        if case .profile(let id) = brain, model.brainCatalog.profile(id) == nil { return true }
         if activeCollision != nil { return true }
         if !workingDirectoryIsValid { return true }
         return false
@@ -226,7 +243,7 @@ struct AddConnectionView: View {
         let args = argumentsText.split(separator: " ").map(String.init)
         model.addRealConnection(name: finalName, command: command, arguments: args,
                                 workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
-                                parentID: parent?.id, brain: .pinned(backend))
+                                parentID: parent?.id, brain: brain)
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not
