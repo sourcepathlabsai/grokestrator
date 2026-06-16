@@ -49,6 +49,13 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// See `design/11-orchestration-platform.md` and `grok-stdio-system-prompt`.
     public var rolePrompt: String?
 
+    /// Which LLM ("brain") runs this Node, and whether it's hard-wired or
+    /// dynamically routed per task. Default `.pinned(.grokACP)` — the existing grok
+    /// path via `command`/`arguments`, so nothing regresses. See
+    /// `design/12-model-agnostic-runtime.md`. (Phase A: config only; the runtime
+    /// still always launches grok until later phases add other backends.)
+    public var brain: BrainBinding
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -68,6 +75,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         role: NodeRole = .agent,
         parentID: UUID? = nil,
         rolePrompt: String? = nil,
+        brain: BrainBinding = .pinned(.grokACP),
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -85,6 +93,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.role = role
         self.parentID = parentID
         self.rolePrompt = rolePrompt
+        self.brain = brain
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -95,7 +104,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     // still loads — `init(from:)` defaults the new fields.
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
-             autoRestart, shared, archived, role, parentID, rolePrompt,
+             autoRestart, shared, archived, role, parentID, rolePrompt, brain,
              status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
@@ -112,6 +121,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.role = try c.decodeIfPresent(NodeRole.self, forKey: .role) ?? .agent
         self.parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
         self.rolePrompt = try c.decodeIfPresent(String.self, forKey: .rolePrompt)
+        self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .pinned(.grokACP)
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)
@@ -126,6 +136,29 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
 public enum NodeRole: String, Codable, Hashable, Sendable, CaseIterable {
     case agent
     case orchestrator
+}
+
+/// Which LLM runtime ("brain") backs a Node. `grokACP` (the default) launches grok
+/// via the Connection's own `command`/`arguments`; the others are declared now and
+/// implemented in later phases. See `design/12-model-agnostic-runtime.md`.
+public enum AgentBackend: Codable, Hashable, Sendable {
+    case grokACP                                                    // uses command/arguments
+    case openAICompatible(baseURL: String, model: String, apiKeyRef: String?)
+    case gemini(model: String, apiKeyRef: String?)
+    case onboard(modelPath: String)
+}
+
+/// An abstract capability tier the orchestrator reasons in (not a model string). A
+/// host-level tier map resolves each to a concrete `AgentBackend`.
+public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
+    case fast, balanced, deep
+}
+
+/// How a Node's brain is chosen. `pinned` hard-wires one backend; `dynamic` lets the
+/// orchestrator route each task to a tier (resolved + clamped to `allowed`).
+public enum BrainBinding: Codable, Hashable, Sendable {
+    case pinned(AgentBackend)
+    case dynamic(defaultTier: Tier, allowed: [Tier])
 }
 
 public enum InstanceStatus: String, Codable, Hashable, Sendable, CaseIterable {
