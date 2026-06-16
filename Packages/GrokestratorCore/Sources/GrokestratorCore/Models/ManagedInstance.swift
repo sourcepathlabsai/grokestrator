@@ -42,6 +42,13 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// chats" rule (see `connection-semantics`) still holds; nothing is nested.
     public var parentID: UUID?
 
+    /// The Node's role/system prompt — what makes it behave as Observe / Orient /
+    /// Decide / Act, etc. grok's `agent stdio` ignores `--system-prompt-override`
+    /// and friends (verified), so this is injected into the prompt stream as a
+    /// one-time preamble on the session's first turn. `nil`/empty ⇒ no role prompt.
+    /// See `design/11-orchestration-platform.md` and `grok-stdio-system-prompt`.
+    public var rolePrompt: String?
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -60,6 +67,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         archived: Bool = false,
         role: NodeRole = .agent,
         parentID: UUID? = nil,
+        rolePrompt: String? = nil,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -76,6 +84,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.archived = archived
         self.role = role
         self.parentID = parentID
+        self.rolePrompt = rolePrompt
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -86,7 +95,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     // still loads — `init(from:)` defaults the new fields.
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
-             autoRestart, shared, archived, role, parentID,
+             autoRestart, shared, archived, role, parentID, rolePrompt,
              status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
@@ -102,6 +111,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         self.role = try c.decodeIfPresent(NodeRole.self, forKey: .role) ?? .agent
         self.parentID = try c.decodeIfPresent(UUID.self, forKey: .parentID)
+        self.rolePrompt = try c.decodeIfPresent(String.self, forKey: .rolePrompt)
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)

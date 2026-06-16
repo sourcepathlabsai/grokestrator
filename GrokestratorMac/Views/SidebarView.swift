@@ -19,6 +19,8 @@ struct SidebarView: View {
     @State private var collapsedNodes: Set<UUID> = []
     /// The Connection we're adding a child agent under (nil ⇒ not adding).
     @State private var addingChildFor: InstanceItem?
+    /// The Connection whose role/system prompt we're editing (nil ⇒ not editing).
+    @State private var editingRoleFor: InstanceItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,6 +60,7 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
         .sheet(item: $addingChildFor) { parent in AddConnectionView(model: model, parent: parent) }
+        .sheet(item: $editingRoleFor) { item in EditRoleView(model: model, item: item) }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
@@ -157,6 +160,7 @@ struct SidebarView: View {
         // — remote instances (and their tree) are managed by their own server.
         if instance.serverID == nil {
             Divider()
+            Button("Edit Role…") { editingRoleFor = instance }
             // Create a child agent under this Connection — promotes it to
             // orchestrator automatically (see GrokestratorModel.addRealConnection).
             Button("Add Child Agent…") { addingChildFor = instance }
