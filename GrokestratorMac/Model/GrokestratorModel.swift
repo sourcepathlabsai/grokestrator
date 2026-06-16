@@ -90,6 +90,9 @@ final class GrokestratorModel {
         self.serverEnabled = UserDefaults.standard.bool(forKey: Self.serverEnabledKey)
         let storedPort = UserDefaults.standard.integer(forKey: Self.serverPortKey)
         self.serverPort = storedPort == 0 ? 7847 : UInt16(storedPort)
+        // First-run: scaffold the host-local secrets file so it exists (with a
+        // commented template) and the in-app brain editors can write keys into it.
+        Secrets.ensureTemplateExists()
         // Start the host-local Orchestration MCP server (loopback). Runs
         // regardless of the remote-serving toggle so launched Nodes can delegate.
         let orchestrationMCP = self.orchestrationMCP
