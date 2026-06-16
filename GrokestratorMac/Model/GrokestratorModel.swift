@@ -57,6 +57,11 @@ final class GrokestratorModel {
     /// Persistent remote-server configs + their live connection state.
     var remoteLinks: [RemoteServerLink]
 
+    /// Host-local `Tier → AgentBackend` map (machine config; gitignored). A
+    /// `dynamic` Node resolves its tier through this when it (re)starts. Edited in
+    /// Settings ▸ Brains. See `design/12-model-agnostic-runtime.md` Phase F.
+    var hostTierMap: HostTierMap = ConnectionStore.loadTierMap()
+
     // MARK: - Server settings (mirrored to UserDefaults)
 
     private static let serverEnabledKey = "grokestrator.server.enabled.v1"
@@ -303,6 +308,91 @@ final class GrokestratorModel {
         Task {
             await manager.setRolePrompt(for: id, value)
             await server.broadcastInstancesIfChanged()
+        }
+    }
+
+    /// The brain binding currently configured for a local Connection (what backs it
+    /// — grok, an OpenAI-compatible model, etc.). Defaults to `.pinned(.grokACP)`
+    /// for anything we can't resolve (e.g. a remote item). Read by `EditBrainView`.
+    func binding(for item: InstanceItem) -> BrainBinding {
+        connections.first(where: { $0.id == item.id })?.brain ?? .pinned(.grokACP)
+    }
+
+    /// Swap a local Connection's brain (the LLM that backs it). Persists the new
+    /// binding, then restarts the Node so the next turn runs on the new backend —
+    /// `restartInstance` drops the cached session and rebinds; the transcript
+    /// reloads from history (see `design/12-model-agnostic-runtime.md`, Phase F).
+    /// No-op for remote items or a no-change swap.
+    func setBrain(_ brain: BrainBinding, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }),
+              connections[idx].brain != brain else { return }
+        connections[idx].brain = brain
+        persistAndRestartIfLive(idx: idx, item: item)
+    }
+
+    /// The tool/capability policy currently configured for a local Connection — what
+    /// its brain is allowed to *do* (read / write / execute, and any allowlist).
+    /// Defaults to `.unrestricted`. Read by `EditToolPolicyView`.
+    func toolPolicy(for item: InstanceItem) -> ToolPolicy {
+        connections.first(where: { $0.id == item.id })?.toolPolicy ?? .unrestricted
+    }
+
+    /// Set a local Connection's tool/capability policy (the app-owned guardrail
+    /// layer — design/11, design/12 Phase C). Persists it and restarts a running
+    /// Node so the new policy takes effect: the API tool loop captures the policy at
+    /// session creation, so a live swap needs a fresh session. No-op for remote
+    /// items or a no-change update.
+    func setToolPolicy(_ policy: ToolPolicy, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }),
+              connections[idx].toolPolicy != policy else { return }
+        connections[idx].toolPolicy = policy
+        persistAndRestartIfLive(idx: idx, item: item)
+    }
+
+    /// Save the connection list and, if the Node is currently live, restart it so a
+    /// config change (brain / tool policy) takes effect immediately — the transcript
+    /// reloads from history. A stopped Node picks the change up on its next launch.
+    /// Shared tail of `setBrain` / `setToolPolicy`.
+    private func persistAndRestartIfLive(idx: Int, item: InstanceItem) {
+        ConnectionStore.save(connections)
+        if item.status == .running || item.status == .starting {
+            restartLive(config: connections[idx], item: item)
+        }
+    }
+
+    /// Restart a currently-live Node against `config` and reflect status on its item.
+    /// The transcript reloads from history; the live UI re-binds (see
+    /// `GrokBuildManager.restartInstance`). Caller has already persisted `config`.
+    private func restartLive(config: ManagedConnection, item: InstanceItem) {
+        let manager = self.manager
+        let server = self.server
+        item.status = .starting
+        Task {
+            do {
+                let updated = try await manager.restartInstance(config)
+                item.status = updated.status
+            } catch {
+                item.status = .errored
+            }
+            await server.broadcastInstancesIfChanged()
+        }
+    }
+
+    /// Replace the host tier map (machine config). Persists it, then restarts any
+    /// **running dynamic** Node so its newly-resolved backend takes effect now —
+    /// pinned Nodes are unaffected, and stopped Nodes pick it up on next launch.
+    /// Edited in Settings ▸ Brains (see `design/12-model-agnostic-runtime.md`).
+    func setHostTierMap(_ map: HostTierMap) {
+        guard map != hostTierMap else { return }
+        hostTierMap = map
+        ConnectionStore.saveTierMap(map)
+        for item in instances where item.serverID == nil {
+            guard let conn = connections.first(where: { $0.id == item.id }),
+                  case .dynamic = conn.brain,
+                  item.status == .running || item.status == .starting else { continue }
+            restartLive(config: conn, item: item)
         }
     }
 
