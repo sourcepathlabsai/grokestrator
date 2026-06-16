@@ -187,6 +187,16 @@ public actor GrokBuildManager {
             throw GrokBuildError.instanceManagementError("Failed to obtain client for instance \(instanceID)")
         }
 
+        // Let a model-agnostic (API) brain orchestrate too: install the `delegate`
+        // handler, scoped to *this* Node's own children (grok Nodes get `delegate`
+        // via the Orchestration MCP server instead). Same router as everything else.
+        if let api = client as? OpenAICompatSession {
+            await api.setDelegateHandler { [weak self] child, task in
+                guard let self else { return "orchestrator unavailable" }
+                return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+            }
+        }
+
         // New layout (memory: `connection-semantics`):
         //   …/Grokestrator/connections/<id>/history.json
         // ConnectionStore.historyURL migrates the legacy file if present.

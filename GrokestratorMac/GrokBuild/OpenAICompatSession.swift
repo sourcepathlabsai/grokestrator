@@ -22,6 +22,10 @@ public actor OpenAICompatSession: AgentSession {
     private let cwd: String
     private let policy: ToolPolicy
     private var messages: [[String: Any]] = []
+    /// When set, this Node can orchestrate: the `delegate` tool routes here (the
+    /// manager installs a handler scoped to this Node's own children). nil ⇒ no
+    /// `delegate` tool is offered.
+    private var delegateHandler: (@Sendable (_ child: String, _ task: String) async -> String)?
     private var sessionId: String?
     private var usage = SessionUsage.empty
     private var cancelled = false
@@ -38,6 +42,12 @@ public actor OpenAICompatSession: AgentSession {
         self.policy = policy
     }
 
+    /// Install the orchestration handler (manager-provided, scoped to this Node's
+    /// children). Enables the `delegate` tool.
+    public func setDelegateHandler(_ handler: @escaping @Sendable (_ child: String, _ task: String) async -> String) {
+        self.delegateHandler = handler
+    }
+
     /// Whether the policy permits a tool: the capability must cover its action class,
     /// and the optional allowlist must include it. The model is only *offered* tools
     /// that pass this, and `executeTool` re-checks (defense in depth).
@@ -47,6 +57,7 @@ public actor OpenAICompatSession: AgentSession {
         case "read_file", "list_dir": capOK = true
         case "write_file":            capOK = policy.capability != .readOnly
         case "run_command":           capOK = policy.capability == .execute
+        case "delegate":              capOK = delegateHandler != nil   // orchestration, not a file/shell tier
         default:                      capOK = false
         }
         let allowOK = policy.allowed?.contains(name) ?? true
@@ -204,6 +215,9 @@ public actor OpenAICompatSession: AgentSession {
                    ["path": ["type": "string"], "content": ["type": "string"]], ["path", "content"]),
         toolSchema("run_command", "Run a shell command in the working directory and return combined stdout/stderr.",
                    ["command": ["type": "string"]], ["command"]),
+        toolSchema("delegate", "Delegate a sub-task to one of your child agents and return its result. "
+                   + "`child` is the child agent's name; `task` is what to ask it.",
+                   ["child": ["type": "string"], "task": ["type": "string"]], ["child", "task"]),
     ] }
 
     private static func toolSchema(_ name: String, _ desc: String,
@@ -243,6 +257,11 @@ public actor OpenAICompatSession: AgentSession {
         case "run_command":
             guard let command = args["command"] as? String else { return ("error: missing command", true) }
             return await Self.runCommand(command, cwd: cwd, cap: outputCap)
+        case "delegate":
+            guard let handler = delegateHandler else { return ("delegation not available for this node", true) }
+            let child = args["child"] as? String ?? ""
+            let task = args["task"] as? String ?? ""
+            return (await handler(child, task), false)
         default:
             return ("error: unknown tool \(name)", true)
         }
