@@ -177,6 +177,61 @@ The **tier map** (`Tier → AgentBackend`) is host/server-level config, not per-
 so all dynamic Nodes share one notion of what `fast`/`deep` mean. Secrets
 (`apiKeyRef`) reference the Keychain, never inline in `connections.json`.
 
+## Context management (working context vs display)
+
+A stateless online LLM has no server-side memory: continuity is the harness re-sending
+the accumulated history each call. With grok we don't own this (grok's process holds
+session state and self-compacts); with any non-grok backend **we become the harness**,
+so we must keep the resent context small without losing the gist.
+
+The architecture that makes this **invisible to the user** is two separate contexts:
+
+- **Display transcript** — what the user sees. Always complete, persisted on disk,
+  never lossy. The customer manages nothing and never hits a "context full" wall.
+- **Working context** — what we actually send the model. Aggressively, automatically
+  optimized. Compaction touches *only* this; the human-facing record is untouched.
+
+A budget-driven `ContextManager` targets ≤ a fraction of *that backend's* window and
+applies a ladder, escalating only as far as needed:
+
+1. **Lossless first.** Prime scaffolding once (not per turn); **externalize large tool
+   outputs** (keep a reference + head/tail snippet, full output on disk, re-read on
+   demand — the biggest single win for coding); diffs not whole files; dedup repeated
+   reads; coalesce tool-call bursts; drop chain-of-thought from the resend (keep
+   conclusions).
+2. **Windowing.** Pinned head (role, goal, constraints, decisions, open TODOs) +
+   verbatim recent tail + compactable middle. Maintain a dense **state object**
+   (goal / decisions / facts / files touched / plan / open questions) rather than
+   replaying turns.
+3. **Summarize the middle** with a **cheap (`fast`-tier) model** — compaction is itself
+   a delegated job; recursive/hierarchical as it grows.
+4. **Retrieval** for very long sessions: store everything, embed the current task, pull
+   back only relevant snippets (local `nomic-embed` via LM Studio = zero-cost
+   embeddings). Working context = anchors + retrieved + recent tail; scales unbounded.
+
+**Orchestration is itself compaction:** each single-purpose child works in its own
+small context and the `delegate` router returns only its distilled result, so the
+orchestrator never holds children's internal turns.
+
+**Gist safeguards:** a never-compacted **session contract** (goal/constraints/decisions/
+plan); compaction prompts that must preserve decisions, facts, state changes, open
+questions, and user "remember this" notes; an **oracle check** that the summary still
+names the key entities/decisions (redo if it dropped one); pin-on-demand.
+
+### When does this rise to the top of the list?
+
+It is **deliberately low while everything is grok** — grok self-manages context, which
+is why we've shipped this far without it. It **rises to the top the moment a non-grok
+brain does real, multi-turn, or tool-heavy work** (i.e. as soon as Phase B is used for
+more than toy turns), because we then own the resend and small windows fill fast.
+Promotion signals: a backend with a small window in the tier map; large tool outputs
+(a single file read can blow a 3B model's window); length-rejected/truncated requests;
+rising cost/latency from re-sending; and **dynamic tier routing (Phase D)**, where the
+working context must fit the *smallest* allowed model. Practically: the **lossless
+subset (#1) + windowing (#2) + pinned contract ride into Phase B** as part of "usable,"
+while **summarization (#3) and retrieval (#4) land as Phase B′** once sessions actually
+run long.
+
 ## Phased roadmap
 
 Each phase ships value and de-risks the next; stop after any phase with a strictly
@@ -192,7 +247,13 @@ more capable tool.
   compat endpoint all speak**, so one adapter unlocks most of "any LLM." Emit
   `ACPEvent`s; execute a minimal tool set (`read_file`/`write_file`/`run_command`)
   through the app, gated by a basic policy. Per-Node config picks backend + model +
-  key. A Node can now be a Groq/Cerebras/local model.
+  key. A Node can now be a Groq/Cerebras/local model. **Includes the lossless context
+  subset** (externalized tool outputs, windowing, pinned contract) — needed for B to be
+  usable on small-window models.
+- **Phase B′ — full context management.** The budget-driven `ContextManager`:
+  cheap-tier summarization + local-embedding retrieval + the gist oracle, behind the
+  display/working split (see Context management). Triggered once sessions run long;
+  raises in priority with small-window tiers and Phase D.
 - **Phase C — app-owned tool registry + capability policy.** Formalize the registry,
   per-Node grants, and per-action gating (the `11` guardrails). Bridge MCP tools
   (including `delegate`) into it so API-model Nodes orchestrate too.
