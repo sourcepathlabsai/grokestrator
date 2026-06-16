@@ -20,6 +20,11 @@ struct AddConnectionView: View {
     var parent: InstanceItem? = nil
 
     @State private var name = ""
+    /// The brain backing this Connection: grok (default — launches a grok process via
+    /// `command`/`arguments`) or a catalog brain (in-process API; ignores them).
+    /// Editable later via "Edit Brain…".
+    @State private var brain: BrainBinding = .grok
+    @State private var addingProfile = false
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
     @State private var workingDirectory = ""
@@ -55,10 +60,25 @@ struct AddConnectionView: View {
                     }
                 }
 
-                TextField("Command", text: $command)
-                    .font(.system(.body, design: .monospaced))
-                TextField("Arguments", text: $argumentsText)
-                    .font(.system(.body, design: .monospaced))
+                Section {
+                    Picker("Brain", selection: brainSelection) {
+                        Text("grok").tag(BrainSelection.grok)
+                        ForEach(model.brainCatalog.profiles) { p in
+                            Text(p.name).tag(BrainSelection.profile(p.id))
+                        }
+                    }
+                    Button { addingProfile = true } label: { Label("Add Brain to Catalog…", systemImage: "plus") }
+                        .buttonStyle(.borderless).font(.caption)
+                } header: {
+                    Text("Brain").font(.caption).foregroundStyle(.secondary)
+                }
+
+                if isGrok {
+                    TextField("Command", text: $command)
+                        .font(.system(.body, design: .monospaced))
+                    TextField("Arguments", text: $argumentsText)
+                        .font(.system(.body, design: .monospaced))
+                }
                 LabeledContent("Working directory (optional)") {
                     HStack(spacing: 4) {
                         TextField("", text: $workingDirectory, prompt: Text("optional"))
@@ -82,7 +102,9 @@ struct AddConnectionView: View {
                             .font(.caption).foregroundStyle(.red)
                     }
                 }
-                Text("`grok agent stdio` runs the agent over stdio — the mode this app talks to.")
+                Text(isGrok
+                     ? "`grok agent stdio` runs the agent over stdio — the mode this app talks to."
+                     : "The working directory is this brain's tool sandbox — its file/shell tools run there.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -121,6 +143,7 @@ struct AddConnectionView: View {
         } message: { _ in
             Text("You can bring back its config + transcript, or keep it archived and create a new one. The archived entry will be renamed so the two are easy to tell apart.")
         }
+        .sheet(isPresented: $addingProfile) { BrainProfileEditorView(model: model) }
     }
 
     // MARK: - Validation
@@ -135,8 +158,29 @@ struct AddConnectionView: View {
         model.activeConnection(named: finalName)
     }
 
+    /// A grok brain launches a process (needs `command`); a catalog brain runs
+    /// in-process and ignores command/arguments.
+    private var isGrok: Bool { if case .grok = brain { return true }; return false }
+
+    /// Picker selection mapped to/from `brain` (only grok or a catalog profile are
+    /// selectable at creation; dynamic/edit comes later via "Edit Brain…").
+    private enum BrainSelection: Hashable { case grok, profile(UUID) }
+    private var brainSelection: Binding<BrainSelection> {
+        Binding(
+            get: { if case .profile(let id) = brain { return .profile(id) }; return .grok },
+            set: { sel in
+                switch sel {
+                case .grok: brain = .grok
+                case .profile(let id): brain = .profile(id)
+                }
+            }
+        )
+    }
+
     private var isAddDisabled: Bool {
-        if command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        // A catalog brain must reference a profile that still exists.
+        if case .profile(let id) = brain, model.brainCatalog.profile(id) == nil { return true }
         if activeCollision != nil { return true }
         if !workingDirectoryIsValid { return true }
         return false
@@ -199,7 +243,7 @@ struct AddConnectionView: View {
         let args = argumentsText.split(separator: " ").map(String.init)
         model.addRealConnection(name: finalName, command: command, arguments: args,
                                 workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
-                                parentID: parent?.id)
+                                parentID: parent?.id, brain: brain)
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not

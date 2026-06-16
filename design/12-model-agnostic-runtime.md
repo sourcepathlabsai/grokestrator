@@ -292,6 +292,19 @@ more capable tool.
   `dynamic` binding now resolves its **default tier** through the host map at
   (re)start; per-task tier *selection/escalation* across the allowed set is still
   Phase D.
+- **Brain catalog (the model is config, not code).** Brains are a curated host-local
+  library (`brains.json`): a `BrainProfile {id, name, backend}` — provider + model +
+  key *name* — with **several per service** so a Node/tier picks the model fit for the
+  task. Everything references brains **by id**: `BrainBinding` is now
+  `grok | profile(id) | dynamic`, and the tier map is `Tier → BrainRef` (`grok |
+  profile(id)`). Resolution flows through the catalog (a dangling id ⇒ grok). Models
+  are never hardcoded — the catalog editor (**Settings ▸ Brains**) curates them and a
+  **"Fetch models"** button lists each provider's live `/v1/models`. Presets are just
+  one-click seeds. Keys are entered in-app and written host-locally to `.env.local_llm`
+  (`0600`, gitignored) via a writable `Secrets`; created with a template on first run.
+  Legacy inline-pinned API brains migrate into catalog profiles at load
+  (`BrainBinding.inlineLegacy` → `migrateBrainsIfNeeded`). This catalog is the
+  substrate the tier map + design oracle (`13`) route over.
 
 ## Risks / notes
 

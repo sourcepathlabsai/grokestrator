@@ -116,10 +116,16 @@ struct EditToolPolicyView: View {
     // MARK: Derived
 
     private var brainIsGrok: Bool {
-        if case .pinned(.grokACP) = model.binding(for: item) { return true }
-        // Dynamic bindings currently resolve to grok too (tier routing lands in Phase D).
-        if case .dynamic = model.binding(for: item) { return true }
-        return false
+        switch model.binding(for: item) {
+        case .grok, .inlineLegacy: return true
+        // A dynamic Node whose default tier maps to grok also runs grok today
+        // (tier routing lands in Phase D); a profile-pinned Node runs an API brain.
+        case .dynamic(let defaultTier, _):
+            if case .grok = model.hostTierMap.ref(for: defaultTier) { return true }
+            return false
+        case .profile:
+            return false
+        }
     }
 
     /// Tools selectable at the current capability: the file tools whose tier the

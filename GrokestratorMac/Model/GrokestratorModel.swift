@@ -57,10 +57,14 @@ final class GrokestratorModel {
     /// Persistent remote-server configs + their live connection state.
     var remoteLinks: [RemoteServerLink]
 
-    /// Host-local `Tier → AgentBackend` map (machine config; gitignored). A
-    /// `dynamic` Node resolves its tier through this when it (re)starts. Edited in
+    /// Host-local `Tier → BrainRef` map (machine config; gitignored). A `dynamic`
+    /// Node resolves its tier through this when it (re)starts. Edited in
     /// Settings ▸ Brains. See `design/12-model-agnostic-runtime.md` Phase F.
     var hostTierMap: HostTierMap = ConnectionStore.loadTierMap()
+
+    /// Host-local library of named brains (provider + model + key name). Nodes and
+    /// the tier map reference these by id. Curated in Settings ▸ Brains.
+    var brainCatalog: BrainCatalog = ConnectionStore.loadBrainCatalog()
 
     // MARK: - Server settings (mirrored to UserDefaults)
 
@@ -90,6 +94,9 @@ final class GrokestratorModel {
         self.serverEnabled = UserDefaults.standard.bool(forKey: Self.serverEnabledKey)
         let storedPort = UserDefaults.standard.integer(forKey: Self.serverPortKey)
         self.serverPort = storedPort == 0 ? 7847 : UInt16(storedPort)
+        // First-run: scaffold the host-local secrets file so it exists (with a
+        // commented template) and the in-app brain editors can write keys into it.
+        Secrets.ensureTemplateExists()
         // Start the host-local Orchestration MCP server (loopback). Runs
         // regardless of the remote-serving toggle so launched Nodes can delegate.
         let orchestrationMCP = self.orchestrationMCP
@@ -155,6 +162,11 @@ final class GrokestratorModel {
         }
         if selectedInstanceID == nil { selectedInstanceID = instances.first?.id }
 
+        // Migrate any pre-catalog inline API brains into catalog profiles (so old
+        // configs reference the catalog like everything else). No-op after the
+        // first run that needed it.
+        migrateBrainsIfNeeded()
+
         // Push saved role prompts into the manager so each Node's conversation
         // primes with its role. Race-free: setRolePrompt and conversation(for:)
         // are both serialized on the manager actor, so whichever runs first, the
@@ -208,7 +220,8 @@ final class GrokestratorModel {
 
     func addRealConnection(name: String, command: String, arguments: [String], workingDirectory: String?,
                            autoRestart: Bool = true, shared: Bool = true,
-                           role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil) {
+                           role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil,
+                           brain: BrainBinding = .grok) {
         let config = ManagedConnection(
             name: name,
             command: command,
@@ -218,7 +231,8 @@ final class GrokestratorModel {
             shared: shared,
             role: role,
             parentID: parentID,
-            rolePrompt: rolePrompt
+            rolePrompt: rolePrompt,
+            brain: brain
         )
         connections.append(config)
         ConnectionStore.save(connections)
@@ -311,11 +325,11 @@ final class GrokestratorModel {
         }
     }
 
-    /// The brain binding currently configured for a local Connection (what backs it
-    /// — grok, an OpenAI-compatible model, etc.). Defaults to `.pinned(.grokACP)`
-    /// for anything we can't resolve (e.g. a remote item). Read by `EditBrainView`.
+    /// The brain binding currently configured for a local Connection (grok, a
+    /// catalog brain, or dynamic). Defaults to `.grok` for anything we can't resolve
+    /// (e.g. a remote item). Read by `EditBrainView`.
     func binding(for item: InstanceItem) -> BrainBinding {
-        connections.first(where: { $0.id == item.id })?.brain ?? .pinned(.grokACP)
+        connections.first(where: { $0.id == item.id })?.brain ?? .grok
     }
 
     /// Swap a local Connection's brain (the LLM that backs it). Persists the new
@@ -329,6 +343,102 @@ final class GrokestratorModel {
               connections[idx].brain != brain else { return }
         connections[idx].brain = brain
         persistAndRestartIfLive(idx: idx, item: item)
+    }
+
+    // MARK: - Brain catalog (named brains the user curates)
+
+    /// Add a profile to the catalog and persist. Returns its id.
+    @discardableResult
+    func addBrainProfile(name: String, backend: AgentBackend) -> UUID {
+        let profile = BrainProfile(name: name, backend: backend)
+        brainCatalog.profiles.append(profile)
+        ConnectionStore.saveBrainCatalog(brainCatalog)
+        return profile.id
+    }
+
+    /// Update a catalog profile in place, persist, and restart any **running** Node
+    /// whose resolved brain references it so the change takes effect now.
+    func updateBrainProfile(_ profile: BrainProfile) {
+        guard let idx = brainCatalog.profiles.firstIndex(where: { $0.id == profile.id }),
+              brainCatalog.profiles[idx] != profile else { return }
+        brainCatalog.profiles[idx] = profile
+        ConnectionStore.saveBrainCatalog(brainCatalog)
+        restartNodesReferencing(profileID: profile.id)
+    }
+
+    /// Remove a catalog profile. Nodes/tiers referencing it become dangling and
+    /// resolve to grok until repointed; running referencing Nodes are restarted.
+    func removeBrainProfile(_ id: UUID) {
+        guard brainCatalog.profiles.contains(where: { $0.id == id }) else { return }
+        brainCatalog.profiles.removeAll { $0.id == id }
+        ConnectionStore.saveBrainCatalog(brainCatalog)
+        restartNodesReferencing(profileID: id)
+    }
+
+    /// Restart every running local Node whose binding resolves through `profileID`
+    /// (a direct `.profile` pin, or a `.dynamic` Node whose default tier maps to it).
+    private func restartNodesReferencing(profileID: UUID) {
+        for item in instances where item.serverID == nil {
+            guard let conn = connections.first(where: { $0.id == item.id }),
+                  item.status == .running || item.status == .starting,
+                  bindingReferences(conn.brain, profileID: profileID) else { continue }
+            restartLive(config: conn, item: item)
+        }
+    }
+
+    private func bindingReferences(_ binding: BrainBinding, profileID: UUID) -> Bool {
+        switch binding {
+        case .profile(let id):
+            return id == profileID
+        case .dynamic(let defaultTier, _):
+            if case .profile(let id) = hostTierMap.ref(for: defaultTier) { return id == profileID }
+            return false
+        case .grok, .inlineLegacy:
+            return false
+        }
+    }
+
+    /// A readable default name for a backend, e.g. "Cerebras · gpt-oss-120b".
+    /// Used by the catalog UI and by migration of legacy inline brains.
+    static func defaultName(for backend: AgentBackend) -> String {
+        switch backend {
+        case .grokACP: return "grok"
+        case .onboard(let path): return "Onboard · \((path as NSString).lastPathComponent)"
+        case .gemini(let model, _): return "Gemini · \(model)"
+        case .openAICompatible(let baseURL, let model, _):
+            let provider = providerName(forBaseURL: baseURL)
+            return model.isEmpty ? provider : "\(provider) · \(model)"
+        }
+    }
+
+    /// Best-effort provider label from a base URL host (Groq / Cerebras / xAI / …).
+    private static func providerName(forBaseURL baseURL: String) -> String {
+        let host = URL(string: baseURL)?.host?.lowercased() ?? baseURL.lowercased()
+        if host.contains("groq") { return "Groq" }
+        if host.contains("cerebras") { return "Cerebras" }
+        if host.contains("x.ai") { return "xAI" }
+        if host.contains("generativelanguage") || host.contains("googleapis") { return "Gemini" }
+        if host.contains("openai.com") { return "OpenAI" }
+        if host.contains("localhost") || host.contains("127.0.0.1") { return "Local" }
+        return host.isEmpty ? "API" : host
+    }
+
+    /// One-time migration: rewrite any `.inlineLegacy(backend)` brain (from a
+    /// pre-catalog config) into a find-or-created catalog profile, so every binding
+    /// references the catalog. Persists catalog + connections only if something
+    /// changed. Safe to call on every launch.
+    private func migrateBrainsIfNeeded() {
+        var connectionsChanged = false
+        for i in connections.indices {
+            guard case .inlineLegacy(let backend) = connections[i].brain else { continue }
+            let id = brainCatalog.findOrCreate(backend: backend, name: Self.defaultName(for: backend))
+            connections[i].brain = .profile(id)
+            connectionsChanged = true
+        }
+        if connectionsChanged {
+            ConnectionStore.saveBrainCatalog(brainCatalog)
+            ConnectionStore.save(connections)
+        }
     }
 
     /// The tool/capability policy currently configured for a local Connection — what

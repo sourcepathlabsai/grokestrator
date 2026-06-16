@@ -20,10 +20,12 @@ public actor GrokBuildServer {
     /// `.openAICompatible` opens an in-process API session (no child process).
     public func startInstance(_ config: ManagedInstance) async throws -> (any AgentSession, ManagedInstance) {
         let session: any AgentSession
-        // Resolve the concrete backend through the host tier map: a pinned binding is
-        // its own backend; a dynamic one resolves its default tier (per-task routing
-        // is Phase D). Read fresh so tier-map edits apply on the next (re)start.
-        let backend = ConnectionStore.loadTierMap().backend(for: config.brain)
+        // Resolve the concrete backend through the brain catalog + host tier map:
+        // grok → grok; a profile binding → its catalog backend; a dynamic binding →
+        // its default tier's ref (per-task routing is Phase D). Read fresh so catalog
+        // / tier-map edits apply on the next (re)start.
+        let backend = ConnectionStore.loadTierMap().backend(for: config.brain,
+                                                            catalog: ConnectionStore.loadBrainCatalog())
         switch backend {
         case .grokACP:
             let handle = try await launcher.launch(config)

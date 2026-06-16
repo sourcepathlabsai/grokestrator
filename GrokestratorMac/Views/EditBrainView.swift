@@ -1,27 +1,24 @@
 import SwiftUI
 import GrokestratorCore
 
-/// Sheet for editing a Node's **brain binding** — which LLM backs it, and whether
-/// that's hard-wired (`pinned`) or routed per task (`dynamic`). Saving swaps the
-/// brain and restarts the Node so the next turn runs on the new backend; the
-/// transcript reloads from history (see `model.setBrain`,
-/// `design/12-model-agnostic-runtime.md`, Phase F).
-///
-/// The pinned backend is edited via the shared `BackendEditor` (grok or any
-/// OpenAI-compatible endpoint). A dynamic binding picks a default tier + the tiers
-/// it may use; the host tier map (Settings ▸ Brains) resolves those to backends.
+/// Sheet for setting a Node's **brain** — grok (its own command), a **catalog
+/// brain** (a named provider+model you curate in Settings ▸ Brains), or **dynamic**
+/// (tier-routed, resolved through the host tier map). Saving restarts the Node so
+/// the next turn runs on the new brain; the transcript reloads from history.
+/// See `model.setBrain`, `design/12-model-agnostic-runtime.md` (Phase F).
 struct EditBrainView: View {
     @Bindable var model: GrokestratorModel
     let item: InstanceItem
     @Environment(\.dismiss) private var dismiss
 
-    private enum Mode: String, CaseIterable, Identifiable { case pinned, dynamic; var id: String { rawValue } }
+    private enum Mode: String, CaseIterable, Identifiable { case grok, brain, dynamic; var id: String { rawValue } }
 
-    @State private var mode: Mode = .pinned
-    @State private var pinnedBackend: AgentBackend = .grokACP
+    @State private var mode: Mode = .grok
+    @State private var profileID: UUID?
     @State private var defaultTier: Tier = .balanced
     @State private var allowed: Set<Tier> = [.fast, .balanced, .deep]
     @State private var loaded = false
+    @State private var addingProfile = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,16 +30,17 @@ struct EditBrainView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 14) {
-                Picker("Binding", selection: $mode) {
-                    Text("Pinned").tag(Mode.pinned)
+                Picker("Brain", selection: $mode) {
+                    Text("grok").tag(Mode.grok)
+                    Text("Catalog brain").tag(Mode.brain)
                     Text("Dynamic").tag(Mode.dynamic)
                 }
                 .pickerStyle(.segmented)
 
-                if mode == .pinned {
-                    BackendEditor(backend: $pinnedBackend)
-                } else {
-                    dynamicEditor
+                switch mode {
+                case .grok:    grokInfo
+                case .brain:   catalogPicker
+                case .dynamic: dynamicEditor
                 }
             }
             .padding()
@@ -55,23 +53,54 @@ struct EditBrainView: View {
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    model.setBrain(buildBinding(), for: item)
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(!isValid)
+                Button("Save") { model.setBrain(buildBinding(), for: item); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isValid)
             }
             .padding()
         }
         .frame(width: 560)
         .onAppear { loadOnce() }
+        .sheet(isPresented: $addingProfile) { BrainProfileEditorView(model: model) }
     }
 
     private var isRunning: Bool { item.status == .running || item.status == .starting }
 
-    // MARK: Dynamic
+    // MARK: Sections
+
+    @ViewBuilder private var grokInfo: some View {
+        Text("Runs grok via this Node's command — the default. No API key needed.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder private var catalogPicker: some View {
+        let profiles = model.brainCatalog.profiles
+        if profiles.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("No catalog brains yet. Create one (Groq, Cerebras, xAI, Gemini, local…) and point this Node at it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { addingProfile = true } label: { Label("Add Brain…", systemImage: "plus") }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Brain").frame(width: 60, alignment: .leading).foregroundStyle(.secondary)
+                    Picker("", selection: $profileID) {
+                        ForEach(profiles) { p in Text(p.name).tag(Optional(p.id)) }
+                    }
+                    .labelsHidden()
+                    Button { addingProfile = true } label: { Image(systemName: "plus") }
+                        .help("Add a new brain to the catalog")
+                }
+                if let id = profileID, let p = model.brainCatalog.profile(id) {
+                    Text(summary(p.backend)).font(.caption2).foregroundStyle(.tertiary)
+                }
+                Text("Manage brains and models in Settings ▸ Brains.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
 
     @ViewBuilder private var dynamicEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -80,8 +109,7 @@ struct EditBrainView: View {
                 Picker("", selection: $defaultTier) {
                     ForEach(Tier.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                .pickerStyle(.segmented).labelsHidden()
             }
             HStack(alignment: .top) {
                 Text("Allowed").frame(width: 90, alignment: .leading).foregroundStyle(.secondary)
@@ -91,7 +119,6 @@ struct EditBrainView: View {
                             get: { allowed.contains(tier) },
                             set: { on in
                                 if on { allowed.insert(tier) } else { allowed.remove(tier) }
-                                // The default tier must stay within the allowed set.
                                 if !allowed.contains(defaultTier), let first = orderedAllowed.first {
                                     defaultTier = first
                                 }
@@ -101,47 +128,48 @@ struct EditBrainView: View {
                     }
                 }
             }
-            Text("The orchestrator routes each task to a tier, clamped to the allowed set, resolved via the host tier map (Settings ▸ Brains). Per-task routing activates with Phase D; until then a dynamic Node runs on its default tier's backend.")
+            Text("The orchestrator routes each task to a tier, clamped to the allowed set, resolved via the host tier map (Settings ▸ Brains). Per-task routing activates with Phase D; until then a dynamic Node uses its default tier.")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 
     private var orderedAllowed: [Tier] { Tier.allCases.filter { allowed.contains($0) } }
 
+    private func summary(_ backend: AgentBackend) -> String {
+        if case .openAICompatible(let url, let model, _) = backend { return "\(model) @ \(url)" }
+        return GrokestratorModel.defaultName(for: backend)
+    }
+
     // MARK: Validation + build
 
     private var isValid: Bool {
         switch mode {
-        case .pinned:
-            if case .openAICompatible(let url, let m, _) = pinnedBackend {
-                return !url.trimmed.isEmpty && !m.trimmed.isEmpty
-            }
-            return true
-        case .dynamic:
-            return !allowed.isEmpty && allowed.contains(defaultTier)
+        case .grok:    return true
+        case .brain:   return profileID != nil && model.brainCatalog.profile(profileID!) != nil
+        case .dynamic: return !allowed.isEmpty && allowed.contains(defaultTier)
         }
     }
 
     private func buildBinding() -> BrainBinding {
         switch mode {
-        case .pinned:  return .pinned(pinnedBackend)
+        case .grok:    return .grok
+        case .brain:   return profileID.map { BrainBinding.profile($0) } ?? .grok
         case .dynamic: return .dynamic(defaultTier: defaultTier, allowed: orderedAllowed)
         }
     }
-
-    // MARK: Load
 
     private func loadOnce() {
         guard !loaded else { return }
         loaded = true
         switch model.binding(for: item) {
-        case .pinned(let backend):
-            mode = .pinned
-            pinnedBackend = backend
+        case .grok, .inlineLegacy:
+            mode = .grok
+        case .profile(let id):
+            mode = .brain; profileID = id
         case .dynamic(let dft, let allow):
-            mode = .dynamic
-            defaultTier = dft
-            allowed = Set(allow.isEmpty ? [dft] : allow)
+            mode = .dynamic; defaultTier = dft; allowed = Set(allow.isEmpty ? [dft] : allow)
         }
+        // Default the catalog picker to the first brain when entering brain mode fresh.
+        if profileID == nil { profileID = model.brainCatalog.profiles.first?.id }
     }
 }
