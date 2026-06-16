@@ -220,6 +220,12 @@ final class GrokestratorModel {
         // so a turn driven from a remote device streams onto the host too.
         item.conversation.startSubscription()
 
+        // Creating a child agent promotes its parent to orchestrator, so the tree
+        // forms in one step (see `setParent`).
+        if let parentID, let parent = instances.first(where: { $0.id == parentID }) {
+            setRole(.orchestrator, for: parent)
+        }
+
         Task { [weak self] in await self?.launchConnection(config, startingItem: item) }
     }
 
@@ -252,6 +258,12 @@ final class GrokestratorModel {
         ConnectionStore.save(connections)
         item.parentID = parentID
         syncTreeMetadataToRemotes(id: item.id, role: item.role, parentID: parentID)
+        // Gaining a child makes the parent an orchestrator — so the old two-step
+        // (mark orchestrator, then assign parent) collapses into one and never
+        // strands a child under a plain agent.
+        if let parentID, let parent = instances.first(where: { $0.id == parentID }) {
+            setRole(.orchestrator, for: parent)
+        }
     }
 
     private func syncTreeMetadataToRemotes(id: UUID, role: NodeRole, parentID: UUID?) {

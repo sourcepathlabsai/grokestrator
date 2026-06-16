@@ -15,6 +15,10 @@ struct AddConnectionView: View {
     @Bindable var model: GrokestratorModel
     @Environment(\.dismiss) private var dismiss
 
+    /// When non-nil, this is an "Add Child Agent" flow: the new Connection is
+    /// created as a child of `parent`, which is auto-promoted to orchestrator.
+    var parent: InstanceItem? = nil
+
     @State private var name = ""
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
@@ -28,12 +32,19 @@ struct AddConnectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Add Connection")
+            Text(parent == nil ? "Add Connection" : "Add Child Agent")
                 .font(.headline)
                 .padding()
             Divider()
 
             Form {
+                if let parent {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.tint)
+                        Text("Child of \"\(parent.name)\" — it becomes an orchestrator.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 TextField("Name", text: $name, prompt: Text("Local Grok"))
 
                 if let collision = activeCollision {
@@ -187,7 +198,8 @@ struct AddConnectionView: View {
     private func performAdd() {
         let args = argumentsText.split(separator: " ").map(String.init)
         model.addRealConnection(name: finalName, command: command, arguments: args,
-                                workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared)
+                                workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
+                                parentID: parent?.id)
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not
