@@ -75,7 +75,7 @@ public actor GrokBuildManager {
     }
 
     /// Advanced escape hatch. Most Mac app code should never call this.
-    internal func _client(for id: UUID) async -> GrokBuildSessionClient? {
+    internal func _client(for id: UUID) async -> (any AgentSession)? {
         await server.getClient(for: id)
     }
 
@@ -86,7 +86,7 @@ public actor GrokBuildManager {
         guard let client = await server.getClient(for: instanceID) else {
             throw GrokBuildError.instanceManagementError("No active client for instance \(instanceID)")
         }
-        let sessionId = try await client.createSession()
+        let sessionId = try await client.createSession(metadata: nil)
         let events = try await client.sendPrompt(sessionId: sessionId, prompt: prompt)
         return (sessionId, events)
     }

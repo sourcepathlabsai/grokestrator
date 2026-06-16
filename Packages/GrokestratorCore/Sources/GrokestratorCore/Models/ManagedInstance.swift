@@ -146,6 +146,42 @@ public enum AgentBackend: Codable, Hashable, Sendable {
     case openAICompatible(baseURL: String, model: String, apiKeyRef: String?)
     case gemini(model: String, apiKeyRef: String?)
     case onboard(modelPath: String)
+
+    // Stable, human-editable Codable (discriminated by `kind`) — config is
+    // hand-/UI-editable in connections.json, not an opaque synthesized shape.
+    private enum CodingKeys: String, CodingKey { case kind, baseURL, model, apiKeyRef, modelPath }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .grokACP:
+            try c.encode("grokACP", forKey: .kind)
+        case .openAICompatible(let baseURL, let model, let apiKeyRef):
+            try c.encode("openAICompatible", forKey: .kind)
+            try c.encode(baseURL, forKey: .baseURL); try c.encode(model, forKey: .model)
+            try c.encodeIfPresent(apiKeyRef, forKey: .apiKeyRef)
+        case .gemini(let model, let apiKeyRef):
+            try c.encode("gemini", forKey: .kind)
+            try c.encode(model, forKey: .model); try c.encodeIfPresent(apiKeyRef, forKey: .apiKeyRef)
+        case .onboard(let modelPath):
+            try c.encode("onboard", forKey: .kind); try c.encode(modelPath, forKey: .modelPath)
+        }
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decodeIfPresent(String.self, forKey: .kind) ?? "grokACP" {
+        case "openAICompatible":
+            self = .openAICompatible(baseURL: try c.decode(String.self, forKey: .baseURL),
+                                     model: try c.decode(String.self, forKey: .model),
+                                     apiKeyRef: try c.decodeIfPresent(String.self, forKey: .apiKeyRef))
+        case "gemini":
+            self = .gemini(model: try c.decode(String.self, forKey: .model),
+                           apiKeyRef: try c.decodeIfPresent(String.self, forKey: .apiKeyRef))
+        case "onboard":
+            self = .onboard(modelPath: try c.decode(String.self, forKey: .modelPath))
+        default:
+            self = .grokACP
+        }
+    }
 }
 
 /// An abstract capability tier the orchestrator reasons in (not a model string). A
@@ -159,6 +195,35 @@ public enum Tier: String, Codable, Hashable, Sendable, CaseIterable {
 public enum BrainBinding: Codable, Hashable, Sendable {
     case pinned(AgentBackend)
     case dynamic(defaultTier: Tier, allowed: [Tier])
+
+    private enum CodingKeys: String, CodingKey { case mode, backend, defaultTier, allowed }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .pinned(let backend):
+            try c.encode("pinned", forKey: .mode); try c.encode(backend, forKey: .backend)
+        case .dynamic(let defaultTier, let allowed):
+            try c.encode("dynamic", forKey: .mode)
+            try c.encode(defaultTier, forKey: .defaultTier); try c.encode(allowed, forKey: .allowed)
+        }
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decodeIfPresent(String.self, forKey: .mode) ?? "pinned" {
+        case "dynamic":
+            self = .dynamic(defaultTier: try c.decode(Tier.self, forKey: .defaultTier),
+                            allowed: try c.decode([Tier].self, forKey: .allowed))
+        default:
+            self = .pinned((try? c.decode(AgentBackend.self, forKey: .backend)) ?? .grokACP)
+        }
+    }
+
+    /// The backend to run *now* (Phase B): pinned → its backend; dynamic → its
+    /// default tier's backend, resolved against the host tier map (none yet ⇒ grok).
+    public var currentBackend: AgentBackend {
+        if case .pinned(let b) = self { return b }
+        return .grokACP   // dynamic resolution lands in Phase D
+    }
 }
 
 public enum InstanceStatus: String, Codable, Hashable, Sendable, CaseIterable {
