@@ -43,3 +43,7 @@ GrokestratoriOS/Info.plist
 
 # Claude Code session state
 .claude/
+
+# Host-local LLM provider secrets — never commit
+.env.local_llm
+*.env.local_llm

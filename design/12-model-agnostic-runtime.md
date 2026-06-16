@@ -183,8 +183,11 @@ var toolGrants: ToolPolicy           // allowlist + capability + scope (rides `1
 ```
 
 The **tier map** (`Tier → AgentBackend`) is host/server-level config, not per-Node,
-so all dynamic Nodes share one notion of what `fast`/`deep` mean. Secrets
-(`apiKeyRef`) reference the Keychain, never inline in `connections.json`.
+so all dynamic Nodes share one notion of what `fast`/`deep` mean. Secrets: a Node's
+`apiKeyRef` stores only the *name* of a key; the value is resolved at launch by
+`Secrets` from the process env or a gitignored, host-local
+`~/Library/Application Support/Grokestrator/.env.local_llm` — never inline in
+`connections.json`, never committed. (Keychain is a later hardening.)
 
 ## Context management (working context vs display)
 
@@ -272,8 +275,12 @@ more capable tool.
   signals**. `delegate(child, task, tier?)` carries an explicit hint; the router
   clamps to allowed tiers + swaps the `AgentSession`. Record the brain per turn.
   Lower priority than the design oracle (`13`), which is the real quality lever.
-- **Phase E — more brains.** Native Gemini shape if its compat endpoint is limiting;
-  an onboard runtime (MLX / llama.cpp) for fully-local Nodes.
+- **Phase E — more brains.** **Done for the cloud providers via the OpenAI-compatible
+  path + host-local secrets:** Groq (`api.groq.com/openai/v1`), Cerebras
+  (`api.cerebras.ai/v1`), and **Gemini via its `/v1beta/openai` compat endpoint**
+  (tool-calling works — no native adapter needed), plus xAI (`api.x.ai/v1`). Verified
+  live (each returns through the same seam). Remaining: an **onboard** runtime (MLX /
+  llama.cpp) for fully in-process local Nodes — the only genuinely new backend.
 - **Phase F — UI.** Per-Node binding editor (pinned model **or** dynamic: default +
   allowed tiers), the host tier map, and the capability/permission editor in the Node
   settings sheet.
