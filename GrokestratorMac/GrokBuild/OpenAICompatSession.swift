@@ -32,6 +32,26 @@ public actor OpenAICompatSession: AgentSession {
     private let maxIterations = 12
     private let outputCap = 8000        // lossless context discipline: cap tool output
 
+    /// Granted MCP servers (set by the server from the Node's registry grant). Their
+    /// tools are bridged into this loop so an API brain can use MCP too — gated by
+    /// the grant (which servers) just like a grok Node. stdio only for now.
+    private var mcpServers: [MCPServerConfig] = []
+    private var mcpClients: [MCPStdioClient] = []
+    private var mcpToolSchemas: [[String: Any]] = []                       // advertised to the model
+    private var mcpRoute: [String: (client: MCPStdioClient, tool: String)] = [:]  // emitted name → call target
+    private var mcpConnected = false
+
+    /// Set the MCP servers this Node may use (filtered to stdio by the caller).
+    public func setMCPServers(_ servers: [MCPServerConfig]) { mcpServers = servers }
+
+    /// Shut down any spawned MCP server subprocesses. Called on stop so they don't
+    /// outlive the session (the launcher can't kill them — they're spawned here).
+    public func shutdownMCP() async {
+        for client in mcpClients { await client.shutdown() }
+        mcpClients.removeAll(); mcpToolSchemas.removeAll(); mcpRoute.removeAll()
+        mcpConnected = false
+    }
+
     public init(instanceID: UUID, baseURL: String, model: String, apiKey: String?, cwd: String?,
                 policy: ToolPolicy = .unrestricted) {
         self.instanceID = instanceID
@@ -58,10 +78,45 @@ public actor OpenAICompatSession: AgentSession {
         case "write_file":            capOK = policy.capability != .readOnly
         case "run_command":           capOK = policy.capability == .execute
         case "delegate":              capOK = delegateHandler != nil   // orchestration, not a file/shell tier
+        case _ where name.hasPrefix("mcp__"):
+            // MCP tools are gated by the per-Node server grant (which servers the
+            // Node may reach), not by the file/shell capability tiers.
+            return mcpRoute[name] != nil
         default:                      capOK = false
         }
         let allowOK = policy.allowed?.contains(name) ?? true
         return capOK && allowOK
+    }
+
+    /// Connect to the granted MCP servers once, aggregating their tools. A server
+    /// that fails to connect is skipped; the rest still work. Idempotent.
+    private func connectMCPIfNeeded() async {
+        guard !mcpConnected else { return }
+        mcpConnected = true
+        for server in mcpServers {
+            let client = MCPStdioClient(server: server, cwd: cwd)
+            guard let specs = try? await client.connect() else { continue }
+            mcpClients.append(client)
+            for spec in specs {
+                let emitted = Self.mcpToolName(server: server.name, tool: spec.name)
+                mcpRoute[emitted] = (client, spec.name)
+                let schema = (try? JSONSerialization.jsonObject(with: spec.inputSchemaJSON)) as? [String: Any]
+                    ?? ["type": "object"]
+                mcpToolSchemas.append(["type": "function", "function": [
+                    "name": emitted,
+                    "description": "[\(server.name)] \(spec.description)",
+                    "parameters": schema,
+                ]])
+            }
+        }
+    }
+
+    /// Namespaced, schema-safe tool name (`^[A-Za-z0-9_-]{1,64}$`).
+    private static func mcpToolName(server: String, tool: String) -> String {
+        func san(_ s: String) -> String {
+            String(s.map { ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") ? $0 : "_" })
+        }
+        return String("mcp__\(san(server))__\(san(tool))".prefix(64))
     }
 
     // MARK: - AgentSession
@@ -108,6 +163,7 @@ public actor OpenAICompatSession: AgentSession {
     // MARK: - The agent loop
 
     private func runLoop(session: String, emit: @Sendable @escaping (ACPEvent) -> Void) async {
+        await connectMCPIfNeeded()
         var iteration = 0
         while iteration < maxIterations {
             iteration += 1
@@ -177,11 +233,13 @@ public actor OpenAICompatSession: AgentSession {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey, !apiKey.isEmpty { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         req.timeoutInterval = 120
-        // Only offer the model the tools its policy permits.
-        let tools = Self.toolSchemas.filter { schema in
+        // Only offer the model the tools its policy permits, plus the bridged MCP
+        // tools (already gated by the per-Node server grant).
+        var tools = Self.toolSchemas.filter { schema in
             guard let fn = schema["function"] as? [String: Any], let name = fn["name"] as? String else { return false }
             return isPermitted(name)
         }
+        tools.append(contentsOf: mcpToolSchemas)
         let body: [String: Any] = [
             "model": model, "messages": messages, "tools": tools,
             "tool_choice": "auto", "stream": false,
@@ -239,6 +297,10 @@ public actor OpenAICompatSession: AgentSession {
 
     private func executeTool(name: String, argumentsJSON: String) async -> (String, Bool) {
         guard isPermitted(name) else { return ("denied by policy: \(name) is not permitted for this node", true) }
+        // Bridged MCP tool → proxy to its server's client.
+        if name.hasPrefix("mcp__"), let route = mcpRoute[name] {
+            return await route.client.call(route.tool, argumentsJSON: argumentsJSON)
+        }
         let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
         switch name {
         case "read_file":

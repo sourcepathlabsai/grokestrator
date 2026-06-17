@@ -275,11 +275,16 @@ more capable tool.
   MCP. Each Node carries a **grant** (`grantedMCPServerIDs`, `nil`=all) over the
   registry, edited from its "MCP Access…" menu. *Slice 1 (done):* grok Nodes get
   their granted servers injected into `session/new` (reusing the existing path), so
-  grok connects to them like any MCP server. *Slice 2 (next):* a minimal in-app MCP
-  **client** (stdio first — `initialize`/`tools/list`/`tools/call`) so **API brains**
-  query the granted servers' tools and the app proxies calls/returns into the
-  `OpenAICompatSession` loop, gated by `ToolPolicy`. This completes Phase C's
-  "bridge MCP tools so API-model Nodes orchestrate too" beyond `delegate`.
+  grok connects to them like any MCP server. *Slice 2 (done):* `MCPStdioClient` — a
+  minimal in-app MCP client (`initialize` → `notifications/initialized` →
+  `tools/list` → `tools/call`, newline-delimited JSON-RPC over stdio) — connects to
+  an `OpenAICompatSession`'s granted servers, advertises their tools (namespaced
+  `mcp__server__tool`) into the chat-completions loop, and proxies calls/returns. So
+  **API brains use MCP too**; the per-Node grant is the gate (no separate
+  permission overlay — API brains are airtight because we own the loop). Subprocesses
+  spawn lazily, are reused across turns, and are torn down on stop. This completes
+  Phase C's "bridge MCP tools so API-model Nodes orchestrate too" beyond `delegate`.
+  *Remaining:* the registry's `http` transport for API brains (grok already gets it).
 - **Phase D — evidence-driven escalation** (not a task-size router; see the
   correction above). Add `Tier` + host tier map + `BrainBinding`; default capable,
   downgrade only for explicitly-marked mechanical work, **escalate on failure/oracle
