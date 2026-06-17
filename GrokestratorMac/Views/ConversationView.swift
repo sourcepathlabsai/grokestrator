@@ -518,7 +518,9 @@ private struct TranscriptRow: View {
                 if entry.id == streamingMessageID {
                     Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
                 } else {
-                    MarkdownText(text)
+                    // Finalized messages render in a single selectable text view so the
+                    // whole message (across paragraphs/code) can be selected + copied.
+                    SelectableMarkdownText(text)
                 }
             }
         case .assistantContent(let parts):
