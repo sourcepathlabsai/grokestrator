@@ -176,46 +176,30 @@ private struct SelectableTextRepresentable: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    // Mirrors the proven resizable-NSTextView recipe in `ComposerTextView`, but
-    // read-only + rich text. The non-scrolling scroll view gives the (vertically
-    // resizable) text view a stable host so it doesn't collapse to zero height.
-    func makeNSView(context: Context) -> NSScrollView {
-        let contentSize = NSSize(width: 200, height: 40)
-        let tv = NSTextView(frame: NSRect(origin: .zero, size: contentSize))
+    // A **bare** read-only NSTextView (no enclosing NSScrollView): nesting an
+    // NSScrollView inside SwiftUI's transcript ScrollView breaks the outer list's
+    // scroll geometry + auto-follow. SwiftUI owns the frame; `sizeThatFits` reports
+    // the height (cached, so a streaming transcript doesn't relayout every tick).
+    func makeNSView(context: Context) -> NSTextView {
+        let tv = NSTextView()
         tv.isEditable = false
         tv.isSelectable = true
         tv.isRichText = true
         tv.drawsBackground = false
         tv.backgroundColor = .clear
         tv.textContainerInset = .zero
-        tv.minSize = NSSize(width: 0, height: 0)
-        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        tv.isVerticallyResizable = true
+        tv.isVerticallyResizable = false
         tv.isHorizontallyResizable = false
-        tv.autoresizingMask = [.width]
         tv.linkTextAttributes = [.foregroundColor: NSColor(Theme.accent), .cursor: NSCursor.pointingHand]
         if let container = tv.textContainer {
             container.lineFragmentPadding = 0
             container.widthTracksTextView = true
-            container.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         }
-
-        let scroll = NSScrollView()
-        scroll.documentView = tv
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = false
-        scroll.hasHorizontalScroller = false
-        scroll.verticalScrollElasticity = .none
-        scroll.horizontalScrollElasticity = .none
         apply(to: tv, context: context)
-        return scroll
+        return tv
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let tv = scroll.documentView as? NSTextView else { return }
-        apply(to: tv, context: context)
-    }
+    func updateNSView(_ tv: NSTextView, context: Context) { apply(to: tv, context: context) }
 
     private func apply(to tv: NSTextView, context: Context) {
         guard context.coordinator.text != text || context.coordinator.size != baseSize else { return }
@@ -224,16 +208,15 @@ private struct SelectableTextRepresentable: NSViewRepresentable {
         tv.textStorage?.setAttributedString(makeMarkdownAttributed(text, baseSize: baseSize))
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
-        let width = proposal.width ?? scroll.frame.width
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView tv: NSTextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? tv.frame.width
         guard width.isFinite, width > 0, width < 100_000 else { return nil }
         // Cache hit → no frame mutation / no relayout. This is what keeps a streaming
         // transcript from thrashing: stable messages just return their known height.
         if let h = cachedHeight(text, baseSize: baseSize, width: width) {
             return CGSize(width: width, height: h)
         }
-        guard let tv = scroll.documentView as? NSTextView,
-              let container = tv.textContainer, let layout = tv.layoutManager else { return nil }
+        guard let container = tv.textContainer, let layout = tv.layoutManager else { return nil }
         tv.frame.size.width = width
         container.containerSize = NSSize(width: max(width, 1), height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
