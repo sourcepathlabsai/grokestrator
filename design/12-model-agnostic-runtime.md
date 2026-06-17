@@ -333,6 +333,18 @@ more capable tool.
   Claude Code → "Run `claude /login`") instead of a silent timeout. ACP carries the
   agent's tool-permission requests, so a self-equipped agent (Claude with its own MCP
   servers) stays mediated by the body — vendor-neutral, verified live.
+- **Autonomous approval policy (unattended delegation).** Mediation via the ACP
+  permission channel is load-bearing, but *manual* prompting stalls an unattended,
+  delegated Node on every call. Each Node carries an `AutoApproval` level —
+  **ask / reads / +edits / all** — keyed on the ACP tool-call `kind`
+  (`read`/`edit`/`execute`/…), so the app answers permission prompts itself up to the
+  chosen risk tier (`reads` ⇒ auto-approve read/search/fetch; `edits` ⇒ +edit/move;
+  `all` ⇒ everything). Default `.manual` preserves "ask for everything." Enforced in
+  `GrokBuildSessionClient.session/request_permission` (covers grok *and* Claude),
+  edited in **Edit Tools…**. This is the capability layer (`ToolPolicy`) extended from
+  the API tool loop to the ACP permission responses — so an orchestrator can delegate
+  a coding task to a `.all` "Code Warrior" and have it run end-to-end without a human,
+  while a supervised Node still prompts. The autonomous autopilot the OODA loop needs.
 
 ## Risks / notes
 

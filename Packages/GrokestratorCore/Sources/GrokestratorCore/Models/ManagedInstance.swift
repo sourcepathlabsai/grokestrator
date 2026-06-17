@@ -67,6 +67,11 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// reach them via the in-app MCP client. Default `nil` keeps parity.
     public var grantedMCPServerIDs: [UUID]?
 
+    /// How much of this Node's ACP tool-permission prompts the app auto-answers (so a
+    /// delegated/unattended Node doesn't stall on every call). Default `.manual` —
+    /// ask for everything, as before. Only meaningful for ACP nodes (grok/Claude).
+    public var autoApproval: AutoApproval
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -89,6 +94,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         brain: BrainBinding = .grok,
         toolPolicy: ToolPolicy = .unrestricted,
         grantedMCPServerIDs: [UUID]? = nil,
+        autoApproval: AutoApproval = .manual,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -109,6 +115,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.brain = brain
         self.toolPolicy = toolPolicy
         self.grantedMCPServerIDs = grantedMCPServerIDs
+        self.autoApproval = autoApproval
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -120,7 +127,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
              autoRestart, shared, archived, role, parentID, rolePrompt, brain, toolPolicy,
-             grantedMCPServerIDs, status, lastStartedAt, lastExitCode, pid
+             grantedMCPServerIDs, autoApproval, status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -139,6 +146,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.brain = try c.decodeIfPresent(BrainBinding.self, forKey: .brain) ?? .grok
         self.toolPolicy = try c.decodeIfPresent(ToolPolicy.self, forKey: .toolPolicy) ?? .unrestricted
         self.grantedMCPServerIDs = try c.decodeIfPresent([UUID].self, forKey: .grantedMCPServerIDs)
+        self.autoApproval = try c.decodeIfPresent(AutoApproval.self, forKey: .autoApproval) ?? .manual
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)
@@ -353,6 +361,40 @@ public struct ToolPolicy: Codable, Hashable, Sendable {
     }
     /// The default: full capability, no allowlist — preserves prior behavior.
     public static let unrestricted = ToolPolicy()
+}
+
+/// How much of an **ACP agent's** (grok / Claude Code) tool-permission prompts the
+/// app answers *without* a human — so a Node delegated an unattended task doesn't
+/// stall on every call. Graded by the ACP tool-call `kind`, mirroring the capability
+/// tiers. `manual` (default) preserves "ask for everything." Only applies to ACP
+/// nodes; API brains already auto-execute within `ToolPolicy`. See design/11/12.
+public struct AutoApproval: Codable, Hashable, Sendable {
+    public enum Level: String, Codable, Hashable, Sendable, CaseIterable {
+        case manual   // ask for everything (default — supervised)
+        case reads    // auto-approve read-only actions (read/search/fetch/think); ask the rest
+        case edits    // + file edits/moves; ask for execute/delete
+        case all      // auto-approve everything (fully autonomous — trust the agent)
+    }
+    public var level: Level
+    public init(level: Level = .manual) { self.level = level }
+    public static let manual = AutoApproval()
+
+    /// Whether a permission with this ACP tool `kind` should be auto-approved.
+    public func autoApproves(kind: String?) -> Bool {
+        switch level {
+        case .manual: return false
+        case .all:    return true
+        case .reads:  return Self.isRead(kind)
+        case .edits:  return Self.isRead(kind) || Self.isEdit(kind)
+        }
+    }
+    private static func isRead(_ kind: String?) -> Bool {
+        switch kind { case "read", "search", "fetch", "think": return true; default: return false }
+    }
+    private static func isEdit(_ kind: String?) -> Bool {
+        // `delete` and `execute` are destructive/powerful — they need `.all`.
+        switch kind { case "edit", "move": return true; default: return false }
+    }
 }
 
 /// How a Node's brain is chosen: `grok` (its own command), a catalog `profile` by
