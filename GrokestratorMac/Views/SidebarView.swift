@@ -6,6 +6,7 @@ import GrokestratorCore
 struct SidebarView: View {
     @Bindable var model: GrokestratorModel
     @State private var showingAdd = false
+    @State private var showingClaudeSetup = false
     @State private var showingAddRemote = false
     @State private var showingArchived = false
     /// Live Connection awaiting a permanent-delete confirmation (nil ⇒ none).
@@ -58,6 +59,7 @@ struct SidebarView: View {
             ToolbarItem {
                 Menu {
                     Button { showingAdd = true } label: { Label("Add Local Connection…", systemImage: "macbook") }
+                    Button { showingClaudeSetup = true } label: { Label("Add Claude Code Agent…", systemImage: "hammer") }
                     Button { showingAddRemote = true } label: { Label("Add Remote Server…", systemImage: "network") }
                 } label: {
                     Label("Add", systemImage: "plus")
@@ -65,6 +67,7 @@ struct SidebarView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
+        .sheet(isPresented: $showingClaudeSetup) { ClaudeCodeSetupView(model: model) }
         .sheet(item: $addingChildFor) { parent in AddConnectionView(model: model, parent: parent) }
         .sheet(item: $editingRoleFor) { item in EditRoleView(model: model, item: item) }
         .sheet(item: $editingBrainFor) { item in EditBrainView(model: model, item: item) }
