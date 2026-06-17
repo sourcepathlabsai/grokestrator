@@ -95,7 +95,7 @@ struct EditToolPolicyView: View {
                 Image(systemName: brainIsGrok ? "info.circle" : "checkmark.shield")
                     .foregroundStyle(.secondary)
                 Text(brainIsGrok
-                     ? "This Node runs grok, which manages its own tools — the policy applies to API-model brains."
+                     ? "This Node runs \(model.acpAgentLabel(for: item)) (an ACP agent), which manages its own tools — the policy applies to API-model brains."
                      : "Enforced by the app's tool loop for this Node's API brain.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
