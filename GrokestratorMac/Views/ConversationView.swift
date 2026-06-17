@@ -135,6 +135,7 @@ struct ConversationView: View {
                 // including any MCP commands registered since launch.
                 if new != nil { conversation.refreshCapabilities() }
             }
+            .frame(maxWidth: .infinity)   // always fill the row width (don't collapse to the text's ideal width)
             .padding(8)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
@@ -518,7 +519,9 @@ private struct TranscriptRow: View {
                 if entry.id == streamingMessageID {
                     Text(text).font(Theme.body(14)).foregroundStyle(Theme.textBody).textSelection(.enabled)
                 } else {
-                    MarkdownText(text)
+                    // Finalized messages render in a single selectable text view so the
+                    // whole message (across paragraphs/code) can be selected + copied.
+                    SelectableMarkdownText(text)
                 }
             }
         case .assistantContent(let parts):
