@@ -62,8 +62,13 @@ public actor GrokBuildSessionClient {
 
     private var readerTask: Task<Void, Never>?
 
-    public init(handle: GrokBuildInstanceHandle) {
+    /// Per-Node auto-approval policy for ACP tool prompts (default: ask for
+    /// everything). Captured at construction; an edit restarts the Node → new client.
+    private let autoApproval: AutoApproval
+
+    public init(handle: GrokBuildInstanceHandle, autoApproval: AutoApproval = .manual) {
         self.handle = handle
+        self.autoApproval = autoApproval
         self.reader = ACPMessageReader(dataStream: handle.stdout)
         // Start the reader once the actor is fully initialized.
         Task { await self.startReader() }
@@ -423,6 +428,19 @@ public actor GrokBuildSessionClient {
                 emit(.activity(ActivityEvent(
                     sessionId: p.sessionId ?? sessionId ?? "",
                     note: "Auto-approved (\(category), remembered): \(p.toolCall?.title ?? "permission")",
+                    kind: "permission_auto", metadata: nil)))
+                return
+            }
+            // Autonomous policy: answer ourselves (no human) when this Node's
+            // auto-approval level covers the tool's action kind — so a delegated,
+            // unattended Node doesn't stall on every prompt.
+            if autoApproval.autoApproves(kind: p.toolCall?.kind),
+               let allow = p.options.first(where: { $0.kind == "allow_once" })
+                        ?? p.options.first(where: { $0.kind == "allow_always" }) {
+                respond(id: id, result: selectedOutcome(allow.optionId))
+                emit(.activity(ActivityEvent(
+                    sessionId: p.sessionId ?? sessionId ?? "",
+                    note: "Auto-approved (\(autoApproval.level.rawValue): \(p.toolCall?.kind ?? "tool")): \(p.toolCall?.title ?? "permission")",
                     kind: "permission_auto", metadata: nil)))
                 return
             }

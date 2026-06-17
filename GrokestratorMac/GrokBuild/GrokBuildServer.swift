@@ -29,7 +29,7 @@ public actor GrokBuildServer {
         switch backend {
         case .grokACP:
             let handle = try await launcher.launch(config)
-            session = GrokBuildSessionClient(handle: handle)
+            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval)
         case .openAICompatible(let baseURL, let model, let apiKeyRef):
             // Secrets are referenced by name, never stored inline. Resolved from the
             // process env or the host-local gitignored .env.local_llm (LM Studio needs none).

@@ -517,6 +517,22 @@ final class GrokestratorModel {
         }
     }
 
+    /// The ACP auto-approval policy currently configured for a local Connection (how
+    /// much of its tool prompts the app answers without a human). Defaults `.manual`.
+    func autoApproval(for item: InstanceItem) -> AutoApproval {
+        connections.first(where: { $0.id == item.id })?.autoApproval ?? .manual
+    }
+
+    /// Set a local Connection's ACP auto-approval policy. Persists and restarts a
+    /// running Node so the new policy takes effect (it's captured at session start).
+    func setAutoApproval(_ policy: AutoApproval, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }),
+              connections[idx].autoApproval != policy else { return }
+        connections[idx].autoApproval = policy
+        persistAndRestartIfLive(idx: idx, item: item)
+    }
+
     /// The tool/capability policy currently configured for a local Connection — what
     /// its brain is allowed to *do* (read / write / execute, and any allowlist).
     /// Defaults to `.unrestricted`. Read by `EditToolPolicyView`.

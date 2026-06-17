@@ -39,6 +39,7 @@ struct EditToolPolicyView: View {
     /// Tools the user has explicitly enabled. Persisted as `allowed`, except when it
     /// equals the full permitted set (then `allowed = nil`, meaning "no allowlist").
     @State private var enabled: Set<String> = []
+    @State private var autoLevel: AutoApproval.Level = .manual
     @State private var loaded = false
 
     private var isOrchestrator: Bool { item.role == .orchestrator }
@@ -53,6 +54,20 @@ struct EditToolPolicyView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 14) {
+                if brainIsGrok {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Autonomous approval").font(.caption).foregroundStyle(.secondary)
+                        Picker("", selection: $autoLevel) {
+                            Text("Ask").tag(AutoApproval.Level.manual)
+                            Text("Reads").tag(AutoApproval.Level.reads)
+                            Text("+ Edits").tag(AutoApproval.Level.edits)
+                            Text("All").tag(AutoApproval.Level.all)
+                        }
+                        .pickerStyle(.segmented).labelsHidden()
+                        Text(autoBlurb).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Capability").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $capability) {
@@ -101,6 +116,7 @@ struct EditToolPolicyView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
+                    model.setAutoApproval(AutoApproval(level: autoLevel), for: item)
                     model.setToolPolicy(buildPolicy(), for: item)
                     dismiss()
                 }
@@ -144,6 +160,17 @@ struct EditToolPolicyView: View {
         }
     }
 
+    /// Explains the selected auto-approval level (ACP nodes). Without this, every
+    /// tool call prompts you — so a delegated/unattended Node stalls.
+    private var autoBlurb: String {
+        switch autoLevel {
+        case .manual: return "Ask for every tool call (supervised). A delegated Node will wait for you."
+        case .reads:  return "Auto-approve read-only actions (read/search); ask for writes & commands."
+        case .edits:  return "Auto-approve reads + file edits; ask for shell commands & deletes."
+        case .all:    return "Auto-approve everything — fully autonomous. Use for a trusted Node you delegate to."
+        }
+    }
+
     private var allText: String { isAllOn ? "Clear all" : "Allow all" }
     private var isAllOn: Bool { enabled.isSuperset(of: permittedTools.map(\.name)) && !permittedTools.isEmpty }
 
@@ -170,6 +197,7 @@ struct EditToolPolicyView: View {
     private func loadOnce() {
         guard !loaded else { return }
         loaded = true
+        autoLevel = model.autoApproval(for: item).level
         let policy = model.toolPolicy(for: item)
         capability = policy.capability
         let names = Set(permittedTools.map(\.name))
