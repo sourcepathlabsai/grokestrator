@@ -103,6 +103,44 @@ strategic thread to confirm, not yet a settled scope decision — see Open quest
 - **Is the orientation corpus *the* product** (engine), with orchestration/brain-swap
   as vehicle? Strategic; confirm before it reshapes scope.
 
+## Runtime governance form — first code contact (2026-06-17)
+
+The thesis above crystallized into a concrete runtime form and a first shadow-mode
+slice. Full reasoning lives in the Obsidian note *Design Oracle (Operational Form)*;
+the load-bearing decisions, projected here:
+
+- **Unit of governance is a proposed Action** (verb, args, payload, context,
+  provenance) — *not* a git diff. Domain-general: "run this shell command", "send this
+  email", "call this MCP tool" all reduce to one shape. The oracle sits at the mediated
+  tool boundary the app already owns.
+- **The corpus is one graph, two media, joined at the invariant.** Prose (goals,
+  decisions, rationale) authored in Obsidian; structure (classifications, detectors,
+  side-effect taxonomy) authored in the repo. The **invariant** is Janus-faced — a
+  prose `statement` that grounds a judge, a structured `detector` that runs as a check.
+  Runtime is a rebuildable materialized view, authoritative over nothing, fail-closed.
+- **Detectors are `(Action) → [Finding]`** with two grades: `definitive` (precise,
+  deterministic — decides; ~10–20%) and `suspect` (high-recall regex/heuristic — flags
+  and defers to a grounded judge; ~80%). Each declares a `minimumFidelity` and abstains
+  below it.
+- **Pipeline:** Action → classify (key index) → detectors → severity → escalation
+  outcome (allow / escalate / block). Unknown classification fails closed.
+
+Shipped (`Packages/GrokestratorCore/Sources/GrokestratorCore/Governance/`,
+`GovernanceEngine.shadow`), wired in **shadow mode** (observe + log, no enforcement) at
+both boundaries. What first contact corrected:
+
+- **Boundary fidelity asymmetry.** The API tool loop (`executeTool`) gives fully
+  structured args (`.structured`, total mediation, app executes); the ACP permission
+  boundary gives a coarse `kind` + a command/title string (`.semiStructured`, grok
+  executes, we only gate). The same invariant (cwd-confinement) is enforceable on the
+  API boundary but **abstains** on ACP — the precise/recall split is partly *forced by
+  the boundary*, not freely chosen.
+- **The agent pre-classifies, untrusted.** grok's ACP `kind` is the agent classifying
+  its own action — captured as an untrusted hint (raise suspicion, never clear). The
+  existing `AutoApproval.autoApproves(kind:)` is literally this oracle's v0.
+- **Mediation has an ACP-side hole.** We see only what grok *asks* permission for;
+  high-assurance governance favors the app-executed boundary.
+
 ## Relationship to other documents
 
 - `11-orchestration-platform.md` — the oracle thesis there guards *outputs*; this
@@ -116,7 +154,8 @@ strategic thread to confirm, not yet a settled scope decision — see Open quest
 
 ---
 
-*Created 2026-06-16. Status: design thesis / direction. Captures that the maintained
-low-level design oracle — model-portable orientation — is the project's core quality
-engine, possibly its core product. No implementation proposed yet; the immediate
-change it forces is the tier-routing correction in `12`.*
+*Created 2026-06-16. Updated 2026-06-17: runtime governance form specified and a
+first shadow-mode slice landed (`GrokestratorCore/Governance/`, observe-only at both
+tool boundaries). Captures that the maintained low-level design oracle — model-portable
+orientation — is the project's core quality engine, possibly its core product. The
+immediate change it forces remains the tier-routing correction in `12`.*

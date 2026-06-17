@@ -420,6 +420,17 @@ public actor GrokBuildSessionClient {
                 respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
                 return
             }
+            // Design-oracle SHADOW (design/13): observe every permission request and
+            // log the verdict the governance engine *would* reach — it does NOT change
+            // who answers (always-allow / auto-approval / human, below, are untouched).
+            // This is the low-fidelity boundary: a coarse `kind` + a command/title
+            // string, no general structured args — so precise detectors abstain here.
+            let shadow = GovernanceEngine.shadow.evaluate(ProposedAction.fromACPPermission(
+                kind: p.toolCall?.kind, variant: p.toolCall?.rawInput?.variant,
+                command: p.toolCall?.rawInput?.command, title: p.toolCall?.title,
+                agentName: agentDisplayName, cwd: nil, nodeName: nil))
+            emit(.activity(ActivityEvent(sessionId: p.sessionId ?? sessionId ?? "",
+                note: "oracle(shadow): \(shadow.summary)", kind: "oracle_shadow", metadata: nil)))
             // If the user already chose "always allow" for this category (e.g. bash),
             // answer it ourselves — grok re-asks even after `allow_always`.
             if let category = p.category, alwaysAllowCategories.contains(category),
