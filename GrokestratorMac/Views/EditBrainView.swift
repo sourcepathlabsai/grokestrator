@@ -31,7 +31,7 @@ struct EditBrainView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 Picker("Brain", selection: $mode) {
-                    Text("grok").tag(Mode.grok)
+                    Text("ACP Agent").tag(Mode.grok)
                     Text("Catalog brain").tag(Mode.brain)
                     Text("Dynamic").tag(Mode.dynamic)
                 }
@@ -70,8 +70,16 @@ struct EditBrainView: View {
     // MARK: Sections
 
     @ViewBuilder private var grokInfo: some View {
-        Text("Runs grok via this Node's command — the default. No API key needed.")
-            .font(.caption).foregroundStyle(.secondary)
+        let agent = model.acpAgentLabel(for: item)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal").foregroundStyle(.tint)
+                Text("This Node runs **\(agent)** as an agent over ACP (its launch command).")
+                    .font(.caption)
+            }
+            Text("grok and Claude Code are both ACP agents; the launch command picks which. Change it in the Add-Connection flow, or use “Add Claude Code Agent…”. No API key needed here.")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
     }
 
     @ViewBuilder private var catalogPicker: some View {

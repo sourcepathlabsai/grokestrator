@@ -337,6 +337,19 @@ final class GrokestratorModel {
         connections.first(where: { $0.id == item.id })?.brain ?? .grok
     }
 
+    /// Human label for the ACP agent a command-based (`.grok`) Node runs, inferred
+    /// from its launch command — grok, Claude Code, or a custom ACP agent — so the
+    /// UI can name it honestly instead of always saying "grok".
+    func acpAgentLabel(for item: InstanceItem) -> String {
+        Self.acpAgentLabel(forCommand: connections.first { $0.id == item.id }?.command ?? "")
+    }
+    static func acpAgentLabel(forCommand command: String) -> String {
+        let c = command.lowercased()
+        if c.contains("claude-code-acp") || c.contains("claude-agent-acp") { return "Claude Code" }
+        if c.hasSuffix("/grok") || c == "grok" || c.contains("/.grok/") { return "grok" }
+        return c.isEmpty ? "ACP agent" : "Custom ACP agent"
+    }
+
     /// Swap a local Connection's brain (the LLM that backs it). Persists the new
     /// binding, then restarts the Node so the next turn runs on the new backend —
     /// `restartInstance` drops the cached session and rebinds; the transcript

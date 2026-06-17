@@ -62,7 +62,7 @@ struct AddConnectionView: View {
 
                 Section {
                     Picker("Brain", selection: brainSelection) {
-                        Text("grok").tag(BrainSelection.grok)
+                        Text("ACP Agent").tag(BrainSelection.grok)
                         ForEach(model.brainCatalog.profiles) { p in
                             Text(p.name).tag(BrainSelection.profile(p.id))
                         }
@@ -78,6 +78,8 @@ struct AddConnectionView: View {
                         .font(.system(.body, design: .monospaced))
                     TextField("Arguments", text: $argumentsText)
                         .font(.system(.body, design: .monospaced))
+                    Text("ACP agent launch command — defaults to grok. For Claude Code use “Add Claude Code Agent…” (auto-resolves the adapter), or paste any ACP-over-stdio command here. Detected: **\(GrokestratorModel.acpAgentLabel(forCommand: command))**.")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
                 LabeledContent("Working directory (optional)") {
                     HStack(spacing: 4) {

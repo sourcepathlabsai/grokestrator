@@ -24,6 +24,10 @@ public actor GrokBuildSessionClient {
 
     private var initialized = false
     private var sessionId: String?
+    /// ACP `agentInfo` + auth hint captured at `initialize`, used to give a clear
+    /// "needs login" message when `session/new` fails for an unauthenticated agent.
+    private var agentDisplayName: String?
+    private var authHint: String?
 
     /// What this instance can do (model, MCP servers, slash commands), captured
     /// from the `initialize` result and refreshed by `available_commands_update`.
@@ -232,6 +236,10 @@ public actor GrokBuildSessionClient {
             cwd = initResult.meta?.currentWorkingDirectory ?? cwd
             capabilities = initResult.toCapabilities()
             capabilities.commands = GrokBuiltinCommands.merged(advertised: capabilities.commands)
+            // Remember how this agent identifies + how to authenticate, so a failed
+            // session/new can say "Claude Code needs login" instead of timing out.
+            agentDisplayName = initResult.agentInfo?.title ?? initResult.agentInfo?.name
+            authHint = (initResult.authMethods ?? []).compactMap { $0.description ?? $0.name }.first
             initialized = true
         }
 
@@ -278,14 +286,25 @@ public actor GrokBuildSessionClient {
             }
         }
 
-        let result = try await request(
-            method: "session/new",
-            params: .object(["cwd": .string(cwd), "mcpServers": .array(mcpServers)]),
-            as: NewSessionResult.self,
-            timeout: 30
-        )
-        sessionId = result.sessionId
-        return result.sessionId
+        do {
+            let result = try await request(
+                method: "session/new",
+                params: .object(["cwd": .string(cwd), "mcpServers": .array(mcpServers)]),
+                as: NewSessionResult.self,
+                timeout: 30
+            )
+            sessionId = result.sessionId
+            return result.sessionId
+        } catch {
+            // An ACP agent that advertised auth methods and then refused/stalled the
+            // session is almost certainly not logged in — surface the actionable hint
+            // rather than a bare timeout (e.g. Claude Code → "Run `claude /login`").
+            if let authHint {
+                throw GrokBuildError.instanceManagementError(
+                    "\(agentDisplayName ?? "This agent") needs authentication — \(authHint).")
+            }
+            throw error
+        }
     }
 
     // MARK: - Incoming line routing
@@ -646,7 +665,15 @@ private struct MCPInitialized: Decodable { let mcpToolCount: Int?; let elapsedMs
 /// Verified against `grok 0.2.3` (see PROJECT_STATE / probe notes).
 private struct InitializeResult: Decodable {
     let meta: Meta?
-    enum CodingKeys: String, CodingKey { case meta = "_meta" }
+    // Standard ACP top-level fields (grok leaves these empty and uses `_meta`;
+    // adapters like Claude Code populate them). `authMethods` lets us surface a
+    // clear "needs login" message instead of a silent session/new failure.
+    let agentInfo: AgentInfo?
+    let authMethods: [AuthMethod]?
+    enum CodingKeys: String, CodingKey { case meta = "_meta", agentInfo, authMethods }
+
+    struct AgentInfo: Decodable { let name: String?; let title: String?; let version: String? }
+    struct AuthMethod: Decodable { let id: String?; let name: String?; let description: String? }
 
     struct Meta: Decodable {
         let agentVersion: String?

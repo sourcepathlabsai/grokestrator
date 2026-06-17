@@ -321,6 +321,18 @@ more capable tool.
   Legacy inline-pinned API brains migrate into catalog profiles at load
   (`BrainBinding.inlineLegacy` → `migrateBrainsIfNeeded`). This catalog is the
   substrate the tier map + design oracle (`13`) route over.
+- **ACP agents are a first-class brain type.** The command-based binding (`.grok`)
+  isn't grok-specific — it launches *any* ACP-over-stdio agent and drives it through
+  `GrokBuildSessionClient`. So **grok and Claude Code are two ACP agents that differ
+  only by launch command** (Claude Code via the `claude-code-acp` adapter; see the
+  "Add Claude Code Agent" setup). The UI presents this honestly: the brain type is
+  **"ACP Agent"**, and the specific agent (grok / Claude Code / custom) is detected
+  from the command (`acpAgentLabel`) and shown in Edit Brain / Add Connection / Edit
+  Tools. **Auth is surfaced:** `initialize` captures the agent's `authMethods`, and a
+  failed `session/new` for an unauthenticated agent reports the actionable hint (e.g.
+  Claude Code → "Run `claude /login`") instead of a silent timeout. ACP carries the
+  agent's tool-permission requests, so a self-equipped agent (Claude with its own MCP
+  servers) stays mediated by the body — vendor-neutral, verified live.
 
 ## Risks / notes
 
