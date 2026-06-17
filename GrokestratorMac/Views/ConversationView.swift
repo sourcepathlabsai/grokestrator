@@ -135,6 +135,7 @@ struct ConversationView: View {
                 // including any MCP commands registered since launch.
                 if new != nil { conversation.refreshCapabilities() }
             }
+            .frame(maxWidth: .infinity)   // always fill the row width (don't collapse to the text's ideal width)
             .padding(8)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))

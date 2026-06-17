@@ -24,6 +24,31 @@ struct SelectableMarkdownText: View {
     }
 }
 
+// MARK: - Caches (streaming hot path)
+
+// The transcript re-evaluates visible rows on every streaming tick (~20×/s). Without
+// caching, each on-screen message re-ran `AttributedString(markdown:)` AND a full
+// `ensureLayout` in `sizeThatFits` — and the per-measure frame mutation fed a layout
+// loop that blanked the transcript for the whole stream. Both are now keyed by
+// content (+ width for height) so a stable message is an O(1) lookup. NSCache is
+// internally thread-safe; `nonisolated(unsafe)` just opts out of the global-actor check.
+nonisolated(unsafe) private let mdAttributedCache: NSCache<NSString, NSAttributedString> = {
+    let c = NSCache<NSString, NSAttributedString>(); c.countLimit = 2000; return c
+}()
+nonisolated(unsafe) private let mdHeightCache: NSCache<NSString, NSNumber> = {
+    let c = NSCache<NSString, NSNumber>(); c.countLimit = 4000; return c
+}()
+
+private func cachedHeight(_ text: String, baseSize: CGFloat, width: CGFloat) -> CGFloat? {
+    mdHeightCache.object(forKey: heightKey(text, baseSize, width)).map { CGFloat($0.doubleValue) }
+}
+private func storeHeight(_ h: CGFloat, text: String, baseSize: CGFloat, width: CGFloat) {
+    mdHeightCache.setObject(NSNumber(value: Double(h)), forKey: heightKey(text, baseSize, width))
+}
+private func heightKey(_ text: String, _ baseSize: CGFloat, _ width: CGFloat) -> NSString {
+    "\(baseSize)\u{1}\(Int(width.rounded()))\u{1}\(text)" as NSString
+}
+
 // MARK: - Attributed-string builder (shared; uses platform font/color helpers)
 
 private func headingSize(_ level: Int, base: CGFloat) -> CGFloat {
@@ -38,6 +63,9 @@ private func headingSize(_ level: Int, base: CGFloat) -> CGFloat {
 /// Build the full attributed string for a message. Blocks are separated by a blank
 /// line; inline spans inside each block come from `AttributedString(markdown:)`.
 func makeMarkdownAttributed(_ text: String, baseSize: CGFloat) -> NSAttributedString {
+    let cacheKey = "\(baseSize)\u{1}\(text)" as NSString
+    if let hit = mdAttributedCache.object(forKey: cacheKey) { return hit }
+
     let out = NSMutableAttributedString()
     let body = themeColor(Theme.textBody)
     let nl = { (s: String) in NSAttributedString(string: s, attributes: [.font: baseFont(baseSize), .foregroundColor: body]) }
@@ -95,6 +123,7 @@ func makeMarkdownAttributed(_ text: String, baseSize: CGFloat) -> NSAttributedSt
     let para = NSMutableParagraphStyle()
     para.lineSpacing = 2
     out.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: out.length))
+    mdAttributedCache.setObject(out, forKey: cacheKey)
     return out
 }
 
@@ -196,14 +225,21 @@ private struct SelectableTextRepresentable: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
-        guard let tv = scroll.documentView as? NSTextView,
-              let container = tv.textContainer, let layout = tv.layoutManager else { return nil }
         let width = proposal.width ?? scroll.frame.width
         guard width.isFinite, width > 0, width < 100_000 else { return nil }
+        // Cache hit → no frame mutation / no relayout. This is what keeps a streaming
+        // transcript from thrashing: stable messages just return their known height.
+        if let h = cachedHeight(text, baseSize: baseSize, width: width) {
+            return CGSize(width: width, height: h)
+        }
+        guard let tv = scroll.documentView as? NSTextView,
+              let container = tv.textContainer, let layout = tv.layoutManager else { return nil }
         tv.frame.size.width = width
         container.containerSize = NSSize(width: max(width, 1), height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height))
+        let h = ceil(layout.usedRect(for: container).height)
+        storeHeight(h, text: text, baseSize: baseSize, width: width)
+        return CGSize(width: width, height: h)
     }
 
     final class Coordinator { var text: String?; var size: CGFloat? }
@@ -260,8 +296,13 @@ private struct SelectableTextRepresentable: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView tv: UITextView, context: Context) -> CGSize? {
         let width = proposal.width ?? tv.frame.width
         guard width.isFinite, width > 0, width < 100_000 else { return nil }
+        if let h = cachedHeight(text, baseSize: baseSize, width: width) {
+            return CGSize(width: width, height: h)
+        }
         let fit = tv.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        return CGSize(width: width, height: ceil(fit.height))
+        let h = ceil(fit.height)
+        storeHeight(h, text: text, baseSize: baseSize, width: width)
+        return CGSize(width: width, height: h)
     }
 
     final class Coordinator { var text: String?; var size: CGFloat? }
