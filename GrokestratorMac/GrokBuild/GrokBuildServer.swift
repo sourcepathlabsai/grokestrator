@@ -34,9 +34,16 @@ public actor GrokBuildServer {
             // Secrets are referenced by name, never stored inline. Resolved from the
             // process env or the host-local gitignored .env.local_llm (LM Studio needs none).
             let key = apiKeyRef.flatMap { Secrets.value(for: $0) }
-            session = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
+            let api = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
                                           model: model, apiKey: key, cwd: config.workingDirectory,
                                           policy: config.toolPolicy)
+            // Bridge the Node's granted MCP servers (stdio) into the API tool loop so
+            // an API brain can use MCP too — same registry + grant as a grok Node.
+            let granted = ConnectionStore.loadMCPRegistry()
+                .granted(to: config.grantedMCPServerIDs)
+                .filter { $0.transport.isStdio }
+            if !granted.isEmpty { await api.setMCPServers(granted) }
+            session = api
         case .gemini, .onboard:
             throw GrokBuildError.instanceManagementError("backend not implemented yet for \(config.name)")
         }
@@ -51,6 +58,9 @@ public actor GrokBuildServer {
     }
 
     public func stopInstance(id: UUID) async {
+        // An API brain may have spawned MCP server subprocesses; the launcher can't
+        // see those, so tell the session to tear them down before we drop it.
+        if let api = clients[id] as? OpenAICompatSession { await api.shutdownMCP() }
         await launcher.terminate(id)
         clients.removeValue(forKey: id)
         if var inst = instances[id] {
@@ -61,6 +71,10 @@ public actor GrokBuildServer {
 
     /// Terminates every running instance. Called from app-quit cleanup.
     public func stopAll(timeout: TimeInterval = 1.0) async {
+        // Tear down any API-brain MCP subprocesses first (launcher doesn't track them).
+        for client in clients.values {
+            if let api = client as? OpenAICompatSession { await api.shutdownMCP() }
+        }
         await launcher.terminateAll(timeout: timeout)
         clients.removeAll()
         for (id, var inst) in instances {
