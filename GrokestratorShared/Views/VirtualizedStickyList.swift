@@ -69,7 +69,12 @@ struct VirtualizedStickyList<Item: Identifiable, RowContent: View>: View where I
                     return
                 }
                 guard isPinned else { return }
-                proxy.scrollTo(bottomID, anchor: .bottom)
+                // Re-issue across a short settle window, not a single shot: a turn
+                // that *finalizes* re-renders its message from plain streaming text
+                // into formatted Markdown and grows taller **after** this tick, so a
+                // lone scrollTo lands short and strands the user above the new bottom.
+                // Heights are cached, so the burst rests on a stable bottom (no jink).
+                settleToBottom(proxy)
             }
             // Forced re-pin (user sent, or switched Connection): re-land at the
             // bottom even though the incoming transcript's rows realize late.
