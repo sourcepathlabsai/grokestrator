@@ -212,12 +212,10 @@ public actor OpenAICompatSession: AgentSession {
                 emit(.toolCall(ToolCallEvent(sessionId: session, toolCallId: id, toolName: name,
                                              arguments: argsPreview(argsJSON))))
                 // Design-oracle SHADOW (design/13): the governance engine observes
-                // the proposed Action and logs the verdict it *would* reach — it does
-                // NOT gate execution yet. The API loop is the high-fidelity boundary
-                // (full structured args), so precise detectors run here.
-                emit(.activity(ActivityEvent(sessionId: session,
-                    note: "oracle(shadow): \(shadowVerdict(name: name, argsJSON: argsJSON).summary)",
-                    kind: "oracle_shadow", metadata: nil)))
+                // the proposed Action and logs (NSLog, NOT the transcript) the verdict
+                // it *would* reach — it does NOT gate execution yet. The API loop is the
+                // high-fidelity boundary (full structured args), so precise detectors run.
+                NSLog("%@", "[oracle] shadow (api): \(shadowVerdict(name: name, argsJSON: argsJSON).summary)")
                 let (result, isError) = await executeTool(name: name, argumentsJSON: argsJSON)
                 emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: result, isError: isError)))
                 messages.append(["role": "tool", "tool_call_id": id, "content": result])
