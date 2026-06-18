@@ -266,6 +266,10 @@ public actor GrokBuildSessionClient {
         // (`<cwd>/design/oracle/`, merged over the baseline) for the shadow governance pass.
         workingDirectory = cwd
         governance = GovernanceEngine.forProject(directory: cwd)
+        // Show the AUTHORITATIVE session cwd (what we send in `session/new`) in the
+        // inspector — not the agent's `initialize` self-report, which precedes session/new
+        // and reads "/" for an adapter that doesn't report a cwd (e.g. Claude Code).
+        capabilities.workingDirectory = cwd
 
         // Advertise the in-app Orchestration MCP server (host-local, loopback) so
         // this Node can `delegate` to children. Per-session injection — no config
