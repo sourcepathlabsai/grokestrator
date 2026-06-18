@@ -45,6 +45,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.sourcepathlabs.grokestrator.mac
         PRODUCT_NAME: Grokestrator
+        # Sign with a STABLE identity (Apple Development, paid team GS8DPK5RPN) instead
+        # of ad-hoc "Sign to Run Locally". macOS privacy (TCC) keys file-access grants to
+        # the code signature; an ad-hoc signature changes every build, so the OS re-prompts
+        # for the same folders on each relaunch. A stable cert makes the grant persist
+        # (allow file access once, and it sticks across rebuilds). For notarized DMG
+        # distribution later, switch this to "Developer ID Application".
+        DEVELOPMENT_TEAM: GS8DPK5RPN
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
@@ -73,10 +82,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.sourcepathlabs.grokestrator.ios
         PRODUCT_NAME: Grokestrator
-        # Free "Personal Team" signing so the app installs on a physical
-        # device straight from Xcode (▶), surviving xcodegen regeneration.
-        # GS8DPK5RPN = Bob Stucky (Personal Team). Swap for the org Team ID
-        # once the paid Developer account clears (then TestFlight takes over).
+        # GS8DPK5RPN = Bob Stucky, now a PAID Apple Developer team — so this app
+        # can ship to TestFlight / the App Store (and install on device from Xcode ▶).
+        # Automatic signing has Xcode mint the Apple Distribution cert + App Store
+        # profile on first Archive → Distribute.
         DEVELOPMENT_TEAM: GS8DPK5RPN
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
