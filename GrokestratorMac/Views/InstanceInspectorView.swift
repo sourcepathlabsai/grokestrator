@@ -12,6 +12,9 @@ import GrokestratorCore
 struct InstanceInspectorView: View {
     let instance: InstanceItem?
     @Bindable var model: GrokestratorModel
+    /// Recent design-oracle verdicts for the selected node (read from the ledger; not
+    /// reactive, so we reload on selection + via the section's refresh).
+    @State private var oracleEvents: [GovernanceEvent] = []
 
     var body: some View {
         Group {
@@ -21,6 +24,7 @@ struct InstanceInspectorView: View {
                     .task(id: instance.id) {
                         instance.conversation.loadCapabilities()
                         instance.conversation.refreshUsage()
+                        oracleEvents = OracleLedger.shared.recent(nodeID: instance.id, limit: 30)
                     }
             } else {
                 ContentUnavailableView("No instance", systemImage: "sidebar.right",
@@ -42,6 +46,7 @@ struct InstanceInspectorView: View {
                     if let model = caps.currentModel { modelSection(model) }
                     if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps)
+                    oracleSection(instance)
                     commandsSection(caps.commands, instance: instance)
                 } else {
                     HStack(spacing: 8) {
@@ -175,6 +180,57 @@ struct InstanceInspectorView: View {
             Text(fmtTokens(value)).font(Theme.mono(12)).foregroundStyle(Theme.textBody)
             Text(label).font(Theme.body(10)).foregroundStyle(Theme.textFaint)
         }
+    }
+
+    /// Design-oracle ledger: what the (shadow) oracle would have decided for this node's
+    /// actions — the evidence it's working. Observe-only; nothing is enforced yet.
+    private func oracleSection(_ instance: InstanceItem) -> some View {
+        section("Design Oracle", systemImage: "lock.shield", count: oracleEvents.isEmpty ? nil : oracleEvents.count) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    oracleStat("allow", oracleEvents.filter { $0.outcome == "allow" }.count, .green)
+                    oracleStat("escalate", oracleEvents.filter { $0.outcome == "escalate" }.count, .orange)
+                    oracleStat("block", oracleEvents.filter { $0.outcome == "block" }.count, .red)
+                    Spacer()
+                    Button { oracleEvents = OracleLedger.shared.recent(nodeID: instance.id, limit: 30) } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderless).help("Refresh verdicts")
+                }
+                Text("Shadow — observed, not enforced. Recorded to `oracle-verdicts.jsonl`.")
+                    .font(Theme.body(10)).foregroundStyle(Theme.textFaint)
+                if oracleEvents.isEmpty {
+                    Text("No verdicts yet — the oracle records here as this node acts.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textMuted).padding(.top, 2)
+                } else {
+                    Divider().overlay(Theme.border)
+                    ForEach(oracleEvents.prefix(12)) { verdictRow($0) }
+                }
+            }
+        }
+    }
+
+    private func oracleStat(_ label: String, _ value: Int, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("\(value)").font(Theme.mono(13)).foregroundStyle(value > 0 ? tint : Theme.textFaint)
+            Text(label).font(Theme.body(9)).foregroundStyle(Theme.textFaint)
+        }
+    }
+
+    private func verdictRow(_ e: GovernanceEvent) -> some View {
+        let tint: Color = e.outcome == "block" ? .red : (e.outcome == "escalate" ? .orange : .green)
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(e.outcome.uppercased()).font(Theme.mono(9)).foregroundStyle(tint)
+                Text(e.verb).font(Theme.mono(10)).foregroundStyle(Theme.textBody)
+                if let se = e.sideEffect { Text("· \(se)").font(Theme.body(9)).foregroundStyle(Theme.textFaint) }
+                Spacer()
+            }
+            if let p = e.payload, !p.isEmpty {
+                Text(p).font(Theme.mono(9)).foregroundStyle(Theme.textMuted).lineLimit(1).truncationMode(.middle)
+            }
+        }
+        .padding(.vertical, 1)
     }
 
     @ViewBuilder
