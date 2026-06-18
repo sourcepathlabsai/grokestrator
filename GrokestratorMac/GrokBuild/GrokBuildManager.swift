@@ -219,12 +219,19 @@ public actor GrokBuildManager {
         // ConnectionStore.historyURL migrates the legacy file if present.
         let historyURL = ConnectionStore.historyURL(for: instanceID)
 
+        // Orient-on-read (design/13, design/14): load the project's design-oracle
+        // invariants and inject them as preamble, so the agent orients on the
+        // project's intent before acting. No oracle dir ⇒ nil ⇒ no-op.
+        let cwd = instanceStates[instanceID]?.workingDirectory ?? config?.workingDirectory
+        let orientation = cwd.flatMap { OracleLoader.orientationPreamble(projectDirectory: $0) }
+
         let convo = GrokBuildConversation(
             instanceID: instanceID,
             sessionID: "default",
             client: client,
             persistenceURL: historyURL,
-            rolePrompt: instanceStates[instanceID]?.rolePrompt ?? config?.rolePrompt
+            rolePrompt: instanceStates[instanceID]?.rolePrompt ?? config?.rolePrompt,
+            orientationPreamble: orientation
         )
 
         try await convo.loadHistoryIfAvailable()

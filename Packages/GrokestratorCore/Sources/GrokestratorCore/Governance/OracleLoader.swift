@@ -50,6 +50,30 @@ public enum OracleLoader {
         DestructiveShellDetector.detectorID: DestructiveShellDetector(),
     ]
 
+    /// Render a compact orientation preamble from the project's active invariants, suitable
+    /// for injection ahead of an agent's first turn (Slice 2: Orient-on-read — design/13,
+    /// design/14). Returns `nil` when the project has no `design/oracle/invariants/`
+    /// directory or no active invariants — the caller simply skips the block (no-op).
+    public static func orientationPreamble(projectDirectory: String) -> String? {
+        let invDir = URL(fileURLWithPath: projectDirectory)
+            .appendingPathComponent("design/oracle/invariants")
+        let parsed = loadInvariants(fromDirectory: invDir)
+        let active = parsed.map(\.invariant).filter { $0.state == .active }
+        guard !active.isEmpty else { return nil }
+
+        var lines = ["[Project Design Oracle — orient on these invariants before acting]"]
+        let sorted = active.sorted {
+            if $0.severity != $1.severity { return $0.severity > $1.severity }
+            return $0.id < $1.id
+        }
+        for inv in sorted {
+            let sev = String(describing: inv.severity).uppercased()
+            lines.append("- [\(sev)] \(inv.id): \(inv.statement)")
+        }
+        lines.append("Honor these constraints in every action you take.")
+        return lines.joined(separator: "\n")
+    }
+
     /// Build the runtime corpus for a project: its `design/oracle/` invariants merged over the
     /// built-in universal baseline classifications. Missing dir ⇒ baseline only (graceful).
     /// Pure file IO; safe on session start.

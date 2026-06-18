@@ -33,6 +33,12 @@ public actor GrokBuildConversation {
     /// the next turn re-injects the new role. `nil`/empty ⇒ no role preamble.
     private var rolePrompt: String?
 
+    /// Project-level orientation loaded from `<cwd>/design/oracle/invariants/`.
+    /// Injected as preamble (after rolePrompt, before choicesInstruction) on the
+    /// first turn so the agent orients on the project's design intent before acting
+    /// (Slice 2: Orient-on-read — design/13, design/14). `nil` ⇒ no oracle block.
+    private let orientationPreamble: String?
+
     /// Active broadcast subscribers (local Mac UI + every remote GKSC subscribed
     /// to this Connection). Each receives a `.snapshot` on join, then `.update`
     /// for every `ConversationUpdate` the conversation produces — regardless of
@@ -50,12 +56,13 @@ public actor GrokBuildConversation {
     discrete choices to pick.
     """
 
-    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil) {
+    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil, orientationPreamble: String? = nil) {
         self.instanceID = instanceID
         self.sessionID = sessionID
         self.client = client
         self.history = AgentConversationHistory(persistenceURL: persistenceURL)
         self.rolePrompt = rolePrompt
+        self.orientationPreamble = orientationPreamble
     }
 
     /// Update the role/system prompt. Resets `primed` so the next turn re-injects
@@ -179,6 +186,7 @@ public actor GrokBuildConversation {
         } else {
             var preamble = ""
             if let role = rolePrompt, !role.isEmpty { preamble += role + "\n\n" }
+            if let orient = orientationPreamble, !orient.isEmpty { preamble += orient + "\n\n" }
             preamble += Self.choicesInstruction
             wireText = "\(preamble)\n\n\(prompt)"
         }
