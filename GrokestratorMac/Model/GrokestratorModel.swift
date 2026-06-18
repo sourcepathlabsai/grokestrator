@@ -534,6 +534,22 @@ final class GrokestratorModel {
         persistAndRestartIfLive(idx: idx, item: item)
     }
 
+    /// The design-oracle enforcement mode for a local Connection. Defaults to
+    /// `.shadow` (observe only). Read by `EditToolPolicyView` and the inspector.
+    func oracleEnforcement(for item: InstanceItem) -> OracleEnforcement {
+        connections.first(where: { $0.id == item.id })?.oracleEnforcement ?? .shadow
+    }
+
+    /// Set a local Connection's oracle enforcement mode. Persists and restarts a
+    /// running Node so the new mode takes effect (it's captured at session start).
+    func setOracleEnforcement(_ mode: OracleEnforcement, for item: InstanceItem) {
+        guard item.serverID == nil,
+              let idx = connections.firstIndex(where: { $0.id == item.id }),
+              connections[idx].oracleEnforcement != mode else { return }
+        connections[idx].oracleEnforcement = mode
+        persistAndRestartIfLive(idx: idx, item: item)
+    }
+
     /// The tool/capability policy currently configured for a local Connection — what
     /// its brain is allowed to *do* (read / write / execute, and any allowlist).
     /// Defaults to `.unrestricted`. Read by `EditToolPolicyView`.

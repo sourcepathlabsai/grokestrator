@@ -40,6 +40,7 @@ struct EditToolPolicyView: View {
     /// equals the full permitted set (then `allowed = nil`, meaning "no allowlist").
     @State private var enabled: Set<String> = []
     @State private var autoLevel: AutoApproval.Level = .manual
+    @State private var oracleLevel: OracleEnforcement = .shadow
     @State private var loaded = false
 
     private var isOrchestrator: Bool { item.role == .orchestrator }
@@ -66,6 +67,19 @@ struct EditToolPolicyView: View {
                         .pickerStyle(.segmented).labelsHidden()
                         Text(autoBlurb).font(.caption2).foregroundStyle(.tertiary)
                     }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Design oracle").font(.caption).foregroundStyle(.secondary)
+                    Picker("", selection: $oracleLevel) {
+                        Text("Shadow").tag(OracleEnforcement.shadow)
+                        Text("Enforce").tag(OracleEnforcement.active)
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    Text(oracleLevel == .active
+                         ? "Verdicts enforced — block prevents execution, escalate forces human review."
+                         : "Shadow — verdicts logged but never block. Use to observe before enforcing.")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -117,6 +131,7 @@ struct EditToolPolicyView: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
                     model.setAutoApproval(AutoApproval(level: autoLevel), for: item)
+                    model.setOracleEnforcement(oracleLevel, for: item)
                     model.setToolPolicy(buildPolicy(), for: item)
                     dismiss()
                 }
@@ -198,6 +213,7 @@ struct EditToolPolicyView: View {
         guard !loaded else { return }
         loaded = true
         autoLevel = model.autoApproval(for: item).level
+        oracleLevel = model.oracleEnforcement(for: item)
         let policy = model.toolPolicy(for: item)
         capability = policy.capability
         let names = Set(permittedTools.map(\.name))

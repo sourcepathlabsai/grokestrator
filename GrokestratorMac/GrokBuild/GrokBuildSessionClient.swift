@@ -75,10 +75,13 @@ public actor GrokBuildSessionClient {
     /// Per-Node auto-approval policy for ACP tool prompts (default: ask for
     /// everything). Captured at construction; an edit restarts the Node → new client.
     private let autoApproval: AutoApproval
+    private let oracleEnforcement: OracleEnforcement
 
-    public init(handle: GrokBuildInstanceHandle, autoApproval: AutoApproval = .manual) {
+    public init(handle: GrokBuildInstanceHandle, autoApproval: AutoApproval = .manual,
+                oracleEnforcement: OracleEnforcement = .shadow) {
         self.handle = handle
         self.autoApproval = autoApproval
+        self.oracleEnforcement = oracleEnforcement
         self.reader = ACPMessageReader(dataStream: handle.stdout)
         // Start the reader once the actor is fully initialized.
         Task { await self.startReader() }
@@ -466,8 +469,41 @@ public actor GrokBuildSessionClient {
                 command: p.toolCall?.rawInput?.command, title: p.toolCall?.title,
                 agentName: agentDisplayName, cwd: workingDirectory, nodeName: nil)
             let shadow = (governance ?? .shadow).evaluate(action)
-            OracleLedger.shared.record(GovernanceEvent(action: action, verdict: shadow, nodeID: handle.id, at: Date()))
-            NSLog("%@", "[oracle] shadow (acp): \(shadow.summary)")
+            let oracleEnforced = oracleEnforcement == .active && shadow.outcome != .allow
+            OracleLedger.shared.record(GovernanceEvent(action: action, verdict: shadow, nodeID: handle.id, at: Date(), enforced: oracleEnforced))
+            NSLog("%@", "[oracle] \(oracleEnforcement == .active ? "enforce" : "shadow") (acp): \(shadow.summary)")
+            // Oracle enforcement (design/13, Slice 3): when active, `.block` auto-rejects
+            // and `.escalate` skips auto-approval so the human sees the prompt.
+            if oracleEnforcement == .active {
+                if shadow.outcome == .block,
+                   let reject = p.options.first(where: { $0.kind == "reject_once" })
+                             ?? p.options.first(where: { $0.kind == "reject_always" }) {
+                    respond(id: id, result: selectedOutcome(reject.optionId))
+                    emit(.activity(ActivityEvent(
+                        sessionId: p.sessionId ?? sessionId ?? "",
+                        note: "Oracle blocked: \(String(shadow.rationale.prefix(80)))",
+                        kind: "permission_oracle_block", metadata: nil)))
+                    return
+                }
+                if shadow.outcome == .escalate {
+                    // Force human review — skip auto-approval, go straight to the
+                    // permission prompt UI so the user decides.
+                    let permissionId = idString(id)
+                    pendingPermissions[permissionId] = id
+                    permissionMemos[permissionId] = PermissionMemo(
+                        category: p.category,
+                        optionKinds: Dictionary(p.options.map { ($0.optionId, $0.kind ?? "") }, uniquingKeysWith: { a, _ in a })
+                    )
+                    let options = p.options.map { PermissionOption(id: $0.optionId, label: $0.name ?? $0.optionId, kind: $0.kind) }
+                    emit(.permissionRequest(PermissionRequestEvent(
+                        sessionId: p.sessionId ?? sessionId ?? "",
+                        permissionId: permissionId,
+                        description: "[Oracle escalated] \(p.toolCall?.title ?? "Grok is requesting permission.")",
+                        options: options
+                    )))
+                    return
+                }
+            }
             // If the user already chose "always allow" for this category (e.g. bash),
             // answer it ourselves — grok re-asks even after `allow_always`.
             if let category = p.category, alwaysAllowCategories.contains(category),

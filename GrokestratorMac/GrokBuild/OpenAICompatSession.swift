@@ -24,6 +24,7 @@ public actor OpenAICompatSession: AgentSession {
     /// Governance engine built from THIS node's project oracle (`<cwd>/design/oracle/`),
     /// merged over the baseline — so the shadow verdicts reflect the project's own intent.
     private let governance: GovernanceEngine
+    private let oracleEnforcement: OracleEnforcement
     private var messages: [[String: Any]] = []
     /// When set, this Node can orchestrate: the `delegate` tool routes here (the
     /// manager installs a handler scoped to this Node's own children). nil ⇒ no
@@ -56,7 +57,7 @@ public actor OpenAICompatSession: AgentSession {
     }
 
     public init(instanceID: UUID, baseURL: String, model: String, apiKey: String?, cwd: String?,
-                policy: ToolPolicy = .unrestricted) {
+                policy: ToolPolicy = .unrestricted, oracleEnforcement: OracleEnforcement = .shadow) {
         self.instanceID = instanceID
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.model = model
@@ -64,6 +65,7 @@ public actor OpenAICompatSession: AgentSession {
         self.cwd = cwd ?? FileManager.default.currentDirectoryPath
         self.policy = policy
         self.governance = GovernanceEngine.forProject(directory: self.cwd)
+        self.oracleEnforcement = oracleEnforcement
     }
 
     /// Install the orchestration handler (manager-provided, scoped to this Node's
@@ -215,11 +217,16 @@ public actor OpenAICompatSession: AgentSession {
                 let argsJSON = fn["arguments"] as? String ?? "{}"
                 emit(.toolCall(ToolCallEvent(sessionId: session, toolCallId: id, toolName: name,
                                              arguments: argsPreview(argsJSON))))
-                // Design-oracle SHADOW (design/13): the governance engine observes
-                // the proposed Action and logs (NSLog, NOT the transcript) the verdict
-                // it *would* reach — it does NOT gate execution yet. The API loop is the
-                // high-fidelity boundary (full structured args), so precise detectors run.
-                NSLog("%@", "[oracle] shadow (api): \(shadowVerdict(name: name, argsJSON: argsJSON).summary)")
+                // Design-oracle (design/13): evaluate the proposed tool call. In shadow
+                // mode, log only; in active mode, `.block` prevents execution.
+                let verdict = shadowVerdict(name: name, argsJSON: argsJSON)
+                NSLog("%@", "[oracle] \(oracleEnforcement == .active ? "enforce" : "shadow") (api): \(verdict.summary)")
+                if oracleEnforcement == .active && verdict.outcome == .block {
+                    let reason = "Oracle blocked: \(verdict.rationale)"
+                    emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: reason, isError: true)))
+                    messages.append(["role": "tool", "tool_call_id": id, "content": reason])
+                    continue
+                }
                 let (result, isError) = await executeTool(name: name, argumentsJSON: argsJSON)
                 emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: result, isError: isError)))
                 messages.append(["role": "tool", "tool_call_id": id, "content": result])
@@ -271,9 +278,9 @@ public actor OpenAICompatSession: AgentSession {
         return obj.mapValues { "\($0)" }
     }
 
-    /// Build a `ProposedAction` from this tool call and run it through the shadow
-    /// governance engine (design/13). Observation only — the returned `Verdict` is
-    /// logged, never enforced (that is the oracle's v1).
+    /// Build a `ProposedAction` from this tool call and run it through the
+    /// governance engine (design/13). Records the verdict in the ledger; the caller
+    /// decides whether to enforce based on `oracleEnforcement`.
     private func shadowVerdict(name: String, argsJSON: String) -> Verdict {
         var server: String?, tool: String?
         if name.hasPrefix("mcp__") {
@@ -283,7 +290,8 @@ public actor OpenAICompatSession: AgentSession {
         let action = ProposedAction.fromAPITool(name: name, arguments: argsPreview(argsJSON),
                                                 cwd: cwd, nodeName: nil, mcpServer: server, mcpTool: tool)
         let verdict = governance.evaluate(action)
-        OracleLedger.shared.record(GovernanceEvent(action: action, verdict: verdict, nodeID: instanceID, at: Date()))
+        let enforced = oracleEnforcement == .active && verdict.outcome != .allow
+        OracleLedger.shared.record(GovernanceEvent(action: action, verdict: verdict, nodeID: instanceID, at: Date(), enforced: enforced))
         return verdict
     }
 

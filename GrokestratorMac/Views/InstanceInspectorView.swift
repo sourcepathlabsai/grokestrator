@@ -197,7 +197,9 @@ struct InstanceInspectorView: View {
                     }
                     .buttonStyle(.borderless).help("Refresh verdicts")
                 }
-                Text("Shadow — observed, not enforced. Recorded to `oracle-verdicts.jsonl`.")
+                Text(model.oracleEnforcement(for: instance) == .active
+                     ? "Active — verdicts enforced. Recorded to `oracle-verdicts.jsonl`."
+                     : "Shadow — observed, not enforced. Recorded to `oracle-verdicts.jsonl`.")
                     .font(Theme.body(10)).foregroundStyle(Theme.textFaint)
                 if oracleEvents.isEmpty {
                     Text("No verdicts yet — the oracle records here as this node acts.")
@@ -221,7 +223,8 @@ struct InstanceInspectorView: View {
         let tint: Color = e.outcome == "block" ? .red : (e.outcome == "escalate" ? .orange : .green)
         return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                Text(e.outcome.uppercased()).font(Theme.mono(9)).foregroundStyle(tint)
+                Text(e.outcome.uppercased()).font(Theme.mono(9)).bold(e.enforced).foregroundStyle(tint)
+                if e.enforced { Text("enforced").font(Theme.mono(8)).foregroundStyle(tint.opacity(0.7)) }
                 Text(e.verb).font(Theme.mono(10)).foregroundStyle(Theme.textBody)
                 if let se = e.sideEffect { Text("· \(se)").font(Theme.body(9)).foregroundStyle(Theme.textFaint) }
                 Spacer()

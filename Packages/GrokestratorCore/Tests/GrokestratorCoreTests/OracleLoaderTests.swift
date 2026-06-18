@@ -144,4 +144,48 @@ struct OracleLoaderTests {
                                             cwd: root.path, nodeName: nil, mcpServer: nil, mcpTool: nil)
         #expect(engine.evaluate(rm).outcome == .escalate)   // caught by the in-repo oracle, not code
     }
+
+    // MARK: - Enforcement types (Slice 3)
+
+    @Test("OracleEnforcement round-trips through JSON")
+    func oracleEnforcementCodable() throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        for mode in OracleEnforcement.allCases {
+            let data = try encoder.encode(mode)
+            let decoded = try decoder.decode(OracleEnforcement.self, from: data)
+            #expect(decoded == mode)
+        }
+    }
+
+    @Test("GovernanceEvent round-trips with enforced=true")
+    func governanceEventEnforcedRoundTrip() throws {
+        let action = ProposedAction.fromAPITool(name: "run_command", arguments: ["command": "rm -rf /"],
+                                                cwd: "/tmp", nodeName: nil, mcpServer: nil, mcpTool: nil)
+        let verdict = GovernanceEngine.shadow.evaluate(action)
+        let event = GovernanceEvent(action: action, verdict: verdict, nodeID: UUID(), at: Date(), enforced: true)
+        #expect(event.enforced == true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(event)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(GovernanceEvent.self, from: data)
+        #expect(decoded.enforced == true)
+        #expect(decoded.id == event.id)
+        #expect(decoded.outcome == event.outcome)
+    }
+
+    @Test("GovernanceEvent decodes without enforced field (backward compat)")
+    func governanceEventBackwardCompat() throws {
+        // Simulate an old JSONL entry without `enforced`
+        let json = """
+        {"id":"11111111-1111-1111-1111-111111111111","at":"2025-01-01T00:00:00Z","boundary":"apiToolLoop","verb":"shell","rawVerb":"run_command","fidelity":"structured","outcome":"allow","severity":3,"rationale":"test"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let event = try decoder.decode(GovernanceEvent.self, from: Data(json.utf8))
+        #expect(event.enforced == false)
+        #expect(event.outcome == "allow")
+    }
 }

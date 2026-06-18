@@ -34,7 +34,8 @@ public actor GrokBuildServer {
         switch backend {
         case .grokACP:
             let handle = try await launcher.launch(config)
-            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval)
+            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval,
+                                               oracleEnforcement: config.oracleEnforcement)
         case .acpStdio(let command, let arguments, _):
             // A saved ACP-stdio brain (e.g. Claude Code) carries its own launch command.
             // Override the Connection's command/arguments with the brain's, re-resolving
@@ -43,14 +44,16 @@ public actor GrokBuildServer {
             acp.command = await Self.resolveACPCommand(command)
             acp.arguments = arguments
             let handle = try await launcher.launch(acp)
-            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval)
+            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval,
+                                               oracleEnforcement: config.oracleEnforcement)
         case .openAICompatible(let baseURL, let model, let apiKeyRef):
             // Secrets are referenced by name, never stored inline. Resolved from the
             // process env or the host-local gitignored .env.local_llm (LM Studio needs none).
             let key = apiKeyRef.flatMap { Secrets.value(for: $0) }
             let api = OpenAICompatSession(instanceID: config.id, baseURL: baseURL,
                                           model: model, apiKey: key, cwd: config.workingDirectory,
-                                          policy: config.toolPolicy)
+                                          policy: config.toolPolicy,
+                                          oracleEnforcement: config.oracleEnforcement)
             // Bridge the Node's granted MCP servers (stdio) into the API tool loop so
             // an API brain can use MCP too — same registry + grant as a grok Node.
             let granted = ConnectionStore.loadMCPRegistry()
