@@ -234,7 +234,10 @@ public actor GrokBuildSessionClient {
     private func ensureSession() async throws -> String {
         if let sessionId { return sessionId }
 
-        var cwd = FileManager.default.currentDirectoryPath
+        // The Connection's configured working directory is AUTHORITATIVE — an ACP adapter
+        // (e.g. Claude Code) that doesn't self-report a cwd must use this, not the GUI app's
+        // "/" cwd. grok reports the same dir it was launched in, so they agree for grok.
+        var cwd = handle.workingDirectory ?? FileManager.default.currentDirectoryPath
         if !initialized {
             let initResult = try await request(
                 method: "initialize",
@@ -248,7 +251,8 @@ public actor GrokBuildSessionClient {
                 as: InitializeResult.self,
                 timeout: 30
             )
-            cwd = initResult.meta?.currentWorkingDirectory ?? cwd
+            // Configured dir wins; only fall back to the agent-reported cwd, then the app cwd.
+            cwd = handle.workingDirectory ?? initResult.meta?.currentWorkingDirectory ?? cwd
             capabilities = initResult.toCapabilities()
             capabilities.commands = GrokBuiltinCommands.merged(advertised: capabilities.commands)
             // Remember how this agent identifies + how to authenticate, so a failed
