@@ -475,10 +475,16 @@ public actor GrokBuildSessionClient {
             // Oracle enforcement (design/13, Slice 3): when active, `.block` auto-rejects
             // and `.escalate` skips auto-approval so the human sees the prompt.
             if oracleEnforcement == .active {
-                if shadow.outcome == .block,
-                   let reject = p.options.first(where: { $0.kind == "reject_once" })
-                             ?? p.options.first(where: { $0.kind == "reject_always" }) {
-                    respond(id: id, result: selectedOutcome(reject.optionId))
+                if shadow.outcome == .block {
+                    // Fail CLOSED: reject via an explicit option if the agent offered one,
+                    // else cancel the request outright — a block must NEVER fall through to
+                    // the always-allow / auto-approval / manual path below.
+                    if let reject = p.options.first(where: { $0.kind == "reject_once" })
+                                 ?? p.options.first(where: { $0.kind == "reject_always" }) {
+                        respond(id: id, result: selectedOutcome(reject.optionId))
+                    } else {
+                        respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
+                    }
                     emit(.activity(ActivityEvent(
                         sessionId: p.sessionId ?? sessionId ?? "",
                         note: "Oracle blocked: \(String(shadow.rationale.prefix(80)))",

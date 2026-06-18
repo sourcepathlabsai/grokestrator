@@ -218,11 +218,17 @@ public actor OpenAICompatSession: AgentSession {
                 emit(.toolCall(ToolCallEvent(sessionId: session, toolCallId: id, toolName: name,
                                              arguments: argsPreview(argsJSON))))
                 // Design-oracle (design/13): evaluate the proposed tool call. In shadow
-                // mode, log only; in active mode, `.block` prevents execution.
+                // mode, log only. In active mode, WITHHOLD on any non-allow verdict — the
+                // API loop has NO human-approval channel, so `.escalate` ("needs review")
+                // cannot be surfaced to a human; proceeding unreviewed would defeat
+                // enforcement. So both `.block` and `.escalate` fail safe to a withhold here.
+                // (The dangerous cases — destructive shell, unknown tools — are `.escalate`,
+                // not `.block`, so blocking only `.block` would let them through.)
                 let verdict = shadowVerdict(name: name, argsJSON: argsJSON)
                 NSLog("%@", "[oracle] \(oracleEnforcement == .active ? "enforce" : "shadow") (api): \(verdict.summary)")
-                if oracleEnforcement == .active && verdict.outcome == .block {
-                    let reason = "Oracle blocked: \(verdict.rationale)"
+                if oracleEnforcement == .active && verdict.outcome != .allow {
+                    let verb = verdict.outcome == .block ? "blocked" : "withheld (needs human review — unavailable for this brain)"
+                    let reason = "Oracle \(verb): \(verdict.rationale)"
                     emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: reason, isError: true)))
                     messages.append(["role": "tool", "tool_call_id": id, "content": reason])
                     continue
