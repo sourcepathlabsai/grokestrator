@@ -22,6 +22,7 @@ struct MCPServerEditorView: View {
     // http
     @State private var url: String
     @State private var headersText: String   // Name: Value per line
+    @State private var chosenTemplate: MCPTemplate?
 
     init(model: GrokestratorModel, existing: MCPServerConfig? = nil) {
         self.model = model
@@ -56,13 +57,33 @@ struct MCPServerEditorView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 12) {
+                Text("An MCP server gives grok and API-model Nodes extra tools — files, web, GitHub, and so on. (Claude Code and Codex Nodes bring their own, so you don't need to add those here.) Pick a template to fill in the details, or enter your own. Secrets you add stay host-local.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if existing == nil {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Template").frame(width: 70, alignment: .leading).foregroundStyle(.secondary)
+                        Menu(chosenTemplate?.label ?? "Custom (enter manually)") {
+                            Button("Custom (enter manually)") { applyTemplate(nil) }
+                            Divider()
+                            ForEach(Self.templates) { t in Button(t.label) { applyTemplate(t) } }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let note = chosenTemplate?.note {
+                        Text(note).font(.caption2).foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 HStack(alignment: .firstTextBaseline) {
                     Text("Name").frame(width: 70, alignment: .leading).foregroundStyle(.secondary)
                     TextField("e.g. filesystem, github", text: $name).textFieldStyle(.roundedBorder)
                 }
-                Picker("Transport", selection: $kind) {
-                    Text("stdio (subprocess)").tag(Kind.stdio)
-                    Text("http").tag(Kind.http)
+                Picker("Runs as", selection: $kind) {
+                    Text("Local command (stdio)").tag(Kind.stdio)
+                    Text("Remote URL (http)").tag(Kind.http)
                 }
                 .pickerStyle(.segmented)
 
@@ -158,5 +179,53 @@ struct MCPServerEditorView: View {
             if !k.isEmpty { out[k] = v }
         }
         return out
+    }
+
+    // MARK: - Templates (so you pick a known server instead of typing an arcane command)
+
+    struct MCPTemplate: Identifiable {
+        let id = UUID()
+        let label: String
+        let name: String
+        let command: String
+        let args: [String]
+        let env: [String]        // "KEY=" placeholders the user fills in
+        let note: String?
+    }
+
+    /// Common, well-known MCP servers. The official `@modelcontextprotocol/*` servers run
+    /// via `npx` (Node); the `mcp-server-*` ones via `uvx` (uv/Python).
+    static let templates: [MCPTemplate] = [
+        MCPTemplate(label: "Filesystem — read/write files", name: "filesystem", command: "npx",
+                    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allow"], env: [],
+                    note: "Replace /path/to/allow with a directory the agent may access. Needs Node (npx)."),
+        MCPTemplate(label: "Fetch — read web pages", name: "fetch", command: "uvx",
+                    args: ["mcp-server-fetch"], env: [], note: "Needs uv installed (uvx)."),
+        MCPTemplate(label: "Git — a local repository", name: "git", command: "uvx",
+                    args: ["mcp-server-git", "--repository", "/path/to/repo"], env: [],
+                    note: "Point --repository at a local repo. Needs uv."),
+        MCPTemplate(label: "GitHub", name: "github", command: "npx",
+                    args: ["-y", "@modelcontextprotocol/server-github"], env: ["GITHUB_PERSONAL_ACCESS_TOKEN="],
+                    note: "Add your token after GITHUB_PERSONAL_ACCESS_TOKEN= in Env. Needs Node."),
+        MCPTemplate(label: "Memory — knowledge graph", name: "memory", command: "npx",
+                    args: ["-y", "@modelcontextprotocol/server-memory"], env: [], note: "Needs Node."),
+        MCPTemplate(label: "Sequential Thinking", name: "sequential-thinking", command: "npx",
+                    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"], env: [], note: "Needs Node."),
+        MCPTemplate(label: "Time / timezones", name: "time", command: "uvx",
+                    args: ["mcp-server-time"], env: [], note: "Needs uv."),
+    ]
+
+    /// Apply a template into the form (or clear to a blank custom stdio form for nil).
+    private func applyTemplate(_ t: MCPTemplate?) {
+        chosenTemplate = t
+        guard let t else {
+            name = ""; kind = .stdio; command = ""; argsText = ""; envText = ""; url = ""; headersText = ""
+            return
+        }
+        name = t.name
+        kind = .stdio
+        command = t.command
+        argsText = t.args.joined(separator: "\n")
+        envText = t.env.joined(separator: "\n")
     }
 }
