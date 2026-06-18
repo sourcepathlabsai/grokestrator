@@ -97,7 +97,8 @@ public actor GrokBuildInstanceLauncher {
                 process: process,
                 stdin: stdinPipe.fileHandleForWriting,
                 stdout: stdoutStream,
-                stderr: stderrStream
+                stderr: stderrStream,
+                workingDirectory: config.workingDirectory
             )
         } catch {
             stdoutContinuation.finish()
@@ -187,6 +188,9 @@ public struct GrokBuildInstanceHandle: @unchecked Sendable {
     public let stdin: FileHandle
     public let stdout: AsyncStream<Data>
     public let stderr: AsyncStream<Data>
+    /// The Connection's configured working directory — the authoritative cwd for
+    /// `session/new` (an ACP adapter that doesn't self-report cwd must NOT fall back to "/").
+    public let workingDirectory: String?
 }
 
 public enum GrokBuildError: Error, LocalizedError {

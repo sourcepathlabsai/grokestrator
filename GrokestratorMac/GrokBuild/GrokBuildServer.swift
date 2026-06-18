@@ -19,6 +19,11 @@ public actor GrokBuildServer {
     /// brain is chosen by `config.brain`: `.grokACP` launches a grok process;
     /// `.openAICompatible` opens an in-process API session (no child process).
     public func startInstance(_ config: ManagedInstance) async throws -> (any AgentSession, ManagedInstance) {
+        // SAFETY (non-negotiable): never run an agent at the filesystem root. A Connection
+        // with no working directory inherits the GUI app's cwd — which is "/" — letting the
+        // agent read/write across the WHOLE disk. Require an explicit, real directory.
+        try Self.requireSafeWorkingDirectory(config)
+
         let session: any AgentSession
         // Resolve the concrete backend through the brain catalog + host tier map:
         // grok → grok; a profile binding → its catalog backend; a dynamic binding →
@@ -64,6 +69,21 @@ public actor GrokBuildServer {
         instances[config.id] = updated
 
         return (session, updated)
+    }
+
+    /// Refuse to launch an agent without a real, non-root working directory. Throws an
+    /// actionable error otherwise — the agent's filesystem reach is bounded by this dir, so
+    /// "/" (or an unset value, which resolves to "/") would be unbounded.
+    static func requireSafeWorkingDirectory(_ config: ManagedInstance) throws {
+        let wd = config.workingDirectory?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard !wd.isEmpty, wd != "/" else {
+            throw GrokBuildError.instanceManagementError(
+                "“\(config.name)” has no working directory. Refusing to launch an agent at the filesystem root — set a working directory for this Connection.")
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: wd, isDirectory: &isDir), isDir.boolValue else {
+            throw GrokBuildError.instanceManagementError("“\(config.name)” working directory does not exist: \(wd)")
+        }
     }
 
     /// Resolve a saved ACP-stdio command to a launchable path. If the stored absolute
