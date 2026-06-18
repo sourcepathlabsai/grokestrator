@@ -14,7 +14,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             if let instance = model.selectedInstance {
-                ConversationView(instance: instance)
+                ConversationView(instance: instance, brain: model.brainDescriptor(for: instance))
             } else {
                 ContentUnavailableView(
                     "No connection selected",

@@ -423,6 +423,7 @@ final class GrokestratorModel {
         case .grokACP: return "grok"
         case .onboard(let path): return "Onboard · \((path as NSString).lastPathComponent)"
         case .gemini(let model, _): return "Gemini · \(model)"
+        case .acpStdio(let command, _, let label): return label ?? acpAgentLabel(forCommand: command)
         case .openAICompatible(let baseURL, let model, _):
             let provider = providerName(forBaseURL: baseURL)
             return model.isEmpty ? provider : "\(provider) · \(model)"

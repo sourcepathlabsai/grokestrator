@@ -9,6 +9,10 @@ import GrokestratorCore
 /// Homebrew). When ready, creates the Node pointed at the resolved adapter.
 struct ClaudeCodeSetupView: View {
     @Bindable var model: GrokestratorModel
+    /// When true, the sheet only installs/verifies the adapter and hands control back
+    /// (no Node fields, no "Create Agent") — used when launched from Add Connection,
+    /// which finishes creating the Node itself. Default false = the full add-agent flow.
+    var installOnly: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     @State private var probe: ClaudeCodeSetup.Probe?
@@ -18,6 +22,9 @@ struct ClaudeCodeSetupView: View {
 
     @State private var name = "Code Warrior"
     @State private var workingDirectory = ""
+    /// Save the resolved adapter as a reusable "Claude Code" catalog brain, so the
+    /// next Claude Node is one pick in the Brain menu — no re-running this setup.
+    @State private var saveAsBrain = true
 
     private let brewInstallCmd = #"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#
 
@@ -25,7 +32,7 @@ struct ClaudeCodeSetupView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "hammer.fill").foregroundStyle(.tint)
-                Text("Add Claude Code Agent").font(.headline)
+                Text(installOnly ? "Set Up Claude Code" : "Add Claude Code Agent").font(.headline)
                 Spacer()
                 Button { Task { await refresh() } } label: { Label("Re-check", systemImage: "arrow.clockwise") }
                     .disabled(checking || busy != nil)
@@ -56,8 +63,10 @@ struct ClaudeCodeSetupView: View {
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     }
 
-                    Divider()
-                    agentFields
+                    if !installOnly {
+                        Divider()
+                        agentFields
+                    }
                 }
                 .padding()
             }
@@ -65,14 +74,21 @@ struct ClaudeCodeSetupView: View {
             Divider()
             HStack {
                 if let probe, !probe.ready {
-                    Text("Finish the steps above to create the agent.")
+                    Text(installOnly ? "Finish the steps above." : "Finish the steps above to create the agent.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Create Agent") { create() }
-                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
-                    .disabled(!(probe?.ready ?? false) || name.trimmed.isEmpty || busy != nil)
+                if installOnly {
+                    // Install/verify only — Add Connection selects the brain on dismiss.
+                    Button("Use Claude Code") { dismiss() }
+                        .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                        .disabled(!(probe?.ready ?? false) || busy != nil)
+                } else {
+                    Button("Create Agent") { create() }
+                        .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                        .disabled(!(probe?.ready ?? false) || name.trimmed.isEmpty || busy != nil)
+                }
             }
             .padding()
         }
@@ -177,7 +193,11 @@ struct ClaudeCodeSetupView: View {
                     .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced))
                 Button { pickDirectory() } label: { Image(systemName: "folder") }.buttonStyle(.borderless)
             }
-            Text("Creates a Node backed by Claude Code, pre-set with an implementation role. Delegate coding tasks to it from an orchestrator.")
+            Toggle(isOn: $saveAsBrain) {
+                Text("Save “Claude Code” as a reusable brain").font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            Text("Creates a Node backed by Claude Code, pre-set with an implementation role. Delegate coding tasks to it from an orchestrator. Saving the brain lets you pick “Claude Code” directly when adding the next Connection — no need to reopen this setup.")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
@@ -200,9 +220,29 @@ struct ClaudeCodeSetupView: View {
         You write, build, run, and verify code in the working directory. Implement the \
         task you're handed end-to-end, then report exactly what you changed and how you verified it.
         """
+        // Optionally save (or reuse) a "Claude Code" catalog brain and bind the Node to
+        // it, so the next Claude Node is one pick in the Brain menu. The Connection keeps
+        // `command: adapter` too, so it still launches Claude even if the brain is later
+        // deleted (a dangling profile falls back to the command). See design/12.
+        let brain: BrainBinding
+        if saveAsBrain {
+            brain = .profile(claudeBrainID(adapter: adapter))
+        } else {
+            brain = .grok
+        }
         model.addRealConnection(name: finalName, command: adapter, arguments: [],
-                                workingDirectory: cwd, rolePrompt: role, brain: .grok)
+                                workingDirectory: cwd, rolePrompt: role, brain: brain)
         dismiss()
+    }
+
+    /// Reuse an existing Claude Code (`.acpStdio`) brain for this adapter, or create one.
+    private func claudeBrainID(adapter: String) -> UUID {
+        if let existing = model.brainCatalog.profiles.first(where: {
+            if case .acpStdio(let cmd, _, _) = $0.backend { return cmd == adapter }
+            return false
+        }) { return existing.id }
+        return model.addBrainProfile(name: "Claude Code",
+                                     backend: .acpStdio(command: adapter, arguments: [], label: "Claude Code"))
     }
 
     private func copy(_ s: String) {

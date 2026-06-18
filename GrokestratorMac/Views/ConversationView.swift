@@ -4,6 +4,9 @@ import GrokestratorCore
 /// The main working surface: a console-like transcript plus a prompt composer.
 struct ConversationView: View {
     @Bindable var instance: InstanceItem
+    /// The brain backing this session — shown as an icon+label in the header (hover →
+    /// full label), so the active session always names its brain.
+    var brain: BrainDescriptor? = nil
     /// Highlighted row in the slash-command popup (keyboard navigation).
     @State private var slashHighlight = 0
     /// Set when the user dismisses the popup with Escape; reset when the token changes.
@@ -54,6 +57,16 @@ struct ConversationView: View {
         .navigationSubtitle(instance.status.rawValue)
         .environment(\.mediaLoader, conversation.mediaLoader)
         .toolbar {
+            if let brain {
+                ToolbarItem(placement: .navigation) {
+                    HStack(spacing: 5) {
+                        Image(systemName: brain.systemImage).foregroundStyle(brain.tint)
+                        Text(brain.label).font(Theme.body(12, .medium)).foregroundStyle(Theme.textMuted)
+                    }
+                    .help("Brain backing this session: \(brain.label)")
+                    .accessibilityLabel("Brain: \(brain.label)")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     confirmingClear = true

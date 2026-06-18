@@ -35,6 +35,11 @@ struct AddConnectionView: View {
     /// archived match so Restore / Create-new can act on it.
     @State private var pendingArchivedMatch: ManagedConnection?
 
+    /// Auto-detecting the Claude Code adapter (so the user never types its path).
+    @State private var resolvingClaude = false
+    /// Shown when Claude Code isn't installed yet — the detect/install flow.
+    @State private var showingClaudeSetup = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(parent == nil ? "Add Connection" : "Add Child Agent")
@@ -67,8 +72,16 @@ struct AddConnectionView: View {
                             Text(p.name).tag(BrainSelection.profile(p.id))
                         }
                     }
-                    Button { addingProfile = true } label: { Label("Add Brain to Catalog…", systemImage: "plus") }
-                        .buttonStyle(.borderless).font(.caption)
+                    HStack(spacing: 12) {
+                        // One tap: find the Homebrew/npm-installed `claude-code-acp`
+                        // adapter, save it as a reusable "Claude Code" brain, and select
+                        // it — so the user never has to know or type the adapter path.
+                        Button { Task { await useClaudeCode() } } label: { Label("Use Claude Code", systemImage: "asterisk") }
+                            .disabled(resolvingClaude)
+                        Button { addingProfile = true } label: { Label("Add Brain to Catalog…", systemImage: "plus") }
+                        if resolvingClaude { ProgressView().controlSize(.small) }
+                    }
+                    .buttonStyle(.borderless).font(.caption)
                 } header: {
                     Text("Brain").font(.caption).foregroundStyle(.secondary)
                 }
@@ -78,7 +91,7 @@ struct AddConnectionView: View {
                         .font(.system(.body, design: .monospaced))
                     TextField("Arguments", text: $argumentsText)
                         .font(.system(.body, design: .monospaced))
-                    Text("ACP agent launch command — defaults to grok. For Claude Code use “Add Claude Code Agent…” (auto-resolves the adapter), or paste any ACP-over-stdio command here. Detected: **\(GrokestratorModel.acpAgentLabel(forCommand: command))**.")
+                    Text("ACP agent launch command — defaults to grok. For Claude Code, click **Use Claude Code** above (auto-detects the adapter — no path to type). Or paste any ACP-over-stdio command here. Detected: **\(GrokestratorModel.acpAgentLabel(forCommand: command))**.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
                 LabeledContent("Working directory (optional)") {
@@ -146,6 +159,26 @@ struct AddConnectionView: View {
             Text("You can bring back its config + transcript, or keep it archived and create a new one. The archived entry will be renamed so the two are easy to tell apart.")
         }
         .sheet(isPresented: $addingProfile) { BrainProfileEditorView(model: model) }
+        .sheet(isPresented: $showingClaudeSetup) {
+            // Install-only sheet just sets up the adapter; on dismiss, select the Claude
+            // brain here so the user finishes creating the Node in this one form.
+            Task { await tryResolveClaudeSilently() }
+        } content: {
+            ClaudeCodeSetupView(model: model, installOnly: true)
+        }
+    }
+
+    /// After the install sheet closes, quietly select the Claude brain if it resolved.
+    private func tryResolveClaudeSilently() async {
+        guard case .grok = brain, let adapter = await ClaudeCodeSetup.resolveAdapterPath() else { return }
+        let id = model.brainCatalog.profiles.first(where: {
+            if case .acpStdio(let cmd, _, _) = $0.backend { return cmd == adapter }
+            return false
+        })?.id ?? model.addBrainProfile(name: "Claude Code",
+                                        backend: .acpStdio(command: adapter, arguments: [], label: "Claude Code"))
+        command = adapter
+        argumentsText = ""
+        brain = .profile(id)
     }
 
     // MARK: - Validation
@@ -239,6 +272,29 @@ struct AddConnectionView: View {
         pendingArchivedMatch = nil
         performAdd()
         dismiss()
+    }
+
+    /// Auto-detect the Claude Code adapter, save/reuse a "Claude Code" catalog brain,
+    /// and select it — the user never types or knows the adapter path. If it isn't
+    /// installed, point them at the one-time installer rather than failing silently.
+    private func useClaudeCode() async {
+        resolvingClaude = true
+        defer { resolvingClaude = false }
+        guard let adapter = await ClaudeCodeSetup.resolveAdapterPath() else {
+            // Not installed — drop straight into the detect/install flow instead of a
+            // dead-end hint. That sheet handles Homebrew/node/adapter and creates the
+            // Claude Node itself, so the user's goal is met there.
+            showingClaudeSetup = true
+            return
+        }
+        let id = model.brainCatalog.profiles.first(where: {
+            if case .acpStdio(let cmd, _, _) = $0.backend { return cmd == adapter }
+            return false
+        })?.id ?? model.addBrainProfile(name: "Claude Code",
+                                        backend: .acpStdio(command: adapter, arguments: [], label: "Claude Code"))
+        command = adapter        // stored on the Connection too, as a fallback if the brain is deleted
+        argumentsText = ""
+        brain = .profile(id)     // select it → command fields collapse, picker shows "Claude Code"
     }
 
     private func performAdd() {

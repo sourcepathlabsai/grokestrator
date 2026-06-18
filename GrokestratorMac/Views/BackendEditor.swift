@@ -30,8 +30,9 @@ struct BackendEditor: View {
         case .gemini(let m, let ref):
             _baseURL = State(initialValue: BackendPreset.geminiBaseURL)
             _model = State(initialValue: m); _keyRef = State(initialValue: ref ?? "GEMINI_API_KEY")
-        case .grokACP, .onboard:
-            // Catalog brains are API brains; start from a blank OpenAI-compatible shape.
+        case .grokACP, .onboard, .acpStdio:
+            // This editor edits API brains; for non-API backends start from a blank
+            // OpenAI-compatible shape (ACP-stdio brains are created via Claude setup).
             _baseURL = State(initialValue: ""); _model = State(initialValue: ""); _keyRef = State(initialValue: "")
         }
     }
@@ -41,16 +42,21 @@ struct BackendEditor: View {
             HStack {
                 Text("Provider").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
                 Menu(currentPresetName) {
+                    Button("New Provider") { applyNewProvider() }
+                    Divider()
                     ForEach(BackendPreset.all) { p in Button(p.name) { apply(p) } }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            field("Base URL", text: $baseURL, placeholder: "https://api.groq.com/openai/v1")
-            modelRow
-            field("API key name", text: $keyRef, placeholder: "GROQ_API_KEY")
+            field("Base URL", text: $baseURL, placeholder: "https://api.your-provider.com/v1")
+            // API key (name + value) sits ABOVE the model on purpose: fetching the
+            // model list needs the base URL *and* a working key.
+            field("Key name", text: $keyRef, placeholder: "PROVIDER_API_KEY")
             keyStatusRow
-            Text("The key *name* points at a host-local secret in .env.local_llm. Enter the value below and the app stores it there (0600, gitignored) — never in config. Leave the name empty for keyless local servers.")
+            Text("The key value is stored host-locally in .env.local_llm (0600, gitignored) under this name — never in config. Pick a known provider above and the name fills in; leave empty only for keyless local servers.")
                 .font(.caption2).foregroundStyle(.tertiary)
+            // Model — fetched from the provider, left blank until you pick one.
+            modelRow
         }
     }
 
@@ -60,7 +66,7 @@ struct BackendEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Model").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
-                TextField("llama-3.3-70b-versatile", text: $model)
+                TextField("Fetch, then pick a model", text: $model)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .onChange(of: model) { _, _ in push() }
@@ -125,7 +131,7 @@ struct BackendEditor: View {
     private func keyEntryField(_ ref: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text("API key").frame(width: 78, alignment: .leading).foregroundStyle(.secondary)
-            SecureField("Paste value for \(ref)", text: $newKeyValue)
+            SecureField("Paste the provider's API key", text: $newKeyValue)
                 .textFieldStyle(.roundedBorder)
             Button("Save key") {
                 if Secrets.set(newKeyValue, for: ref) {
@@ -149,13 +155,22 @@ struct BackendEditor: View {
     }
 
     private var currentPresetName: String {
-        BackendPreset.all.first { $0.baseURL == baseURL.trimmed }?.name ?? "Custom"
+        BackendPreset.all.first { $0.baseURL == baseURL.trimmed }?.name ?? "New Provider"
     }
 
+    /// Apply a known provider: fills base URL + key name, but NOT a model — the model
+    /// list is fetched and picked, never guessed.
     private func apply(_ p: BackendPreset) {
         baseURL = p.baseURL
-        if model.trimmed.isEmpty { model = p.model }
+        model = ""
         keyRef = p.keyRef
+        fetchedModels = []; fetchError = nil
+        push()
+    }
+
+    /// Start from a blank "New Provider" shape (clears the preset's fields).
+    private func applyNewProvider() {
+        baseURL = ""; model = ""; keyRef = ""
         fetchedModels = []; fetchError = nil
         push()
     }
