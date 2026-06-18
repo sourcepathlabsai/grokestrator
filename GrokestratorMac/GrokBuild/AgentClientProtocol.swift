@@ -113,7 +113,7 @@ struct SessionUpdateParams: Decodable {
 
     struct Update: Decodable {
         let sessionUpdate: String          // e.g. "agent_message_chunk", "agent_thought_chunk", "tool_call"
-        let content: ContentBlock?         // for message/thought chunks
+        let content: ContentBlock?         // for message/thought chunks (a single object)
         let toolCallId: String?            // for tool_call / tool_call_update
         let title: String?                 // tool call title
         let kind: String?                  // tool call kind
@@ -121,6 +121,29 @@ struct SessionUpdateParams: Decodable {
         let availableCommands: [CommandWire]?   // for "available_commands_update"
         let entries: [PlanEntryWire]?      // for "plan" (grok's live task checklist)
         let currentModeId: String?         // for "current_mode_update" (ACP standard; unobserved from grok)
+
+        enum CodingKeys: String, CodingKey {
+            case sessionUpdate, content, toolCallId, title, kind, status, availableCommands, entries, currentModeId
+        }
+
+        // `content` is polymorphic on the wire: a single `ContentBlock` for
+        // message/thought chunks, but an ARRAY for `tool_call_update` results. Decoding
+        // it strictly as `ContentBlock?` threw on the array form and dropped the ENTIRE
+        // update (e.g. the completed image-gen result with its `rawOutput.path`). Decode
+        // it leniently — an array (or any non-object) yields `nil`, which is fine: tool
+        // results are read from `rawOutput`, not this field.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            sessionUpdate = try c.decode(String.self, forKey: .sessionUpdate)
+            content = (try? c.decodeIfPresent(ContentBlock.self, forKey: .content)) ?? nil
+            toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
+            title = try c.decodeIfPresent(String.self, forKey: .title)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind)
+            status = try c.decodeIfPresent(String.self, forKey: .status)
+            availableCommands = try c.decodeIfPresent([CommandWire].self, forKey: .availableCommands)
+            entries = try c.decodeIfPresent([PlanEntryWire].self, forKey: .entries)
+            currentModeId = try c.decodeIfPresent(String.self, forKey: .currentModeId)
+        }
     }
 }
 

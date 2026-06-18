@@ -164,9 +164,19 @@ private struct Representable: NSViewRepresentable {
         // finite, bounded width; otherwise defer to default sizing.
         let width = proposal.width ?? scroll.frame.width
         guard width.isFinite, width > 0, width < 100_000 else { return nil }
-        // Re-measure at the proposed width → text reflows, height follows.
-        // The text view's width drives the (width-tracking) container, so set
-        // the frame first, then lay out.
+        // Re-measure at the proposed width → text reflows, height follows. The text
+        // view's width drives the (width-tracking) container, so set the frame first,
+        // then lay out — but SAVE/RESTORE around it: SwiftUI probes this with several
+        // candidate widths (including a transient narrow one when a sibling like the
+        // slash-command popup is inserted), and leaving the container at a probe width
+        // makes the live prompt wrap at a few characters until the next wide layout.
+        // A measurement must not mutate persistent state.
+        let savedWidth = textView.frame.size.width
+        let savedContainer = container.containerSize
+        defer {
+            textView.frame.size.width = savedWidth
+            container.containerSize = savedContainer
+        }
         textView.frame.size.width = width
         container.containerSize = NSSize(width: max(width, 1), height: CGFloat.greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: container)

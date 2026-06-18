@@ -62,6 +62,10 @@ public actor GrokBuildSessionClient {
 
     private var readerTask: Task<Void, Never>?
 
+    /// Image artifact paths already surfaced as inline images (image_gen/image_edit),
+    /// so a re-sent `completed` tool update doesn't render the same image twice.
+    private var renderedImagePaths: Set<String> = []
+
     /// Per-Node auto-approval policy for ACP tool prompts (default: ask for
     /// everything). Captured at construction; an edit restarts the Node → new client.
     private let autoApproval: AutoApproval
@@ -377,6 +381,18 @@ public actor GrokBuildSessionClient {
             if let status = p.update.status {
                 emit(.activity(ActivityEvent(sessionId: sid, note: "\(p.update.title ?? "tool") — \(status)", kind: "tool_update", metadata: nil)))
             }
+            // Image tools (`image_gen` / `image_edit`) save the result to grok's session
+            // folder and report the path in `rawOutput.path` — and instruct grok's own
+            // model NOT to re-display it (grok's native GUI renders it from the folder).
+            // Over ACP *we* are the GUI: surface the path as an inline image. Emitting it
+            // as a one-line Markdown image reuses the existing ContentParser → image-view
+            // path (and persists/replays identically). See design/08 media rendering.
+            if let path = Self.imageResultPath(in: line),
+               renderedImagePaths.insert(path).inserted {   // once per artifact, even if re-sent
+                let alt = (path as NSString).lastPathComponent
+                emit(.message(MessageEvent(sessionId: sid, role: "assistant",
+                                           content: "![\(alt)](\(path))", metadata: nil)))
+            }
 
         case "available_commands_update":
             // The authoritative, possibly-updating advertised list (plugins can change
@@ -663,6 +679,32 @@ public actor GrokBuildSessionClient {
         var line = data
         line.append(0x0A)
         try? handle.stdin.write(contentsOf: line)
+    }
+}
+
+extension GrokBuildSessionClient {
+    /// Extracts an image artifact path from a `tool_call_update` line's `rawOutput`
+    /// (grok's image tools report `{ type, path, filename }` there). Decoded
+    /// *independently* of the main `Update` decode so an unrelated tool's differently
+    /// shaped `rawOutput` can never break the primary path. Returns the path only when
+    /// it points at a renderable image file.
+    static func imageResultPath(in line: Data) -> String? {
+        struct Wire: Decodable {
+            struct Params: Decodable {
+                struct Update: Decodable {
+                    struct RawOutput: Decodable { let type: String?; let path: String? }
+                    let rawOutput: RawOutput?
+                }
+                let update: Update
+            }
+            let params: Params
+        }
+        guard let path = (try? JSONDecoder().decode(Wire.self, from: line))?.params.update.rawOutput?.path,
+              !path.isEmpty else { return nil }
+        let imageExts: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic"]
+        guard imageExts.contains((path as NSString).pathExtension.lowercased()),
+              FileManager.default.fileExists(atPath: path) else { return nil }
+        return path
     }
 }
 
