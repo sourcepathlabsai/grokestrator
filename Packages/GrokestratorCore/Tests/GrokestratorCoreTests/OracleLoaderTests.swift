@@ -79,6 +79,58 @@ struct OracleLoaderTests {
         try? FileManager.default.removeItem(at: base)
     }
 
+    // MARK: - Orient-on-read (Slice 2)
+
+    @Test("orientationPreamble formats active invariants sorted critical-first")
+    func orientationPreamble() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("orient-\(UUID().uuidString)")
+        let invDir = base.appendingPathComponent("design/oracle/invariants")
+        try FileManager.default.createDirectory(at: invDir, withIntermediateDirectories: true)
+        try "---\nid: INV-alpha\nseverity: high\nstate: active\n---\nAlpha must hold.".write(to: invDir.appendingPathComponent("INV-alpha.md"), atomically: true, encoding: .utf8)
+        try "---\nid: INV-beta\nseverity: critical\nstate: active\n---\nBeta must hold.".write(to: invDir.appendingPathComponent("INV-beta.md"), atomically: true, encoding: .utf8)
+        try "---\nid: INV-retired\nseverity: high\nstate: retired\n---\nRetired.".write(to: invDir.appendingPathComponent("INV-retired.md"), atomically: true, encoding: .utf8)
+
+        let preamble = OracleLoader.orientationPreamble(projectDirectory: base.path)
+        #expect(preamble != nil)
+        #expect(preamble!.contains("[CRITICAL] INV-beta"))
+        #expect(preamble!.contains("[HIGH] INV-alpha"))
+        #expect(!preamble!.contains("INV-retired"))
+        // Critical sorts before high
+        let betaRange = preamble!.range(of: "INV-beta")!
+        let alphaRange = preamble!.range(of: "INV-alpha")!
+        #expect(betaRange.lowerBound < alphaRange.lowerBound)
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    @Test("orientationPreamble returns nil for nonexistent directory")
+    func orientationNoDir() {
+        let preamble = OracleLoader.orientationPreamble(projectDirectory: "/nonexistent-\(UUID().uuidString)")
+        #expect(preamble == nil)
+    }
+
+    @Test("orientationPreamble returns nil when all invariants are retired")
+    func orientationAllRetired() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("orient-ret-\(UUID().uuidString)")
+        let invDir = base.appendingPathComponent("design/oracle/invariants")
+        try FileManager.default.createDirectory(at: invDir, withIntermediateDirectories: true)
+        try "---\nid: INV-old\nseverity: high\nstate: retired\n---\nOld.".write(to: invDir.appendingPathComponent("INV-old.md"), atomically: true, encoding: .utf8)
+        #expect(OracleLoader.orientationPreamble(projectDirectory: base.path) == nil)
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    @Test("orientationPreamble works against the SHIPPED design/oracle (dogfood)")
+    func orientationShipped() {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let preamble = OracleLoader.orientationPreamble(projectDirectory: root.path)
+        guard let preamble else { return }   // skip gracefully if layout differs
+        #expect(preamble.contains("INV-no-destructive-shell"))
+        #expect(preamble.contains("INV-cwd-confinement"))
+        #expect(preamble.contains("INV-external-comms-reviewed"))
+        #expect(preamble.hasPrefix("[Project Design Oracle"))
+        #expect(preamble.hasSuffix("Honor these constraints in every action you take."))
+    }
+
     @Test("the SHIPPED design/oracle parses + governs (dogfood)")
     func shippedOracle() {
         var root = URL(fileURLWithPath: #filePath)   // …/Packages/GrokestratorCore/Tests/GrokestratorCoreTests/<file>
