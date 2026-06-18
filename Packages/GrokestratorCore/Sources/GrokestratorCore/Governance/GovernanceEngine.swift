@@ -14,8 +14,16 @@ public struct GovernanceEngine: Sendable {
     public let corpus: Corpus
     public init(corpus: Corpus) { self.corpus = corpus }
 
-    /// The shared shadow-mode engine, built from the curated seed corpus.
+    /// The shared shadow-mode engine, built from the code baseline (fallback when a project
+    /// has no `design/oracle/`).
     public static let shadow = GovernanceEngine(corpus: .seed)
+
+    /// Build an engine from a project's own `design/oracle/` (loaded from its working
+    /// directory), merged over the universal baseline. This is the project-owned oracle —
+    /// it travels with the repo, not the app. No oracle in the project ⇒ baseline only.
+    public static func forProject(directory: String) -> GovernanceEngine {
+        GovernanceEngine(corpus: OracleLoader.loadCorpus(projectDirectory: directory))
+    }
 
     public func evaluate(_ action: ProposedAction) -> Verdict {
         // 1. Classify against the key index.

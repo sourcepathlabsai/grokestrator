@@ -8,6 +8,9 @@ two standing duties that keep that true.
 ## 1. Orient before substantial work
 
 Before non-trivial work, orient on:
+- **The project oracle** — `design/oracle/` (invariants this project must hold; one
+  human+machine-readable markdown file each — see `design/oracle/README.md`). These are
+  enforced at runtime by the governance engine *and* are yours to orient on directly.
 - **Repo design docs** — `design/*.md`, especially `10` (orchestration rungs), `11`
   (orchestration platform), `12` (model-agnostic runtime), `13` (design oracle), `14`
   (OODA helix).

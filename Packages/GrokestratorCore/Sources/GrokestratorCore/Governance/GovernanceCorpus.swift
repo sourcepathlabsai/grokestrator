@@ -108,25 +108,30 @@ public extension Corpus {
     /// the two detectors. MCP tools are deliberately *not* enumerated — an unknown MCP
     /// tool falls through to fail-closed (escalate), which is the behavior we want to
     /// watch in shadow against real servers (Granted, etc.).
+    /// Universal verb → side-effect classifications — NOT project-specific (shell is execute
+    /// everywhere), so they're a built-in baseline that every project's loaded oracle merges
+    /// over. Project-specific classifications can be added to `design/oracle/` later.
+    static let baselineClassifications: [Classification] = [
+        Classification(identity: .init(verb: "fs.read"), sideEffect: .observe,
+                       attributes: .init(reversible: true, external: false, scope: .node),
+                       severityFloor: .info, rationale: "Reading a file changes nothing."),
+        Classification(identity: .init(verb: "fs.list"), sideEffect: .observe,
+                       attributes: .init(reversible: true, external: false, scope: .node),
+                       severityFloor: .info, rationale: "Listing a directory changes nothing."),
+        Classification(identity: .init(verb: "fs.write"), sideEffect: .mutate,
+                       attributes: .init(reversible: true, external: false, scope: .node),
+                       severityFloor: .low, rationale: "Writing a file mutates recoverable node-local state."),
+        Classification(identity: .init(verb: "shell"), sideEffect: .execute,
+                       attributes: .init(reversible: false, external: true, scope: .host),
+                       severityFloor: .high,
+                       rationale: "Shell runs arbitrary code on the host — a wildcard; its true class hides in the payload."),
+        Classification(identity: .init(verb: "delegate"), sideEffect: .delegate,
+                       attributes: .init(reversible: false, external: false, scope: .node),
+                       severityFloor: .low, rationale: "Hands a sub-task (and authority) to a child agent."),
+    ]
+
     static var seed: Corpus {
-        let classifications: [Classification] = [
-            Classification(identity: .init(verb: "fs.read"), sideEffect: .observe,
-                           attributes: .init(reversible: true, external: false, scope: .node),
-                           severityFloor: .info, rationale: "Reading a file changes nothing."),
-            Classification(identity: .init(verb: "fs.list"), sideEffect: .observe,
-                           attributes: .init(reversible: true, external: false, scope: .node),
-                           severityFloor: .info, rationale: "Listing a directory changes nothing."),
-            Classification(identity: .init(verb: "fs.write"), sideEffect: .mutate,
-                           attributes: .init(reversible: true, external: false, scope: .node),
-                           severityFloor: .low, rationale: "Writing a file mutates recoverable node-local state."),
-            Classification(identity: .init(verb: "shell"), sideEffect: .execute,
-                           attributes: .init(reversible: false, external: true, scope: .host),
-                           severityFloor: .high,
-                           rationale: "Shell runs arbitrary code on the host — a wildcard; its true class hides in the payload."),
-            Classification(identity: .init(verb: "delegate"), sideEffect: .delegate,
-                           attributes: .init(reversible: false, external: false, scope: .node),
-                           severityFloor: .low, rationale: "Hands a sub-task (and authority) to a child agent."),
-        ]
+        let classifications = baselineClassifications
         let invariants: [Invariant] = [
             Invariant(id: "INV-cwd-confinement",
                       statement: "File actions must stay within the node's working directory.",

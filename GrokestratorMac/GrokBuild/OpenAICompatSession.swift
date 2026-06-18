@@ -21,6 +21,9 @@ public actor OpenAICompatSession: AgentSession {
     private let apiKey: String?
     private let cwd: String
     private let policy: ToolPolicy
+    /// Governance engine built from THIS node's project oracle (`<cwd>/design/oracle/`),
+    /// merged over the baseline — so the shadow verdicts reflect the project's own intent.
+    private let governance: GovernanceEngine
     private var messages: [[String: Any]] = []
     /// When set, this Node can orchestrate: the `delegate` tool routes here (the
     /// manager installs a handler scoped to this Node's own children). nil ⇒ no
@@ -60,6 +63,7 @@ public actor OpenAICompatSession: AgentSession {
         self.apiKey = apiKey
         self.cwd = cwd ?? FileManager.default.currentDirectoryPath
         self.policy = policy
+        self.governance = GovernanceEngine.forProject(directory: self.cwd)
     }
 
     /// Install the orchestration handler (manager-provided, scoped to this Node's
@@ -278,7 +282,7 @@ public actor OpenAICompatSession: AgentSession {
         }
         let action = ProposedAction.fromAPITool(name: name, arguments: argsPreview(argsJSON),
                                                 cwd: cwd, nodeName: nil, mcpServer: server, mcpTool: tool)
-        return GovernanceEngine.shadow.evaluate(action)
+        return governance.evaluate(action)
     }
 
     // MARK: - Tools (app-executed, cwd-scoped)

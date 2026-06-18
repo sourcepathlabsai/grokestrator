@@ -66,6 +66,12 @@ public actor GrokBuildSessionClient {
     /// so a re-sent `completed` tool update doesn't render the same image twice.
     private var renderedImagePaths: Set<String> = []
 
+    /// The node's resolved working directory + the governance engine built from its project
+    /// oracle (`<cwd>/design/oracle/`). Built once the cwd is known (after `initialize`);
+    /// falls back to the baseline engine until then.
+    private var workingDirectory: String?
+    private var governance: GovernanceEngine?
+
     /// Per-Node auto-approval policy for ACP tool prompts (default: ask for
     /// everything). Captured at construction; an edit restarts the Node → new client.
     private let autoApproval: AutoApproval
@@ -251,6 +257,11 @@ public actor GrokBuildSessionClient {
             authHint = (initResult.authMethods ?? []).compactMap { $0.description ?? $0.name }.first
             initialized = true
         }
+
+        // Now the working directory is known — build this node's project-oracle engine
+        // (`<cwd>/design/oracle/`, merged over the baseline) for the shadow governance pass.
+        workingDirectory = cwd
+        governance = GovernanceEngine.forProject(directory: cwd)
 
         // Advertise the in-app Orchestration MCP server (host-local, loopback) so
         // this Node can `delegate` to children. Per-session injection — no config
@@ -442,10 +453,10 @@ public actor GrokBuildSessionClient {
             // human, below, are untouched). This is the low-fidelity boundary: a coarse
             // `kind` + a command/title string, no general structured args — so precise
             // detectors abstain here.
-            let shadow = GovernanceEngine.shadow.evaluate(ProposedAction.fromACPPermission(
+            let shadow = (governance ?? .shadow).evaluate(ProposedAction.fromACPPermission(
                 kind: p.toolCall?.kind, variant: p.toolCall?.rawInput?.variant,
                 command: p.toolCall?.rawInput?.command, title: p.toolCall?.title,
-                agentName: agentDisplayName, cwd: nil, nodeName: nil))
+                agentName: agentDisplayName, cwd: workingDirectory, nodeName: nil))
             NSLog("%@", "[oracle] shadow (acp): \(shadow.summary)")
             // If the user already chose "always allow" for this category (e.g. bash),
             // answer it ourselves — grok re-asks even after `allow_always`.
