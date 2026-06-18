@@ -72,6 +72,10 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     /// ask for everything, as before. Only meaningful for ACP nodes (grok/Claude).
     public var autoApproval: AutoApproval
 
+    /// Whether design-oracle verdicts are enforced or observe-only (shadow). Default
+    /// `.shadow` — log verdicts but never gate execution (today's behavior).
+    public var oracleEnforcement: OracleEnforcement
+
     // Runtime (not persisted the same way)
     public var status: InstanceStatus
     public var lastStartedAt: Date?
@@ -95,6 +99,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         toolPolicy: ToolPolicy = .unrestricted,
         grantedMCPServerIDs: [UUID]? = nil,
         autoApproval: AutoApproval = .manual,
+        oracleEnforcement: OracleEnforcement = .shadow,
         status: InstanceStatus = .stopped,
         lastStartedAt: Date? = nil,
         lastExitCode: Int32? = nil,
@@ -116,6 +121,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.toolPolicy = toolPolicy
         self.grantedMCPServerIDs = grantedMCPServerIDs
         self.autoApproval = autoApproval
+        self.oracleEnforcement = oracleEnforcement
         self.status = status
         self.lastStartedAt = lastStartedAt
         self.lastExitCode = lastExitCode
@@ -127,7 +133,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, command, arguments, workingDirectory, environmentOverrides,
              autoRestart, shared, archived, role, parentID, rolePrompt, brain, toolPolicy,
-             grantedMCPServerIDs, autoApproval, status, lastStartedAt, lastExitCode, pid
+             grantedMCPServerIDs, autoApproval, oracleEnforcement, status, lastStartedAt, lastExitCode, pid
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -147,6 +153,7 @@ public struct ManagedInstance: Identifiable, Codable, Hashable, Sendable {
         self.toolPolicy = try c.decodeIfPresent(ToolPolicy.self, forKey: .toolPolicy) ?? .unrestricted
         self.grantedMCPServerIDs = try c.decodeIfPresent([UUID].self, forKey: .grantedMCPServerIDs)
         self.autoApproval = try c.decodeIfPresent(AutoApproval.self, forKey: .autoApproval) ?? .manual
+        self.oracleEnforcement = try c.decodeIfPresent(OracleEnforcement.self, forKey: .oracleEnforcement) ?? .shadow
         self.status = try c.decodeIfPresent(InstanceStatus.self, forKey: .status) ?? .stopped
         self.lastStartedAt = try c.decodeIfPresent(Date.self, forKey: .lastStartedAt)
         self.lastExitCode = try c.decodeIfPresent(Int32.self, forKey: .lastExitCode)
@@ -408,6 +415,16 @@ public struct AutoApproval: Codable, Hashable, Sendable {
         // `delete` and `execute` are destructive/powerful — they need `.all`.
         switch kind { case "edit", "move": return true; default: return false }
     }
+}
+
+/// Whether the design-oracle's verdicts gate execution or just observe. `shadow`
+/// (default) preserves today's behavior: verdicts are logged but never block. `active`
+/// lets the oracle enforce — `.block` prevents execution, `.escalate` forces human
+/// review (ACP) or logs a warning (API). Per-node, so one Node can trial enforcement
+/// while others stay in shadow.
+public enum OracleEnforcement: String, Codable, Hashable, Sendable, CaseIterable {
+    case shadow    // log only (today's behavior)
+    case active    // verdicts gate execution
 }
 
 /// How a Node's brain is chosen: `grok` (its own command), a catalog `profile` by

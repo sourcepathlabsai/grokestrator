@@ -22,8 +22,9 @@ public struct GovernanceEvent: Codable, Sendable, Identifiable {
     public let sideEffect: String?     // nil ⇒ unknown (fail-closed)
     public let severity: Int
     public let rationale: String
+    public let enforced: Bool          // true when the verdict actually gated execution
 
-    public init(action: ProposedAction, verdict: Verdict, nodeID: UUID?, at: Date) {
+    public init(action: ProposedAction, verdict: Verdict, nodeID: UUID?, at: Date, enforced: Bool = false) {
         self.id = UUID()
         self.at = at
         self.nodeID = nodeID
@@ -37,6 +38,25 @@ public struct GovernanceEvent: Codable, Sendable, Identifiable {
         self.sideEffect = verdict.sideEffect?.rawValue
         self.severity = verdict.severity.rawValue
         self.rationale = verdict.rationale
+        self.enforced = enforced
+    }
+
+    // Forward-compatible decoding: older JSONL entries lack `enforced`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.at = try c.decode(Date.self, forKey: .at)
+        self.nodeID = try c.decodeIfPresent(UUID.self, forKey: .nodeID)
+        self.boundary = try c.decode(String.self, forKey: .boundary)
+        self.verb = try c.decode(String.self, forKey: .verb)
+        self.rawVerb = try c.decode(String.self, forKey: .rawVerb)
+        self.payload = try c.decodeIfPresent(String.self, forKey: .payload)
+        self.fidelity = try c.decode(String.self, forKey: .fidelity)
+        self.outcome = try c.decode(String.self, forKey: .outcome)
+        self.sideEffect = try c.decodeIfPresent(String.self, forKey: .sideEffect)
+        self.severity = try c.decode(Int.self, forKey: .severity)
+        self.rationale = try c.decode(String.self, forKey: .rationale)
+        self.enforced = try c.decodeIfPresent(Bool.self, forKey: .enforced) ?? false
     }
 }
 
