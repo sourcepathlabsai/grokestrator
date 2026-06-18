@@ -167,14 +167,19 @@ public enum NodeRole: String, Codable, Hashable, Sendable, CaseIterable {
 /// via the Connection's own `command`/`arguments`; the others are declared now and
 /// implemented in later phases. See `design/12-model-agnostic-runtime.md`.
 public enum AgentBackend: Codable, Hashable, Sendable {
-    case grokACP                                                    // uses command/arguments
+    case grokACP                                                    // uses the Connection's command/arguments
     case openAICompatible(baseURL: String, model: String, apiKeyRef: String?)
     case gemini(model: String, apiKeyRef: String?)
     case onboard(modelPath: String)
+    /// A reusable **ACP-over-stdio agent** (Claude Code via the `claude-code-acp`
+    /// adapter, or any ACP stdio command) carrying its own launch command — so a
+    /// working ACP agent can be saved once as a catalog brain and reused for the next
+    /// Node without re-running setup. `label` is an optional display hint.
+    case acpStdio(command: String, arguments: [String], label: String?)
 
     // Stable, human-editable Codable (discriminated by `kind`) — config is
     // hand-/UI-editable in connections.json, not an opaque synthesized shape.
-    private enum CodingKeys: String, CodingKey { case kind, baseURL, model, apiKeyRef, modelPath }
+    private enum CodingKeys: String, CodingKey { case kind, baseURL, model, apiKeyRef, modelPath, command, arguments, label }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
@@ -189,6 +194,10 @@ public enum AgentBackend: Codable, Hashable, Sendable {
             try c.encode(model, forKey: .model); try c.encodeIfPresent(apiKeyRef, forKey: .apiKeyRef)
         case .onboard(let modelPath):
             try c.encode("onboard", forKey: .kind); try c.encode(modelPath, forKey: .modelPath)
+        case .acpStdio(let command, let arguments, let label):
+            try c.encode("acpStdio", forKey: .kind)
+            try c.encode(command, forKey: .command); try c.encode(arguments, forKey: .arguments)
+            try c.encodeIfPresent(label, forKey: .label)
         }
     }
     public init(from decoder: Decoder) throws {
@@ -203,6 +212,10 @@ public enum AgentBackend: Codable, Hashable, Sendable {
                            apiKeyRef: try c.decodeIfPresent(String.self, forKey: .apiKeyRef))
         case "onboard":
             self = .onboard(modelPath: try c.decode(String.self, forKey: .modelPath))
+        case "acpStdio":
+            self = .acpStdio(command: try c.decode(String.self, forKey: .command),
+                             arguments: try c.decodeIfPresent([String].self, forKey: .arguments) ?? [],
+                             label: try c.decodeIfPresent(String.self, forKey: .label))
         default:
             self = .grokACP
         }

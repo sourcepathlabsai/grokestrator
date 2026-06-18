@@ -30,6 +30,15 @@ public actor GrokBuildServer {
         case .grokACP:
             let handle = try await launcher.launch(config)
             session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval)
+        case .acpStdio(let command, let arguments, _):
+            // A saved ACP-stdio brain (e.g. Claude Code) carries its own launch command.
+            // Override the Connection's command/arguments with the brain's, re-resolving
+            // the binary if the saved absolute path has moved (e.g. an npm reinstall).
+            var acp = config
+            acp.command = await Self.resolveACPCommand(command)
+            acp.arguments = arguments
+            let handle = try await launcher.launch(acp)
+            session = GrokBuildSessionClient(handle: handle, autoApproval: config.autoApproval)
         case .openAICompatible(let baseURL, let model, let apiKeyRef):
             // Secrets are referenced by name, never stored inline. Resolved from the
             // process env or the host-local gitignored .env.local_llm (LM Studio needs none).
@@ -55,6 +64,18 @@ public actor GrokBuildServer {
         instances[config.id] = updated
 
         return (session, updated)
+    }
+
+    /// Resolve a saved ACP-stdio command to a launchable path. If the stored absolute
+    /// path is gone (e.g. the adapter was reinstalled to a new prefix), re-resolve the
+    /// `claude-code-acp` adapter; otherwise return the command unchanged.
+    static func resolveACPCommand(_ command: String) async -> String {
+        if FileManager.default.isExecutableFile(atPath: command) { return command }
+        if (command as NSString).lastPathComponent == ClaudeCodeSetup.adapterBin,
+           let resolved = await ClaudeCodeSetup.resolveAdapterPath() {
+            return resolved
+        }
+        return command
     }
 
     public func stopInstance(id: UUID) async {

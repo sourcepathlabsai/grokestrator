@@ -186,6 +186,8 @@ struct SettingsView: View {
         case .grokACP: return "grok"
         case .onboard(let path): return "onboard · \(path)"
         case .gemini(let model, _): return "gemini · \(model)"
+        case .acpStdio(let command, let args, let label):
+            return (label.map { "\($0) · " } ?? "ACP · ") + ([command] + args).joined(separator: " ")
         case .openAICompatible(let url, let model, let ref):
             return "\(model)  @ \(url)" + (ref.map { "  · key \($0)" } ?? "")
         }

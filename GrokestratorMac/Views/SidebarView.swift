@@ -156,7 +156,7 @@ struct SidebarView: View {
     /// One selectable row + its context menu, shared by parent and child rows.
     @ViewBuilder
     private func instanceRow(_ instance: InstanceItem, in group: SidebarServerGroup) -> some View {
-        InstanceRow(instance: instance, serverDown: group.isDown)
+        InstanceRow(instance: instance, brain: model.brainDescriptor(for: instance), serverDown: group.isDown)
             .tag(instance.id)
             .contextMenu { rowMenu(instance) }
     }
@@ -333,6 +333,9 @@ private struct SectionHeader: View {
 /// A single connection row: status indicator + name.
 private struct InstanceRow: View {
     let instance: InstanceItem
+    /// The brain backing this Node — a mini-icon with a hover tooltip naming it, so you
+    /// can see at a glance which brain each session runs (grok / Claude / Cerebras / …).
+    var brain: BrainDescriptor? = nil
     /// When the parent server is unreachable, the session can't be driven — show
     /// its dot red regardless of the last-known instance status. It recovers
     /// automatically when the server reconnects (no per-session reconnect).
@@ -343,6 +346,14 @@ private struct InstanceRow: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+            if let brain {
+                Image(systemName: brain.systemImage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(serverDown ? Theme.textFaint : brain.tint)
+                    .frame(width: 13)
+                    .help("Brain: \(brain.label)")
+                    .accessibilityLabel("Brain: \(brain.label)")
+            }
             if instance.role == .orchestrator {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 11))
