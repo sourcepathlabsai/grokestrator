@@ -75,9 +75,17 @@ final class ConversationViewModel {
     /// "Responding…", "Using read_file…", a progress note's text) and reset when
     /// the turn ends. Live-only; never persisted.
     private(set) var activityStatus = "Thinking…"
-    /// A permission request awaiting the user's decision (shown over the thread,
-    /// not inline). `nil` when there is nothing to answer.
+    /// The permission request currently shown over the thread (the front of the
+    /// queue). `nil` when there's nothing to answer. Claude Code issues tool calls in
+    /// PARALLEL, so several permission requests can be in flight at once — they're
+    /// queued and surfaced one at a time (a single overwriting value would strand all
+    /// but the last, and the connection would hang since the watchdog won't age out
+    /// while permissions are pending).
     private(set) var pendingPermission: PermissionRequestInfo?
+    /// Permission requests awaiting an answer (front = the one on screen).
+    private var permissionQueue: [PermissionRequestInfo] = []
+    /// How many permission requests are waiting (for an "N of M" hint in the overlay).
+    var pendingPermissionCount: Int { permissionQueue.count }
     /// A structured user question (`_x.ai/ask_user_question`) awaiting an answer,
     /// shown over the thread like `pendingPermission`. `nil` when nothing pending.
     private(set) var pendingUserQuestion: UserQuestionInfo?
@@ -249,6 +257,7 @@ final class ConversationViewModel {
         // "Connecting…" banner reappears while capabilities come up.
         entries = []
         quickReplies = []
+        permissionQueue = []
         pendingPermission = nil
         pendingUserQuestion = nil
         isStreaming = false
@@ -359,7 +368,8 @@ final class ConversationViewModel {
     /// leaving a compact record in the thread.
     func answerPermission(_ option: PermissionOption) {
         guard let perm = pendingPermission else { return }
-        pendingPermission = nil
+        permissionQueue.removeAll { $0.id == perm.id }
+        pendingPermission = permissionQueue.first   // advance to the next concurrent request
         appendEntry(.update(.activityNote("\(option.isAllow ? "Approved" : "Declined"): \(perm.description)", kind: "permission", metadata: nil)))
         let driver = self.driver
         Task { await driver.respondToPermission(permissionId: perm.id, optionId: option.id) }
@@ -455,17 +465,21 @@ final class ConversationViewModel {
         case .thought(let full, _):
             finalize(full, kind: .thought)
         case .permissionRequested(let info):
-            // Surface over the thread (overlay), not as an inline row.
+            // Surface over the thread (overlay). Enqueue (deduped) so concurrent
+            // requests — Claude's parallel tool use — are answered one at a time
+            // instead of clobbering each other.
             endStreaming()
-            pendingPermission = info
+            if !permissionQueue.contains(where: { $0.id == info.id }) { permissionQueue.append(info) }
+            pendingPermission = permissionQueue.first
         case .userQuestionRequested(let info):
             // Surface over the thread (overlay), like a permission request.
             endStreaming()
             pendingUserQuestion = info
         case .interactionResolved(let id):
-            // Answered on some device — dismiss the matching overlay here too.
-            // Id-matched so a *new* prompt that arrived in the meantime is kept.
-            if pendingPermission?.id == id { pendingPermission = nil }
+            // Answered on some device — drop it from the queue and advance to the next
+            // (others in flight are preserved).
+            permissionQueue.removeAll { $0.id == id }
+            pendingPermission = permissionQueue.first
             if pendingUserQuestion?.id == id { pendingUserQuestion = nil }
         case .planUpdated(let plan):
             // grok re-broadcasts the ENTIRE plan on every status change. Keep a

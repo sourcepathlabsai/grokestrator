@@ -31,7 +31,7 @@ struct ConversationView: View {
             transcript
                 .overlay(alignment: .bottom) {
                     if let perm = conversation.pendingPermission {
-                        PermissionOverlay(request: perm) { option in
+                        PermissionOverlay(request: perm, queued: conversation.pendingPermissionCount) { option in
                             conversation.answerPermission(option)
                         }
                         .padding(12)
@@ -638,13 +638,24 @@ private struct TranscriptRow: View {
 /// sent back to the agent. (Free-text answers for agent *questions* are a follow-up.)
 private struct PermissionOverlay: View {
     let request: PermissionRequestInfo
+    var queued: Int = 1
     let onChoose: (PermissionOption) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Grok is asking permission", systemImage: "lock.shield")
-                .font(.headline)
-                .foregroundStyle(.orange)
+            HStack {
+                Label("Permission requested", systemImage: "lock.shield")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Spacer()
+                if queued > 1 {
+                    Text("+\(queued - 1) more")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(.orange.opacity(0.18), in: Capsule())
+                        .help("Concurrent requests — answer one at a time")
+                }
+            }
 
             // A long description + many options shouldn't push the buttons
             // off-screen above the composer — scroll the body when it overflows.
