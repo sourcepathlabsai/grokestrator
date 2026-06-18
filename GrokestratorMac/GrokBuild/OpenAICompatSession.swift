@@ -282,7 +282,9 @@ public actor OpenAICompatSession: AgentSession {
         }
         let action = ProposedAction.fromAPITool(name: name, arguments: argsPreview(argsJSON),
                                                 cwd: cwd, nodeName: nil, mcpServer: server, mcpTool: tool)
-        return governance.evaluate(action)
+        let verdict = governance.evaluate(action)
+        OracleLedger.shared.record(GovernanceEvent(action: action, verdict: verdict, nodeID: instanceID, at: Date()))
+        return verdict
     }
 
     // MARK: - Tools (app-executed, cwd-scoped)

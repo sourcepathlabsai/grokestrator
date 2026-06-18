@@ -453,10 +453,12 @@ public actor GrokBuildSessionClient {
             // human, below, are untouched). This is the low-fidelity boundary: a coarse
             // `kind` + a command/title string, no general structured args — so precise
             // detectors abstain here.
-            let shadow = (governance ?? .shadow).evaluate(ProposedAction.fromACPPermission(
+            let action = ProposedAction.fromACPPermission(
                 kind: p.toolCall?.kind, variant: p.toolCall?.rawInput?.variant,
                 command: p.toolCall?.rawInput?.command, title: p.toolCall?.title,
-                agentName: agentDisplayName, cwd: workingDirectory, nodeName: nil))
+                agentName: agentDisplayName, cwd: workingDirectory, nodeName: nil)
+            let shadow = (governance ?? .shadow).evaluate(action)
+            OracleLedger.shared.record(GovernanceEvent(action: action, verdict: shadow, nodeID: handle.id, at: Date()))
             NSLog("%@", "[oracle] shadow (acp): \(shadow.summary)")
             // If the user already chose "always allow" for this category (e.g. bash),
             // answer it ourselves — grok re-asks even after `allow_always`.
