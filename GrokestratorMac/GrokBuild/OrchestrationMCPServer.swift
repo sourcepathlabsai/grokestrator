@@ -26,7 +26,8 @@ public actor OrchestrationMCPServer {
 
     /// The router that performs a delegation. `callerID` is the calling Node's id
     /// (from the per-session header), so the router can scope to *its* children.
-    private var delegateHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ task: String) async -> String)?
+    /// `timeout` is nil when the caller didn't specify one (use the default).
+    private var delegateHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ task: String, _ timeout: TimeInterval?) async -> String)?
 
     /// Header grok forwards on every MCP request, carrying the calling Node's id.
     public static let nodeHeader = "X-Grokestrator-Node"
@@ -34,7 +35,7 @@ public actor OrchestrationMCPServer {
     public init() {}
 
     /// Install the real delegation router (Phase 1c). Safe to call before/after start.
-    public func setDelegateHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ task: String) async -> String) {
+    public func setDelegateHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ task: String, _ timeout: TimeInterval?) async -> String) {
         self.delegateHandler = handler
     }
 
@@ -74,8 +75,8 @@ public actor OrchestrationMCPServer {
     /// write before any session is created in practice.
     public nonisolated(unsafe) static var isActive = false
 
-    fileprivate func runDelegate(callerID: UUID?, child: String, task: String) async -> String {
-        if let handler = delegateHandler { return await handler(callerID, child, task) }
+    fileprivate func runDelegate(callerID: UUID?, child: String, task: String, timeout: TimeInterval? = nil) async -> String {
+        if let handler = delegateHandler { return await handler(callerID, child, task, timeout) }
         return "Delegation is not wired yet (orchestration Phase 1c). "
              + "Received child=\"\(child)\", task=\"\(task)\"."
     }
@@ -132,7 +133,8 @@ public actor OrchestrationMCPServer {
             if name == "delegate" {
                 let child = args["child"] as? String ?? ""
                 let task = args["task"] as? String ?? ""
-                let text = await server.runDelegate(callerID: req.nodeID, child: child, task: task)
+                let timeout = (args["timeout"] as? Int).map { TimeInterval($0) }
+                let text = await server.runDelegate(callerID: req.nodeID, child: child, task: task, timeout: timeout)
                 result = ["content": [["type": "text", "text": text]], "isError": false]
             } else {
                 result = ["content": [["type": "text", "text": "Unknown tool: \(name ?? "nil")"]], "isError": true]
@@ -153,14 +155,48 @@ public actor OrchestrationMCPServer {
     private static var delegateToolSchema: [String: Any] {
         [
             "name": "delegate",
-            "description": "Delegate a task to one of your child Connections (agents) and "
-                + "return its result. `child` is the child Connection's name; `task` is the "
-                + "instruction to send it. The child runs as its own observable grok session.",
+            "description": """
+                Delegate a task to one of your child agents and return its result. \
+                Each child is a separate, observable session with its own tools and \
+                role orientation — it can reason deeply and spawn its own subagents.
+
+                WHEN TO USE: You are a coordination orchestrator. Do NOT perform \
+                substantial work yourself (writing code, running commands, deep \
+                analysis). Instead, decompose the work into cohesive units and \
+                delegate each to the appropriate child agent by name. Synthesize \
+                their results into a final deliverable.
+
+                PARALLEL DELEGATION: You may call this tool multiple times \
+                concurrently for independent subtasks. Each call blocks until \
+                that child finishes (or times out), but concurrent calls run in \
+                parallel.
+
+                TASK SIZING: Each delegation should be a self-contained task large \
+                enough to warrant its own reasoning — not a single-line edit. The \
+                child will see only the `task` text you provide; include all \
+                necessary context.
+
+                TIMEOUT: Default 120 seconds. If a child times out, it keeps \
+                running — you'll get a timeout notice but no result. Set a longer \
+                timeout for complex tasks.
+
+                The human can watch each child's live transcript in a separate pane.
+                """,
             "inputSchema": [
                 "type": "object",
                 "properties": [
-                    "child": ["type": "string", "description": "Name of the child Connection to delegate to."],
-                    "task": ["type": "string", "description": "The task/prompt to send the child."],
+                    "child": [
+                        "type": "string",
+                        "description": "Name of the child agent to delegate to.",
+                    ],
+                    "task": [
+                        "type": "string",
+                        "description": "The full task/prompt to send the child. Include all context it needs — it has no memory of your prior conversation.",
+                    ],
+                    "timeout": [
+                        "type": "integer",
+                        "description": "Max seconds to wait for the child's result (default 120). Use higher values for complex tasks.",
+                    ],
                 ],
                 "required": ["child", "task"],
             ],

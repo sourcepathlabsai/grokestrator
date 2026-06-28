@@ -8,6 +8,7 @@ struct SidebarView: View {
     @State private var showingAdd = false
     @State private var showingClaudeSetup = false
     @State private var showingAddRemote = false
+    @State private var showingCreateTeam = false
     @State private var showingArchived = false
     /// Live Connection awaiting a permanent-delete confirmation (nil ⇒ none).
     @State private var pendingDelete: InstanceItem?
@@ -55,19 +56,10 @@ struct SidebarView: View {
         }
         .navigationTitle("Grokestrator")
         .background(Theme.bgDeep)
-        .toolbar {
-            ToolbarItem {
-                Menu {
-                    Button { showingAdd = true } label: { Label("Add Local Connection…", systemImage: "macbook") }
-                    Button { showingClaudeSetup = true } label: { Label("Add Claude Code Agent…", systemImage: "hammer") }
-                    Button { showingAddRemote = true } label: { Label("Add Remote Server…", systemImage: "network") }
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-            }
-        }
+        .toolbar { toolbarContent }
         .sheet(isPresented: $showingAdd) { AddConnectionView(model: model) }
         .sheet(isPresented: $showingClaudeSetup) { ClaudeCodeSetupView(model: model) }
+        .sheet(isPresented: $showingCreateTeam) { CreateTeamView(model: model) }
         .sheet(item: $addingChildFor) { parent in AddConnectionView(model: model, parent: parent) }
         .sheet(item: $editingRoleFor) { item in EditRoleView(model: model, item: item) }
         .sheet(item: $editingBrainFor) { item in EditBrainView(model: model, item: item) }
@@ -103,6 +95,21 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) { pendingServerRemoval = nil }
         } message: { _ in
             Text("Removes this server from this device. The Mac and its grok sessions are unaffected.")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
+            Menu {
+                Button { showingAdd = true } label: { Label("Add Local Connection…", systemImage: "macbook") }
+                Button { showingClaudeSetup = true } label: { Label("Add Claude Code Agent…", systemImage: "hammer") }
+                Button { showingCreateTeam = true } label: { Label("Create Team…", systemImage: "person.3.fill") }
+                Divider()
+                Button { showingAddRemote = true } label: { Label("Add Remote Server…", systemImage: "network") }
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
         }
     }
 
