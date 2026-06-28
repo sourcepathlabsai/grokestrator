@@ -111,8 +111,9 @@ final class GrokestratorModel {
                 try await orchestrationMCP.start(port: OrchestrationMCPServer.defaultPort)
                 // Install the real router (Phase 1c): delegate(child, task) sends
                 // the task to the named child Node and returns its final answer.
-                await orchestrationMCP.setDelegateHandler { caller, child, task in
-                    await manager.delegate(callerID: caller, toChildNamed: child, task: task)
+                await orchestrationMCP.setDelegateHandler { caller, child, task, timeout in
+                    await manager.delegate(callerID: caller, toChildNamed: child, task: task,
+                                           timeout: timeout ?? 120)
                 }
                 OrchestrationMCPServer.isActive = true
                 NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
@@ -262,6 +263,80 @@ final class GrokestratorModel {
         }
 
         Task { [weak self] in await self?.launchConnection(config, startingItem: item) }
+    }
+
+    // MARK: - Team templates (stamp out orchestrator + children)
+
+    /// Create an orchestrator + its child agents from a `TeamTemplate` in one step.
+    /// `baseName` is the user-chosen prefix; each member's `nameSuffix` is appended.
+    /// All Connections share the same `command`, `arguments`, `workingDirectory`, and
+    /// `brain` so the user only configures the runtime once. The orchestrator is
+    /// selected after creation.
+    func createTeam(from template: TeamTemplate, baseName: String,
+                    command: String, arguments: [String], workingDirectory: String?,
+                    brain: BrainBinding = .grok) {
+        guard !template.members.isEmpty else { return }
+        // Create the orchestrator (member[0]).
+        let orch = template.members[0]
+        let orchName = baseName + orch.nameSuffix
+        let orchConfig = ManagedConnection(
+            name: orchName, command: command, arguments: arguments,
+            workingDirectory: workingDirectory,
+            autoRestart: true, shared: true,
+            role: .orchestrator, parentID: nil,
+            rolePrompt: orch.rolePrompt, brain: brain,
+            autoApproval: orch.autoApproval
+        )
+        connections.append(orchConfig)
+        let orchItem = InstanceItem(
+            id: orchConfig.id, name: orchName, status: .starting,
+            driver: LiveConversationDriver(manager: manager, instanceID: orchConfig.id),
+            role: .orchestrator, parentID: nil, rolePrompt: orch.rolePrompt
+        )
+        instances.append(orchItem)
+        orchItem.conversation.startSubscription()
+
+        // Create each child (members[1…]).
+        for member in template.members.dropFirst() {
+            let childName = baseName + member.nameSuffix
+            let childConfig = ManagedConnection(
+                name: childName, command: command, arguments: arguments,
+                workingDirectory: workingDirectory,
+                autoRestart: true, shared: true,
+                role: .agent, parentID: orchConfig.id,
+                rolePrompt: member.rolePrompt, brain: brain,
+                autoApproval: member.autoApproval
+            )
+            connections.append(childConfig)
+            let childItem = InstanceItem(
+                id: childConfig.id, name: childName, status: .starting,
+                driver: LiveConversationDriver(manager: manager, instanceID: childConfig.id),
+                role: .agent, parentID: orchConfig.id, rolePrompt: member.rolePrompt
+            )
+            instances.append(childItem)
+            childItem.conversation.startSubscription()
+        }
+
+        ConnectionStore.save(connections)
+        selectedInstanceID = orchConfig.id
+
+        // Push role prompts into the manager so each Node primes on first turn.
+        let mgr = manager
+        let allConfigs = [orchConfig] + connections.filter { $0.parentID == orchConfig.id }
+        Task {
+            for c in allConfigs where !(c.rolePrompt ?? "").isEmpty {
+                await mgr.setRolePrompt(for: c.id, c.rolePrompt)
+            }
+        }
+
+        // Launch all team members.
+        let tolaunch = connections.filter { $0.id == orchConfig.id || $0.parentID == orchConfig.id }
+        for config in tolaunch {
+            let item = instances.first(where: { $0.id == config.id })
+            Task { [weak self] in
+                await self?.launchConnection(config, startingItem: item)
+            }
+        }
     }
 
     // MARK: - Orchestration tree (role + parent edge)
