@@ -9,6 +9,11 @@ struct TranscriptEntry: Identifiable, Sendable {
 
     enum Kind: Sendable {
         case userPrompt(String)
+        /// A user prompt sitting in the queue, waiting for the current turn to
+        /// finish before being sent. Renders with muted styling + a "queued"
+        /// badge so the user knows their input was accepted. Replaced by a
+        /// normal `.userPrompt` when the queued prompt fires.
+        case queuedPrompt(String)
         /// Assistant answer text (may grow live as deltas stream in).
         case assistantMessage(String)
         /// Finalized assistant answer parsed into parts (text + inline images).
@@ -92,6 +97,12 @@ final class ConversationViewModel {
     /// Confident quick-reply options for the last assistant question (set when a
     /// message finalizes; cleared on the next prompt). Empty ⇒ user types.
     private(set) var quickReplies: [String] = []
+    /// Prompts waiting to fire after the current turn completes. Each entry is a
+    /// pair of (prompt text, transcript entry id) so we can replace the queued-
+    /// prompt row with a normal `.userPrompt` when it fires.
+    private var promptQueue: [(text: String, entryID: UUID)] = []
+    /// `true` when there are prompts waiting to fire (drives the "queued" badge).
+    var hasQueuedPrompts: Bool { !promptQueue.isEmpty }
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
     /// even while a bubble grows in place (entry count doesn't change then).
     private(set) var streamTick = 0
@@ -265,6 +276,7 @@ final class ConversationViewModel {
         sessionReady = capabilities != nil
         endStreaming()
         discardPendingDelta()
+        promptQueue.removeAll()
         streamTick += 1
 
         subscriptionTask = Task { [weak self] in
@@ -300,12 +312,33 @@ final class ConversationViewModel {
     /// the UI never looks frozen, even when grok itself is slow to come up.
     func send(_ prompt: String) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isStreaming else { return }
+        guard !trimmed.isEmpty else { return }
+
+        // If a turn is in progress, queue the prompt instead of dropping it.
+        // The queued prompt appears in the transcript immediately (muted) and
+        // fires automatically when the current turn completes.
+        if isStreaming {
+            let entry = TranscriptEntry(kind: .queuedPrompt(trimmed))
+            promptQueue.append((text: trimmed, entryID: entry.id))
+            entries.append(entry)
+            streamTick += 1
+            return
+        }
+
+        firePrompt(trimmed)
+    }
+
+    /// Actually sends a prompt to the driver. Called by `send` (direct) and by
+    /// `drainQueue` (after a turn completes). When `echoInTranscript` is false
+    /// the optimistic `.userPrompt` row is skipped (the caller already placed it).
+    private func firePrompt(_ trimmed: String, echoInTranscript: Bool = true) {
         quickReplies = []
         isStreaming = true
         activityStatus = "Thinking…"
         startUsagePolling()                 // live context meter during the turn
-        appendEntry(.userPrompt(trimmed))   // optimistic echo
+        if echoInTranscript {
+            appendEntry(.userPrompt(trimmed))   // optimistic echo
+        }
         let driver = self.driver
         Task { [weak self] in
             do {
@@ -354,6 +387,7 @@ final class ConversationViewModel {
         isStreaming = false
         endStreaming()
         discardPendingDelta()
+        promptQueue.removeAll()   // snapshot wipes transient state
         streamTick += 1
         refreshUsage()
     }
@@ -405,6 +439,7 @@ final class ConversationViewModel {
     func cancel() {
         endStreaming()
         discardPendingDelta()
+        clearPromptQueue()
         isStreaming = false
     }
 
@@ -413,13 +448,39 @@ final class ConversationViewModel {
     /// cancel / `turnComplete` round-trip can never come back (the old code only
     /// asked the driver and waited for a broadcast that never arrived). Then it
     /// best-effort tells the driver to cancel so a *live* turn actually stops.
+    /// Also clears the prompt queue — a manual Stop is an explicit "stop
+    /// everything" signal.
     func cancelCurrent() {
         guard isStreaming else { return }
         endStreaming()
         discardPendingDelta()
         isStreaming = false
+        clearPromptQueue()
         let driver = self.driver
         Task { await driver.cancel() }
+    }
+
+    /// Fires the next queued prompt (if any). Called after a turn completes
+    /// naturally (`.turnComplete`). Replaces the queued-prompt transcript entry
+    /// with a normal `.userPrompt` so it no longer looks "pending".
+    private func drainQueue() {
+        guard let next = promptQueue.first else { return }
+        promptQueue.removeFirst()
+        // Replace the `.queuedPrompt` row with a normal `.userPrompt`.
+        if let idx = entries.firstIndex(where: { $0.id == next.entryID }) {
+            entries[idx].kind = .userPrompt(next.text)
+        }
+        streamTick += 1
+        firePrompt(next.text, echoInTranscript: false)
+    }
+
+    /// Removes all queued prompts and their transcript entries (used on Stop,
+    /// cancel, and snapshot replay).
+    private func clearPromptQueue() {
+        let ids = Set(promptQueue.map(\.entryID))
+        entries.removeAll { ids.contains($0.id) }
+        promptQueue.removeAll()
+        streamTick += 1
     }
 
     // MARK: - Update handling
@@ -505,6 +566,9 @@ final class ConversationViewModel {
             activityStatus = "Thinking…"
             collapseWork()
             appendEntry(.update(update))
+            // Fire the next queued prompt despite the error — the user
+            // explicitly typed it and wants it processed.
+            drainQueue()
         case .turnComplete:
             endStreaming()
             isStreaming = false
@@ -516,6 +580,10 @@ final class ConversationViewModel {
             collapseWork()
             appendEntry(.update(update))
             refreshUsage()
+            // Fire the next queued prompt (if any). Must come after isStreaming
+            // is cleared and the turn divider is appended so the transcript
+            // reads naturally.
+            drainQueue()
         default:
             endStreaming()
             // Tool calls / progress / activity notes mean grok is actively

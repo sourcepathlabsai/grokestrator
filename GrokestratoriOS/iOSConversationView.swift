@@ -172,22 +172,21 @@ struct iOSConversationView: View {
                         .foregroundStyle(.red)
                         .shadow(color: .red.opacity(0.5), radius: 4)
                 }
-            } else {
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(Theme.accent)
-                        .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
-                }
-                .disabled(!canSend)
             }
+            Button(action: send) {
+                Image(systemName: conversation.isStreaming ? "text.badge.plus" : "arrow.up.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Theme.accent)
+                    .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
+            }
+            .disabled(!canSend)
         }
         .padding(12)
         .background(Theme.bgDeep)
     }
 
     private var canSend: Bool {
-        !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
+        !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func send() {
@@ -357,6 +356,16 @@ private struct iOSTranscriptRow: View {
         case .userPrompt(let text):
             row(icon: "person.fill", tint: Theme.textMuted) {
                 Text(text).font(Theme.body(15, .semibold)).foregroundStyle(Theme.textPrimary).textSelection(.enabled)
+            }
+        case .queuedPrompt(let text):
+            row(icon: "clock", tint: Theme.textFaint) {
+                HStack(spacing: 6) {
+                    Text(text).font(Theme.body(15, .semibold)).foregroundStyle(Theme.textMuted)
+                    Text("queued").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Theme.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Theme.border))
+                }
             }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
