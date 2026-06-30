@@ -14,6 +14,21 @@ Decide → Act** — as the actual rhythm of work, not as decorative vocabulary.
 concept notes: Obsidian `4-Concepts/OODA Loop and Mission Orientation`, `OODA Is a Helix
 Not a Loop`, `Design Oracle (Operational Form)`; repo projection: `design/14-ooda-helix.md`.
 
+### Why we enforce this here (two purposes)
+
+1. **Backlog in the best order we can divine — and re-divine.** The loop exists so we
+   move through work (`PROJECT_STATE.md`, GitHub milestone *Canonical Backlog*, open
+   issues) in the order that best serves **goals, design, and intent at this moment** —
+   not a frozen roadmap. **Orient** grounds that ordering; **Decide** commits to the
+   next slice; **Act** produces evidence. New observations **re-Orient** and may
+   legitimately **reorder** what comes next. Priority is fluid, not arbitrary: when
+   order shifts, say what you learned and which goal it serves.
+2. **A teachable thought process for any LLM.** This file is how a fresh intelligence
+   (Claude, Codex, grok, …) learns *how to think here* — not just what to build. Make
+   the loop visible: what you observed, how you oriented, what you decided and why,
+   what you acted on. The corpus + this discipline are what let model families hand off
+   without losing the plot.
+
 ### The four stations (each is required)
 
 | Station | What it is | Failure mode if skipped |
@@ -44,7 +59,9 @@ comments are provenance on the helix.
    before proposing or editing.
 2. **Orient** — before substantial work, load the corpus (§1). State what mission you
    derived and which design goals/invariants govern the slice. **Do not skip this step.**
-3. **Decide** — pick scope and approach explicitly; say what is out of scope.
+3. **Decide** — pick the **next slice** and its place in the backlog: scope, approach,
+   what is out of scope, and **why this now** (goals/design/intent). Re-decide when
+   Observe changes the picture.
 4. **Act** — implement; land via PR (§4).
 5. **Observe → re-Orient** — after Act: tests/build, PR handoff, on merge report update
    issues; if strategic intent shifted, draft Obsidian updates (§2).
