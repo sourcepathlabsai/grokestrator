@@ -1,10 +1,19 @@
 # CLAUDE.md
 
 Project agent guidance lives in **[AGENTS.md](AGENTS.md)** — read it first. It is the
-orient-on-read entry point and defines two standing duties: **orient on the design
-corpus** (repo `design/*.md` + the Obsidian `4-Concepts/` notes) before substantial
-work, and **aggressively maintain the strategic record in Obsidian** (strategic
-goals / oracles / reasoning — not operational decisions).
+orient-on-read entry point.
+
+# Mode of operation (mandatory)
+
+**You must work in the OODA helix** — Observe → **Orient** → Decide → Act. See
+**AGENTS.md §0**. **Orient is load-bearing** (synthesis through doctrine and design
+intent; derive the real mission). Skipping Orient = barreling; never Acting = timidity.
+Helix, not flat loop: each Act feeds re-Orient; delegation spawns sub-helices.
+
+Standing duties (the Orient axis made operational):
+- **Orient on the design corpus** (§1) before substantial work
+- **Maintain the strategic record in Obsidian** (§2) — goals / oracles / reasoning, not
+  operational trivia
 
 # Tool usage
 
