@@ -7,6 +7,7 @@ import GrokestratorCore
 /// chosen port. Tailscale handles encryption / access.
 struct SettingsView: View {
     @Bindable var model: GrokestratorModel
+    @AppStorage(DockAttentionCoordinator.enabledKey) private var dockBounceOnAttention = true
 
     /// Working copy of the host tier map; committed via `model.setHostTierMap`.
     @State private var tierMap: HostTierMap = .default
@@ -220,6 +221,15 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Listener").font(Theme.display(12, .semibold))
+            }
+
+            Section {
+                Toggle("Bounce Dock icon on permission or question", isOn: $dockBounceOnAttention)
+                Text("When an agent needs your answer and Grokestrator isn't frontmost, the Dock icon bounces until you switch back. The badge count still appears if this is off.")
+                    .font(Theme.body(11))
+                    .foregroundStyle(Theme.textMuted)
+            } header: {
+                Text("Notifications").font(Theme.display(12, .semibold))
             }
         }
         .formStyle(.grouped)

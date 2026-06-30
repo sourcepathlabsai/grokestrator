@@ -13,3 +13,9 @@ goals / oracles / reasoning — not operational decisions).
   tool exists for this purpose — use it directly.
 - Reserve the Task tool for research, exploration, and planning — not for making
   code changes that you can make yourself.
+
+# Delivery (mandatory)
+
+See **AGENTS.md §4**. Every completed slice → **open a PR** → list fixed issues →
+**give the PR link** → **await merge** → do not start the next slice until merged.
+Warn the human if they ask for more work while a PR is still open.

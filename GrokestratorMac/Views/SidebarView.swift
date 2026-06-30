@@ -383,12 +383,12 @@ private struct InstanceRow: View {
                     .help("Waiting for your answer")
                     .accessibilityLabel("Needs your attention")
             } else if instance.isBusy {
-                // Pulsing cyan dots: this agent is actively working a turn — shown
-                // even when the Connection isn't the one on screen, so you can see
-                // at a glance which agents are busy.
-                ThinkingIndicator(status: "", compact: true)
-                    .help("Working…")
-                    .accessibilityLabel("Working")
+                // Pulsing cyan dots + short status: visible even when this Connection
+                // isn't on screen, so you can see which agents are busy (#148).
+                ThinkingIndicator(status: instance.conversation.activityStatus, compact: true)
+                    .frame(maxWidth: 110, alignment: .trailing)
+                    .help(instance.conversation.activityStatus)
+                    .accessibilityLabel(instance.conversation.activityStatus)
             }
         }
         .padding(.vertical, 3)

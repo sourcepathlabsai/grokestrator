@@ -463,7 +463,7 @@ private struct iOSTranscriptRow: View {
                 if entry.id == streamingMessageID {
                     Text(text).font(Theme.body(15)).foregroundStyle(Theme.textBody).textSelection(.enabled)
                 } else {
-                    MarkdownText(text, baseSize: 15)
+                    SelectableMarkdownText(text, baseSize: 15)
                 }
             }
         case .assistantContent(let parts):

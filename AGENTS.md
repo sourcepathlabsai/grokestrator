@@ -52,3 +52,22 @@ how a particular change was carried out → operational → stays in the repo.
 Talk → work out the details → write it down → maintain the low-level oracle of design
 goals. That loop (a meta-OODA over the design corpus) is what has let multiple model
 families contribute here without breaking things. Keep it running.
+
+## 4. Delivery: every slice lands via PR — then stop
+
+**All work merges through pull requests.** No direct commits to `main`, no "I'll merge
+later," no starting the next slice while a PR is open.
+
+When you complete a slice:
+
+1. **Branch** — focused `feat/` or `fix/` branch from current `main`.
+2. **PR** — open a pull request before declaring the slice done.
+3. **Description** — list every GitHub issue fixed/closed (e.g. `Fixes #122, #147,
+   #148`). Include a short summary of what changed and why.
+4. **Hand off** — give the human the **PR link** and explicitly **await merge**.
+5. **Gate** — **do not start another slice** until that PR is merged. If the human
+   asks for more work while a PR is open, warn them: *merge the open PR first* (or
+   confirm they want to stack/revise scope).
+
+This is standing policy — re-read it at session start so it does not need to be
+re-prompted every time.
