@@ -1,6 +1,6 @@
 # Grokestrator — Model-Agnostic Runtime (brain-swap)
 
-Status: **design / implementation plan** — not yet started. Captures the principle
+Status: **Phases A–C, E, F implemented** (2026-06-30); B′, D, onboard ahead. Captures the principle
 that surfaced in review (2026-06-15) and the plan to realize it.
 
 ## The principle
@@ -384,7 +384,5 @@ and **tier routing**. Revised 2026-06-16: corrected dynamic routing — *no auto
 task-size router*; default to the capable model, downgrade only for explicitly narrow
 mechanical work, and **escalate on evidence** (oracle reject / test fail / model
 uncertainty). The real quality lever is **orientation**, not model size — see the new
-`13-design-oracle.md`. Status:
-implementation plan; not started. Phase A (formalize the seam) is the first,
-behavior-preserving step; Phase B (OpenAI-compatible backend) is the first real
-brain-swap and the biggest single unlock; Phase D adds dynamic, task-sized routing.*
+`13-design-oracle.md`. Revised 2026-06-30: Phases A–C, E, F shipped. See
+`PROJECT_STATE.md`.*

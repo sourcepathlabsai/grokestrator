@@ -1,6 +1,7 @@
 # Grokestrator — Orchestrated Agent Platform (Implementation Plan)
 
-Status: **design / implementation plan** — a deliberate scope expansion. Grokestrator
+Status: **Phase 1–2 largely implemented** (2026-06-30); Phase 3+ ahead. A deliberate
+scope expansion. Grokestrator
 becomes a heavy-duty **orchestrated multi-agent platform**: a tree of grok
 Connections where some are **orchestrators** (coordinate children) and some are
 **agents** (do the work), exchanging data rigorously, backed by an embedded database
@@ -344,6 +345,5 @@ OpenAI-compatible backend — the 80/20 unlock).
 activation — cron/event/DB-row, the "run periodically or on an event" capability) and
 **child guardrails as defense in depth** (pre-action permission policy → pre-output
 oracle gate → resource caps); clarified tool provisioning as **both, sequenced**
-(grant existing in Phase 2, synthesize oracle-gated cells in Phase 4+). Status:
-implementation plan; not yet started. Phase 1 (tree + one delegation) is the first
-milestone and the biggest single unlock.*
+(grant existing in Phase 2, synthesize oracle-gated cells in Phase 4+). Revised
+2026-06-30: Phase 1–2 largely shipped; Phase 3 parked. See `PROJECT_STATE.md`.*

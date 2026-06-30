@@ -1,185 +1,145 @@
 # Grokestrator — Project State
 
-This file is the canonical snapshot of where Grokestrator stands right now.
+Canonical snapshot of where Grokestrator stands **right now**. Update when
+architecture, phasing, shipped scope, or immediate priorities change.
 
-Update this file when any of the following change:
-- Architecture decisions
-- Scope / phasing
-- Active constraints
-- Immediate next steps
-- Major risks or open questions
+**Tracking:** actionable work → [GitHub Issues](https://github.com/sourcepathlabsai/grokestrator/issues)
+(milestone: **Canonical Backlog**). This file is the narrative snapshot; issues are the task queue.
 
 ---
 
-## Current Position (2026-05-27)
+## Current Position (2026-06-30)
 
-**Grokestrator** is a native macOS + iOS application (Swift + SwiftUI) that acts as a high-quality control plane for orchestrating multiple Grok Build agents across devices.
+**Grokestrator** is a native macOS + iOS application (Swift 6 + SwiftUI) that supervises
+and orchestrates agent sessions — grok, Claude Code, and OpenAI-compatible API brains —
+across devices over Tailscale.
 
-**Mac app**: Hybrid — runs both the client UI *and* the server. The powerful stationary dev Mac owns:
-- Direct lifecycle management of `grok` instances (launch, monitor, auto-restart on boot/crash — no tmux in v1)
-- Conversation history and persistence
-- Coordination for local UI + remote clients (iOS / other Macs over Tailscale)
+| Layer | Role |
+|-------|------|
+| **GrokestratorMac** | Hybrid: UI + GKSS server + agent lifecycle + Orchestration MCP |
+| **GrokestratoriOS** | Client-only remote companion |
+| **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
-**iOS app**: Client-only. Enables seamless experience including voice interaction while driving or away from the desk.
+**Release:** v0.3.0-alpha (2026-06-30). Prior: v0.2.0-alpha (2026-05-31).  
+**Engineering:** 153+ merged PRs; Core tests: 42/42 passing.
 
-**Current focus**: The Mac app is a real, working, on-brand application. You can add a real `grok agent stdio` connection and hold a live, streaming conversation — with the out-of-thread permission overlay, choice quick-replies, full multimodal (images/audio/video/files), and the SourcePath Labs visual theme. Next candidates: finish theming the overlays/chips, an instance inspector, conversation history in the UI, and the iOS client.
+**Founder full-time** since 2026-06-05. Binding constraints: **sequencing, validation**, and
+doc/corpus accuracy (OODA Orient axis) — not capacity.
 
-The long-term North Star remains: one comfortable interface to fluidly direct and orchestrate many Grok Build agents (local and remote) as if they were one coherent system.
+### Product direction (unchanged since 2026-06-01)
 
-> **Note (2026-06-01):** the per-PR detail below is a historical snapshot (through PR #22). The product is well past that (v0.2.0-alpha; through PR #71). The current *direction* is captured in the dated section immediately below; the historical decisions/state are kept for context but not exhaustively refreshed here — see `RELEASE_NOTES.md` and `design/` for current detail.
+Two tracks, kept separate:
 
-## Founder went full-time (2026-06-05)
+1. **Grokestrator** — free supervision + orchestration for founder + solo devs. Heart =
+   observable, answerable, native supervision (any domain).
+2. **General-case AI** (`design/strategy-general-case-ai.md`) — separate monetization bet;
+   must not redefine the free tool.
 
-The founder **left Adobe** (retirement package) and is now **full-time** on
-Grokestrator, `~/dev/alexander`, and AI consulting. **Capacity is no longer the
-binding constraint** — so the "part-time / early-morning" framing that shaped earlier
-docs has been re-baselined (`00-vision-and-north-star.md`, `strategy-general-case-ai.md`,
-`11-orchestration-platform.md`). New binding realities: a **no-salary income clock**
-(favor work that validates/earns sooner — the consulting/validation lane is now a real
-self-funding path) and focus. The **orchestration platform** (`11-…`) is now genuinely
-buildable; still sequence it (Phase 1 first) for *learning/validation*, not survival.
+Committed destination: **orchestration rung 3** — each role a real, steerable Connection
+with `parentID` edges and app-side `delegate` MCP (not grok-native subagents).
 
-## Product Direction (2026-06-01)
+**Agent operating doctrine:** OODA helix mandatory (`AGENTS.md` §0). Orient on this file +
+`design/` + `design/oracle/` before substantial work.
 
-A deliberate re-framing of the north star and the agent-orchestration path
-(full reasoning in `design/00-vision-and-north-star.md` and
-`design/10-agent-orchestration.md`):
+---
 
-- **Two things, kept separate (revised 2026-06-01).** (a) **Grokestrator** =
-  a **free, focused tool for the founder + solo devs** — "use it if you want" —
-  whose heart is the **supervision UX** (watch agents think, answer their
-  questions, steer across devices, in a GUI; any domain). (b) The general-case
-  **"agentic AI for the rest of us"** is split out as a **separate, linked
-  monetization bet** in `design/strategy-general-case-ai.md` (hosted, narrow
-  vertical, services-led, a non-grok brain) — captured so it can't redefine the
-  free tool. Differentiator both share vs. console tools (Warp): observable,
-  answerable, native supervision.
+## What Is Shipped
 
-- **Sub-agent reality (authoritative, `~/.grok/docs/user-guide/16-subagents.md`):**
-  grok's `task` tool spawns parallel child sessions and the parent collects each
-  summary on completion — but subagents **cannot interact with the user** and are
-  **invisible over ACP** (in-process; only a `task` tool-call is on the wire). So
-  "watch a worker think live / answer its question" is impossible with grok-native
-  subagents.
+### Supervision UX (north star — mature for alpha)
 
-- **Orchestration path = both, sequenced.** Near-term: a **cross-conversation
-  attention cue** (badge a background Connection with a pending question — works on
-  today's flat model) + **surfacing** grok-native subagents inline. Then the config
-  GUI (rung 2). **Rung 3 — each role a real, observable, steerable Connection +
-  a Grokestrator-hosted `delegate` MCP tool + a soft `parentID` edge — is now the
-  committed destination** (was "deferred indefinitely"), because only it delivers
-  the live-watch + human-in-the-loop-on-a-child the north star now leads with. The
-  "1:1 instance, no nested chats" rule holds; rung 3 *extends* it with `parentID`,
-  it doesn't break it.
+- Mac hybrid + iOS client over Tailscale; live multi-device mirroring
+- Token streaming, permission/question overlays, structured questions, plan checklist
+- Multimodal inline; virtualized transcript; selectable/copyable messages
+- Prompt queue during streaming (#125); file drag-and-drop (#126)
+- Concurrent permission queue (#117); attention badges + Dock bounce (#149)
+- Instance inspector; persistence + archive; transcript accumulators (#127)
+- Mac code signing stabilized (#114)
 
-- **Status:** design/strategy only — no implementation of any rung yet. The
-  attention cue is the cheapest near-term candidate and is independent of the
-  hierarchy work.
+### Model-agnostic runtime (`design/12` Phases A–C, E, F)
 
-### Key Decisions Made
-- **Native Swift + SwiftUI** (Mac hybrid + iOS client) after evaluation of Tauri/Rust path. Chosen for true iOS client support, seamless multi-device (Tailscale), and avoiding local stdio + sandbox limitations.
-- Mac server owns everything (instance lifecycle, persistence, client sessions).
-- Direct `Process` management of `grok` binaries on the Mac (auto-restart, no tmux in MVP).
-- Multi-server support via tabs (Mac) / panes (iOS).
-- Strict branch → focused logical PR → merge discipline (no giant messy commits).
-- GrokestratorCore (Swift Package) as the single source of truth for models, protocol, persistence, and shared logic.
-- File-based persistence (JSON) for MVP, implemented and tested in Core.
-- Explicit control-plane protocol (`GrokestratorProtocol`) between clients and the server component.
-- **Xcode project generated by XcodeGen** from `project.yml`; the `.xcodeproj` is gitignored (run `xcodegen generate`). Two app targets depend on the local `GrokestratorCore` package.
-- **Real ACP = newline-delimited JSON-RPC 2.0** (`grok agent stdio`). The Mac ACP client speaks it directly. (Gotchas baked in: encode with `JSONEncoder(.withoutEscapingSlashes)` — grok rejects `session\/new`; read stdout in chunks via `readabilityHandler`, not byte-by-byte.)
-- **Mock + Live conversation drivers** behind one `ConversationDriver` seam, so the UI runs offline and against real grok with identical code.
-- **Multimodal arrives as markdown in the assistant text** for grok-build (data-URI images + bare local image paths), *not* native ACP media blocks — verified by probing the binary.
-- **Agent questions & permissions render out-of-thread** in an overlay (design/02), not inline. Permission requests (ACP `session/request_permission`) show option buttons; free-form questions get **confident-only** quick-reply chips (heuristics + a `[[CHOICES: …]]` convention we prime grok to emit), with text always available.
-- **SourcePath Labs visual identity**: dark navy + cyan `#00F0FF` + glow, Inter (body) / Space Grotesk (display), bundled OFL fonts. Grokestrator lives under the SourcePath umbrella; tokens mirror `~/dev/alexander/app/ui/fred.css`.
+- `AgentSession` seam; `GrokBuildSessionClient` + `OpenAICompatSession`
+- Brain catalog, tier map, per-Node brain/tools editors, host-local API keys
+- Groq, Cerebras, Gemini, xAI; ACP Agent (grok, Claude Code, custom)
+- MCP registry + per-Node grants; in-app MCP client for API brains
+- `AutoApproval` for unattended delegation
 
-### What Exists Now
+### Orchestration platform (`design/11` Phase 1–2)
 
-**Core (GrokestratorCore package)**
-- Fully implemented and building (see previous state for details).
-- Branch: `feat/initial-core-package-structure` (merged).
+- `role` + `parentID` tree; `OrchestrationMCPServer` + enriched `delegate`
+- Team templates: Code Review, Implementation, Research (#124)
+- Per-Node role prompts, tool policy; live child transcripts during delegation
 
-**Grok Build Integration Layer** (completed on `feat/mac-grok-build-plumbing`, merged in PR #4)
-- Full black-box communication layer for real `grok` build instances via the Agent Client Protocol (ACP) over stdio.
-- `GrokBuildManager` and `GrokBuildConversation` as the stable high-level API (no raw ACP leakage).
-- Rich `ConversationUpdate` support including progress/activity notes.
-- Tool and permission roundtrips, structured history (`AgentTurn`/`AgentMessage`), lifecycle management.
-- All ACP details encapsulated.
+### Design oracle (`design/13` runtime slices 1–3)
 
-**Client Control Plane & Shared Client Comms Layer** (landed via PR #5; build repaired in PR #6, both merged)
-- Control-plane protocol (`GrokestratorProtocol`) lets clients drive remote Grok Build instances with high fidelity.
-- `GrokestratorClient`: Top-level actor for managing server connections and higher-level sessions.
-- `GrokBuildClientSession`: Higher-level client abstraction (remote equivalent of `GrokBuildConversation`).
-- `InMemoryGrokestratorTransport` for testing the client flow end-to-end.
-- Rich model types (`ConversationUpdate`, `AgentTurn`, `ToolCallInfo`, etc.) promoted into Core.
-- Design document: `design/07-client-control-plane-protocol.md` (v0.1 reviewed + decisions locked).
-- Note: this layer (for remote/iOS clients over Tailscale) is built in Core but **not yet exercised** by the apps — the Mac app currently drives the black box in-process. It becomes active when the iOS client / remote access is wired up.
+- `design/oracle/invariants/` — three active invariants
+- Shadow → persist → orient-on-read → active enforcement
+- `OracleLedger` → `oracle-verdicts.jsonl`; inspector verdicts
+- ACP permission verb mapping for Claude/non-grok brains (#153)
 
-**Xcode project & app build system** (PR #8)
-- `project.yml` (XcodeGen) generates `Grokestrator.xcodeproj` with `GrokestratorMac` (macOS) + `GrokestratoriOS` (iOS) app targets, both depending on the local `GrokestratorCore` package. The `.xcodeproj` is gitignored.
-- App-code Swift 6 compile errors that had been latent (sources never built before) were fixed in PR #9.
+---
 
-**Mac app — working** (PRs #10, #12–#14, #16, #18, #20–#22)
-- App shell: `NavigationSplitView` (sidebar of connections + console-like transcript + composer), per design/02.
-- `ConversationDriver` seam with `MockConversationDriver` (offline, actor — demos permission + audio) and `LiveConversationDriver` (real black box).
-- **Real ACP JSON-RPC client** (`GrokBuildSessionClient`): `initialize` → `session/new` → `session/prompt`, streamed `session/update` → `ConversationUpdate`, `fs/read|write`. Verified end-to-end against the live binary.
-- **Add Connection** form (real/mock); launch via `GrokBuildManager`; status + Stop. (Launcher actor-deadlock from `waitUntilExit` fixed, #14.)
-- **Token-level streaming** of thoughts/messages (live typing).
-- **Agent-prompt UI** (#20): out-of-thread permission overlay (real options, replaces auto-approve) + confident quick-reply chips for questions (heuristics + `[[CHOICES]]` convention). Verified live.
-- **Multimodal** (#16, #21): `ContentPart`/`MediaSource` model + markdown/path parser → inline image thumbnails (open in Preview), audio (play/pause) + video (AVKit) players, file cards with QuickLook thumbnails + "Open with" + download.
-- **App icon** (#18, HAL-eye orchestration wheel) + **SourcePath theme** (#22): dark navy + cyan, bundled Inter/Space Grotesk, themed sidebar/transcript/composer.
+## What Is Not Shipped
 
-**Build Health**
-- ✅ `main` is green. `GrokestratorCore` builds + 12 tests pass (`swift build`/`swift test`). Both app targets build via `xcodebuild` (regenerate first: `xcodegen generate`).
+| Area | Status | Reference |
+|------|--------|-----------|
+| First-class verb normalization layer | Open (#154) | `GovernanceEngine` adapters today |
+| Rung 1 — grok-native subagent surfacing | Not built (#131) | `design/10` |
+| Rung 2 — `.grok/` config GUI | Partial (#132) | `TeamTemplate` only |
+| Orchestration Phase 3 — SQLite | **Parked** (#133) | `feat/orchestration-db` |
+| Run/DAG view | Not built (#134) | `design/11` |
+| Oracle depth (verify-against-intent, corpus maintenance) | Open (#141–#142) | `design/13` |
+| Signed/notarized Mac + TestFlight | Roadmap (#143) | README |
 
-### Current State of Design Docs
-- `02-ui-navigation-and-interaction.md`: + section on out-of-thread agent prompts (questions & permissions overlay).
-- `06-project-structure.md`: Reflects the native structure.
-- `07-client-control-plane-protocol.md`: Client-side control plane (v0.1; built in Core, not yet exercised by apps).
-- `08-multimodal-content.md`: Non-text content model + the **verified** grok-build reality (media as markdown in text, not ACP blocks). Images/audio/video/files all shipped (#16, #21).
-- **SourcePath visual identity**: no doc in this repo yet; tokens live in `~/dev/alexander/app/ui/fred.css` and are implemented in `GrokestratorMac/Theme/Theme.swift` (#22).
-- `00-vision-and-north-star.md`: North Star and phasing still valid.
-- `01-architecture-and-components.md` and `03-technology-and-build-strategy.md`: Historical.
-- `PROJECT_STATE.md`: This file — the live source of truth.
+---
+
+## Implementation vs. Design Doc Headers
+
+| Doc | Header may say | Reality (2026-06-30) |
+|-----|----------------|----------------------|
+| `design/10` | "not implemented" | Rung 0 ✅, rung 3 substantially ✅ |
+| `design/11` | "not started" | Phase 1–2 largely ✅ |
+| `design/12` | "not started" | Phases A–C, E, F ✅ |
+| `design/13` | "thesis only" | Runtime slices 1–3 ✅ |
+
+**This file** and `RELEASE_NOTES.md` are the operational truth for "where we are."
 
 ---
 
 ## Immediate Priorities
-Candidates for the next slices (Mac-first), roughly in value order:
-1. **Finish theming** — apply SourcePath surfaces to the permission overlay / quick-reply chips (still system materials) and tune Space Grotesk variable-font weights if headers read thin.
-2. **Instance inspector** (design/02 right panel): per-instance capabilities (MCP servers, slash commands, model) on demand. (`initialize` already returns this data.)
-3. **Conversation persistence/history in the UI** (history exists in the black box; surface it).
-4. **iOS client** + media/streaming over the control plane (activates the Core client layer + design/08 `fetchResource`) + the SourcePath theme.
-5. **Polish**: audio scrubber + duration; media caching in history.
 
-### Known gaps / risks
-- **Duplicate models**: Mac `GrokBuild/` defines its own `ConversationUpdate`/`ToolCallInfo`/etc. that shadow the promoted Core versions. De-dup refactor pending.
-- **Launched-grok environment**: a Finder-launched app gives grok a minimal `PATH`, so its MCP servers don't spawn (grok still answers). Pass a fuller env if MCP tools should work in-app.
-- **iOS media**: `localFile` references aren't reachable from iOS — needs the `fetchResource` control-plane capability (design/08).
-- **Variable-font weights**: SwiftUI `.weight()` on the bundled variable fonts may render at the default weight; static weights / font-descriptor axes if Space Grotesk looks off.
-- **Streaming a data-URI image** shows the raw base64 as text until the message finalizes, then renders.
-- **Icon at tiny sizes**: the radiating instance windows soften at 16–32px; a simplified iris+ring variant is a future refinement.
+[milestone: Canonical Backlog](https://github.com/sourcepathlabsai/grokestrator/milestone/1)
+
+| Priority | Issue | Topic |
+|----------|-------|-------|
+| 1 | [#154](https://github.com/sourcepathlabsai/grokestrator/issues/154) | Verb normalization as first-class harness layer |
+| 2 | [#134](https://github.com/sourcepathlabsai/grokestrator/issues/134) | Run view — delegation DAG + oracle verdicts |
+| 3 | [#133](https://github.com/sourcepathlabsai/grokestrator/issues/133) | SQLite Phase 3 (parked — exercise Phase 1–2 first) |
+| 4 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
+| — | [#130–#154](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 
 ---
 
-## Non-Goals (Current Phase)
-- Remote agent connections beyond Tailscale client access to the home Mac server (full multi-machine orchestration is later).
-- Windows/Linux as primary platforms.
-- Public release or open source.
-- Polished visual design (structure and experience first).
+## Key Architectural Decisions (standing)
+
+- Native Swift + SwiftUI; GKSS (Mac server) is source of truth
+- 1 Connection = 1 agent instance; tree = soft `parentID` edge
+- ACP + `ACPEvent` universal wire; coordination in app (`delegate` MCP)
+- Governance unit = `ProposedAction`; verb normalization at harness boundaries
+- File-based JSON persistence; SQLite deferred to orchestration Phase 3
+- Every slice → PR → merge gate (`AGENTS.md` §4)
 
 ---
 
 ## Tracking
-- Design documents: `design/`
-- Work tracking: GitHub Issues (to be established)
-- This file (`PROJECT_STATE.md`) is the single source of current truth
-- Strict process: Every chunk of work happens on a focused branch and lands via logical PR.
+
+| What | Where |
+|------|-------|
+| Strategic goals | Obsidian vault (`4-Concepts/`, project folder) |
+| Design intent + invariants | `design/*.md`, `design/oracle/` |
+| Operational snapshot | **This file** |
+| Actionable tasks | GitHub Issues (Canonical Backlog) |
+| Shipped user-facing changes | `RELEASE_NOTES.md` |
 
 ---
 
-*Last updated: 2026-05-27 (rev 2) — through PR #22, all merged:
-- Agent-prompt UI (#20): out-of-thread permission overlay + confident quick-reply chips (heuristics + `[[CHOICES]]` convention, verified live).
-- Multimodal (#21): audio/video players + file cards with QuickLook thumbnails + "Open with"; PDF first-page thumbnails.
-- SourcePath theme (#22): dark navy + cyan, bundled Inter/Space Grotesk; themed sidebar/transcript/composer + app icon.
-- `main` is green; both app targets build (via `xcodegen generate` + `xcodebuild`); Core 12 tests pass.
-- Next: finish theming (overlays/chips, variable-weight), instance inspector, conversation history in UI, iOS client. Gaps tracked above.*
+*Last updated: 2026-06-30 — through PR #153. Supersedes 2026-05-27 snapshot.*

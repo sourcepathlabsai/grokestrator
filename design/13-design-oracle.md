@@ -1,7 +1,7 @@
 # Grokestrator — The Design Oracle (orientation as the quality engine)
 
-Status: **design thesis** — surfaced 2026-06-16 from a working observation, captured
-as direction. It reframes what the product's core asset is.
+Status: **runtime slices 1–3 shipped** (2026-06-30); full thesis ahead. Surfaced
+2026-06-16. It reframes what the product's core asset is.
 
 ## The observation
 
@@ -158,4 +158,6 @@ both boundaries. What first contact corrected:
 first shadow-mode slice landed (`GrokestratorCore/Governance/`, observe-only at both
 tool boundaries). Captures that the maintained low-level design oracle — model-portable
 orientation — is the project's core quality engine, possibly its core product. The
-immediate change it forces remains the tier-routing correction in `12`.*
+immediate change it forces remains the tier-routing correction in `12`. Revised
+2026-06-30: slices 1–3 + ACP verb mapping (#153) shipped. Open: #154 verb layer,
+verify-against-intent (#141). See `PROJECT_STATE.md`.*
