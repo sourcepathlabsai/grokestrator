@@ -161,7 +161,8 @@ public actor GrokBuildManager {
             // Subscribe before prompting so we don't miss the turn's events.
             let stream = try await subscribe(to: target.id)
             _ = try await sendPrompt(to: target.id, prompt: task)
-            result = await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+            let raw = await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+            result = ChildFindingEnvelope.formatDelegateResult(raw, childName: target.name)
         } catch {
             result = "Delegation to \"\(target.name)\" failed: \(error.localizedDescription)"
         }
@@ -170,7 +171,7 @@ public actor GrokBuildManager {
             delegationRunCallback?(.finished(
                 id: runID,
                 status: Self.inferDelegationStatus(result: result),
-                resultPreview: result
+                resultPreview: String(result.prefix(200))
             ))
         }
         return result
@@ -241,10 +242,17 @@ public actor GrokBuildManager {
         // Let a model-agnostic (API) brain orchestrate too: install the `delegate`
         // handler, scoped to *this* Node's own children (grok Nodes get `delegate`
         // via the Orchestration MCP server instead). Same router as everything else.
-        if let api = client as? OpenAICompatSession {
-            await api.setDelegateHandler { [weak self] child, task in
-                guard let self else { return "orchestrator unavailable" }
-                return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+        let cfg = instanceStates[instanceID] ?? config
+        if let api = client as? OpenAICompatSession, let cfg {
+            let catalog = ConnectionStore.loadBrainCatalog()
+            let tierMap = ConnectionStore.loadTierMap()
+            let fleetOrch = cfg.role == .orchestrator
+                && OrchestrationSupport.mode(for: cfg.brain, catalog: catalog, tierMap: tierMap) == .orchestratedFleet
+            if fleetOrch {
+                await api.setDelegateHandler { [weak self] child, task in
+                    guard let self else { return "orchestrator unavailable" }
+                    return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+                }
             }
         }
 
