@@ -26,7 +26,7 @@ struct iOSAssistantContentView: View {
     private func renderer(for part: ContentPart) -> some View {
         switch part {
         case .text(let text):
-            MarkdownText(text, baseSize: 15)
+            SelectableMarkdownText(text, baseSize: 15)
         case .image(let source, let mimeType):
             if case .serverFile(let path) = source {
                 iOSRemoteImagePartView(path: path, mimeType: mimeType)

@@ -7,6 +7,7 @@ struct ContentView: View {
     /// The inspector follows the current selection (design/02): kept here at the
     /// top level so its open/closed state persists as you switch instances.
     @State private var showInspector = false
+    @State private var dockAttention = DockAttentionCoordinator()
 
     var body: some View {
         NavigationSplitView {
@@ -37,10 +38,13 @@ struct ContentView: View {
                 .help("Show instance inspector")
             }
         }
-        // Global "needs you" indicator: a Dock badge with the count of Connections
-        // waiting on an answer — visible even when the app isn't focused.
+        // Global "needs you" indicator: Dock badge + bounce when a new permission or
+        // question arrives while Grokestrator isn't frontmost (#122).
         .onChange(of: model.attentionCount, initial: true) { _, count in
-            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+            dockAttention.updateAttentionCount(count)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            dockAttention.applicationDidBecomeActive()
         }
     }
 }

@@ -190,8 +190,9 @@ private struct ConnectionRow: View {
                     .symbolEffect(.pulse)
                     .accessibilityLabel("Needs your attention")
             } else if instance.isBusy {
-                ThinkingIndicator(status: "", compact: true)
-                    .accessibilityLabel("Working")
+                ThinkingIndicator(status: instance.conversation.activityStatus, compact: true)
+                    .frame(maxWidth: 120, alignment: .trailing)
+                    .accessibilityLabel(instance.conversation.activityStatus)
             }
         }
         .padding(.vertical, 2)
