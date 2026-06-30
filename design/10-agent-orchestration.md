@@ -1,6 +1,7 @@
 # Grokestrator — Agent Orchestration
 
-Status: **design exploration** — not yet implemented. This document proposes how
+Status: **partially implemented** (2026-06-30) — rung 0 ✅, rung 3 substantially ✅;
+rungs 1–2 not built. This document proposes how
 Grokestrator helps you stand up and **supervise** *teams of grok agents* — a
 coordinator plus specialists — that carry a job from "figure out how" through
 "do it" to "report back." The recurring example is coding (architect → code →
@@ -412,4 +413,5 @@ near-term = rung 0 (cross-conversation attention cue) + rung 1 (surface
 grok-native subagents); rung 2 = the config GUI; **rung 3 (steerable fleet) is the
 committed destination**, not indefinitely deferred — because the north star now
 leads with observable, answerable, general-purpose supervision, which only rung 3
-delivers. Status: design exploration; no implementation yet.*
+delivers. Revised 2026-06-30: rung 0 + rung 3 shipped; rungs 1–2 remain. See
+`PROJECT_STATE.md`.*

@@ -1,5 +1,51 @@
 # Grokestrator — Release Notes
 
+## v0.3.0-alpha — 2026-06-30
+
+Third alpha. Grokestrator is no longer a grok-only Mac client — it is a **multi-brain
+orchestration control plane** with a runtime design oracle, team delegation, and polished
+supervision UX. Includes everything from v0.2.0-alpha below.
+
+### Platform
+
+- **Model-agnostic runtime.** Swap brains per Connection: grok, Claude Code (ACP), Groq,
+  Cerebras, Gemini, xAI — via brain catalog, host-local API keys, and per-Node editors.
+- **Orchestration spine.** Tree of Connections (`parentID`), Orchestration MCP with
+  `delegate(child, task)`, team templates (Code Review / Implementation / Research).
+- **Design oracle (active).** Project invariants in `design/oracle/`; shadow → enforce on
+  permission boundary; orient-on-read preamble; verdicts in inspector + `oracle-verdicts.jsonl`.
+- **MCP infrastructure.** Host-owned MCP server registry; per-Node grants; API brains reach
+  granted servers via in-app MCP client.
+
+### Supervision UX
+
+- **Prompt queue** — messages typed during streaming queue instead of dropping.
+- **File attachments** — drag-and-drop into the composer.
+- **Markdown rendering** — VS Code-style assistant messages; full-message copy on Mac and iOS.
+- **Dock bounce** — alerts when a permission/question arrives and the app isn't frontmost.
+- **Sidebar busy state** — live activity status on background Connections.
+- **Transcript accumulators** — long tool-use turns collapse to summary rows (layout stability).
+- **Concurrent permissions** — Claude parallel tool use no longer freezes the session.
+
+### Fixes / hardening
+
+- ACP permission verb mapping for Claude Code (oracle no longer shows `unknown` for every action).
+- Session cwd shown correctly in inspector; agents never run at filesystem root.
+- Stable Mac code signature (fewer repeated TCC prompts).
+- Selectable transcript messages; grok-generated images render in chat.
+
+### Agent / contributor docs
+
+- `AGENTS.md` / `CLAUDE.md`: OODA helix operating mode, PR-per-slice delivery gate,
+  post-merge issue hygiene. See repo — not user-facing in the app.
+
+### Install
+
+Same as v0.2.0-alpha: build from source via XcodeGen, or unsigned DMG on version tags.
+Signed/notarized distribution and TestFlight remain on the roadmap.
+
+---
+
 ## v0.2.0-alpha — 2026-05-31
 
 Second alpha. A round of conversation-surface and remote fixes on top of the
