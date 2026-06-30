@@ -49,10 +49,18 @@ struct AddConnectionView: View {
 
             Form {
                 if let parent {
-                    HStack(spacing: 4) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.tint)
-                        Text("Child of \"\(parent.name)\" — it becomes an orchestrator.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    if model.supportsFleetOrchestration(for: parent) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.tint)
+                            Text("Fleet child of \"\(parent.name)\" — parent is promoted to orchestrator.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text("\"\(parent.name)\" is a supervised ACP agent — fleet children require an API/local brain parent.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 TextField("Name", text: $name, prompt: Text("Local Grok"))
@@ -213,6 +221,8 @@ struct AddConnectionView: View {
     }
 
     private var isAddDisabled: Bool {
+        if let parent, !model.supportsFleetOrchestration(for: parent) { return true }
+        if parent != nil, isGrok { return true }
         if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
         // A catalog brain must reference a profile that still exists.
         if case .profile(let id) = brain, model.brainCatalog.profile(id) == nil { return true }

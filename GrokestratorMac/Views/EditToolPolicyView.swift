@@ -43,7 +43,7 @@ struct EditToolPolicyView: View {
     @State private var oracleLevel: OracleEnforcement = .shadow
     @State private var loaded = false
 
-    private var isOrchestrator: Bool { item.role == .orchestrator }
+    private var isFleetOrchestrator: Bool { model.isFleetOrchestrator(item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -163,7 +163,7 @@ struct EditToolPolicyView: View {
     /// capability covers, plus `delegate` for an orchestrator.
     private var permittedTools: [Tool] {
         var out = Self.fileTools.filter { rank($0.requires) <= rank(capability) }
-        if isOrchestrator { out.append(Self.delegateTool) }
+        if isFleetOrchestrator { out.append(Self.delegateTool) }
         return out
     }
 

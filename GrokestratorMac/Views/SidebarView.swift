@@ -155,7 +155,7 @@ struct SidebarView: View {
         }
 
         ForEach(roots) { root in
-            if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
+            if model.showsFleetTree(for: root), let kids = childrenByParent[root.id], !kids.isEmpty {
                 DisclosureGroup(isExpanded: expansionBinding(root.id)) {
                     DelegationRunsSidebarSection(
                         runs: model.delegationRuns.runs(for: root.id),
@@ -165,7 +165,7 @@ struct SidebarView: View {
                 } label: {
                     orchestratorLabel(root, in: group)
                 }
-            } else if root.role == .orchestrator {
+            } else if model.showsFleetTree(for: root) {
                 DisclosureGroup(isExpanded: expansionBinding(root.id)) {
                     DelegationRunsSidebarSection(
                         runs: model.delegationRuns.runs(for: root.id),
@@ -226,15 +226,16 @@ struct SidebarView: View {
             Button("MCP Access…") { editingMCPFor = instance }
             // Create a child agent under this Connection — promotes it to
             // orchestrator automatically (see GrokestratorModel.addRealConnection).
-            Button("Add Child Agent…") { addingChildFor = instance }
-            if instance.role == .orchestrator {
+            if model.supportsFleetOrchestration(for: instance) {
+                Button("Add Child Agent…") { addingChildFor = instance }
+            }
+            if model.showsFleetTree(for: instance) {
                 Button("Make Agent") { model.setRole(.agent, for: instance) }
-            } else {
+            } else if model.supportsFleetOrchestration(for: instance) {
                 Button("Make Orchestrator") { model.setRole(.orchestrator, for: instance) }
             }
-            // An agent can be parented under an orchestrator (one level for now).
-            if instance.role == .agent {
-                let parents = model.localOrchestrators.filter { $0.id != instance.id }
+            if instance.role == .agent, model.supportsFleetOrchestration(for: instance) {
+                let parents = model.localFleetOrchestrators.filter { $0.id != instance.id }
                 Menu("Parent") {
                     Button(instance.parentID == nil ? "✓ None" : "None") {
                         model.setParent(nil, for: instance)
