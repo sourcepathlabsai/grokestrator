@@ -68,6 +68,53 @@ struct GovernanceEngineTests {
         #expect(v.outcome == .escalate)            // recall detector runs on payloadText
     }
 
+    @Test("Claude Code Bash permission (no kind) → shell via title/command")
+    func claudeBashPermissionMapsToShell() {
+        let a = ProposedAction.fromACPPermission(
+            kind: nil, variant: nil,
+            command: "ls -la",
+            title: "`ls -la`",
+            agentName: "Claude Code", cwd: "/work", nodeName: nil)
+        #expect(a.verb == "shell")
+        let v = engine.evaluate(a)
+        #expect(v.sideEffect == .execute)
+        #expect(v.outcome == .escalate)   // execute-class floor
+    }
+
+    @Test("Claude Code Read permission (no kind) → fs.read via title")
+    func claudeReadPermissionMapsToRead() {
+        let a = ProposedAction.fromACPPermission(
+            kind: nil, variant: nil,
+            command: nil,
+            title: "Read src/main.swift",
+            agentName: "Claude Code", cwd: "/work", nodeName: nil)
+        #expect(a.verb == "fs.read")
+        let v = engine.evaluate(a)
+        #expect(v.outcome == .allow)
+    }
+
+    @Test("Claude Code Edit permission (no kind) → fs.write via title")
+    func claudeEditPermissionMapsToWrite() {
+        let a = ProposedAction.fromACPPermission(
+            kind: nil, variant: nil,
+            command: nil,
+            title: "Edit `src/main.swift`",
+            agentName: "Claude Code", cwd: "/work", nodeName: nil)
+        #expect(a.verb == "fs.write")
+        let v = engine.evaluate(a)
+        #expect(v.sideEffect == .mutate)
+    }
+
+    @Test("Claude Code Grep permission (no kind) → fs.list via title")
+    func claudeGrepPermissionMapsToList() {
+        let a = ProposedAction.fromACPPermission(
+            kind: nil, variant: nil,
+            command: nil,
+            title: "grep \"foo\" src/",
+            agentName: "Claude Code", cwd: "/work", nodeName: nil)
+        #expect(a.verb == "fs.list")
+    }
+
     @Test("ACP path-escape goes UNDETECTED — the fidelity gap, pinned")
     func acpPathEscapeUndetected() {
         // grok's edit permission gives us a title, not a structured path. The precise
