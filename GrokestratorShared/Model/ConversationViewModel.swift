@@ -64,6 +64,17 @@ enum TranscriptListItem: Identifiable {
     }
 }
 
+/// A file the user dragged onto the composer. Its contents will be prepended to
+/// the prompt text when sent (the driver pipeline is plain `String`, so structured
+/// multi-part content isn't available today).
+struct AttachedFile: Identifiable {
+    let id = UUID()
+    let url: URL
+    var name: String { url.lastPathComponent }
+    /// Byte size, for the chip label. Captured at attach time.
+    let size: Int64
+}
+
 /// MainActor-facing state for a single conversation.
 ///
 /// Bridges the actor-based `AsyncStream<ConversationUpdate>` (black box / mock)
@@ -97,10 +108,10 @@ final class ConversationViewModel {
     /// Confident quick-reply options for the last assistant question (set when a
     /// message finalizes; cleared on the next prompt). Empty ⇒ user types.
     private(set) var quickReplies: [String] = []
-    /// Prompts waiting to fire after the current turn completes. Each entry is a
-    /// pair of (prompt text, transcript entry id) so we can replace the queued-
-    /// prompt row with a normal `.userPrompt` when it fires.
-    private var promptQueue: [(text: String, entryID: UUID)] = []
+    /// Prompts waiting to fire after the current turn completes. Each entry stores
+    /// the wire text (sent to the driver), the display text (shown in the
+    /// transcript), and the transcript entry id for row promotion.
+    private var promptQueue: [(wireText: String, displayText: String, entryID: UUID)] = []
     /// `true` when there are prompts waiting to fire (drives the "queued" badge).
     var hasQueuedPrompts: Bool { !promptQueue.isEmpty }
     /// Bumped on every transcript mutation so views can keep scrolled to the bottom
@@ -124,6 +135,8 @@ final class ConversationViewModel {
     /// Instance Inspector's slash-command list, which inserts on double-click) can
     /// write into it without going through the view.
     var draft: String = ""
+    /// Files the user has dragged onto (or picked for) the composer. Cleared on send.
+    var attachedFiles: [AttachedFile] = []
     /// Bumped to ask the composer to take keyboard focus (e.g. right after an
     /// inserted slash command, so the user can immediately type the argument).
     private(set) var focusToken: Int = 0
@@ -312,32 +325,72 @@ final class ConversationViewModel {
     /// the UI never looks frozen, even when grok itself is slow to come up.
     func send(_ prompt: String) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let files = attachedFiles
+        guard !trimmed.isEmpty || !files.isEmpty else { return }
+
+        // Build the wire prompt: file contents (if any) prepended to the user text.
+        let wirePrompt = Self.buildWirePrompt(text: trimmed, files: files)
+        attachedFiles = []
 
         // If a turn is in progress, queue the prompt instead of dropping it.
         // The queued prompt appears in the transcript immediately (muted) and
         // fires automatically when the current turn completes.
+        let displayText = files.isEmpty ? trimmed : (trimmed.isEmpty ? "\(files.count) file(s) attached" : trimmed)
+
         if isStreaming {
-            let entry = TranscriptEntry(kind: .queuedPrompt(trimmed))
-            promptQueue.append((text: trimmed, entryID: entry.id))
+            let entry = TranscriptEntry(kind: .queuedPrompt(displayText))
+            promptQueue.append((wireText: wirePrompt, displayText: displayText, entryID: entry.id))
             entries.append(entry)
             streamTick += 1
             return
         }
 
-        firePrompt(trimmed)
+        firePrompt(wirePrompt, displayText: displayText)
+    }
+
+    // MARK: - File attachments
+
+    /// Add files to the composer (from drag-and-drop or a file picker).
+    /// Deduplicates by URL.
+    func addFiles(_ urls: [URL]) {
+        for url in urls {
+            guard !attachedFiles.contains(where: { $0.url == url }) else { continue }
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+            attachedFiles.append(AttachedFile(url: url, size: size))
+        }
+    }
+
+    func removeAttachedFile(_ file: AttachedFile) {
+        attachedFiles.removeAll { $0.id == file.id }
+    }
+
+    /// Builds the prompt string sent over the wire, prepending file contents
+    /// as fenced `<file>` blocks. Binary files are noted but not inlined.
+    private static func buildWirePrompt(text: String, files: [AttachedFile]) -> String {
+        guard !files.isEmpty else { return text }
+        var parts: [String] = []
+        for file in files {
+            if let contents = try? String(contentsOf: file.url, encoding: .utf8) {
+                parts.append("<file name=\"\(file.name)\">\n\(contents)\n</file>")
+            } else {
+                parts.append("<file name=\"\(file.name)\">\n[binary file, \(file.size) bytes]\n</file>")
+            }
+        }
+        if !text.isEmpty { parts.append(text) }
+        return parts.joined(separator: "\n\n")
     }
 
     /// Actually sends a prompt to the driver. Called by `send` (direct) and by
     /// `drainQueue` (after a turn completes). When `echoInTranscript` is false
     /// the optimistic `.userPrompt` row is skipped (the caller already placed it).
-    private func firePrompt(_ trimmed: String, echoInTranscript: Bool = true) {
+    /// `displayText` controls what the transcript shows (defaults to the wire text).
+    private func firePrompt(_ trimmed: String, echoInTranscript: Bool = true, displayText: String? = nil) {
         quickReplies = []
         isStreaming = true
         activityStatus = "Thinking…"
         startUsagePolling()                 // live context meter during the turn
         if echoInTranscript {
-            appendEntry(.userPrompt(trimmed))   // optimistic echo
+            appendEntry(.userPrompt(displayText ?? trimmed))   // optimistic echo
         }
         let driver = self.driver
         Task { [weak self] in
@@ -468,10 +521,10 @@ final class ConversationViewModel {
         promptQueue.removeFirst()
         // Replace the `.queuedPrompt` row with a normal `.userPrompt`.
         if let idx = entries.firstIndex(where: { $0.id == next.entryID }) {
-            entries[idx].kind = .userPrompt(next.text)
+            entries[idx].kind = .userPrompt(next.displayText)
         }
         streamTick += 1
-        firePrompt(next.text, echoInTranscript: false)
+        firePrompt(next.wireText, echoInTranscript: false)
     }
 
     /// Removes all queued prompts and their transcript entries (used on Stop,
