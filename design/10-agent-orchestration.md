@@ -1,7 +1,10 @@
 # Grokestrator — Agent Orchestration
 
-Status: **partially implemented** (2026-06-30) — rung 0 ✅, rung 3 substantially ✅;
-rungs 1–2 not built. This document proposes how
+Status: **partially implemented** (2026-06-30) — rung 0 ✅, orchestrated-fleet
+(formerly rung 3) substantially ✅ for API brains; rungs 1–2 not built for ACP
+agents. **Direction revised 2026-06-30:** dual-path orchestration — ACP agents
+use harness subagents (supervision only); API/local brains use Grokestrator
+sub-sessions (`delegate`). This document proposes how
 Grokestrator helps you stand up and **supervise** *teams of grok agents* — a
 coordinator plus specialists — that carry a job from "figure out how" through
 "do it" to "report back." The recurring example is coding (architect → code →
@@ -20,16 +23,27 @@ Connection is 1:1 with one grok instance; there are no nested chats* — a rule 
 holds through rungs 1–2 and is extended (not broken) by a soft `parentID` edge at
 rung 3 (below).
 
-**Direction (revised 2026-06-01).** The path is now stated as **both, sequenced**:
-surface grok-native subagents first (cheap, partial), then graduate to
-**real, steerable Connection children** as the explicit destination. Rung 3 is no
-longer "deferred until some hypothetical need" — Grokestrator's heart is the
-supervision UX (*watch a worker think live, and answer its question*), which
-grok-native subagents structurally can't provide (see the limits below). This
-supervision slice is built for the **free founder/solo-dev tool on its own
-merits** — and it doubles as the **live prototype** for the separate monetization
-bet in `strategy-general-case-ai.md` (which reuses the *concept*, not this app's
-grok brain or local-Mac deployment).
+**Direction (revised 2026-06-30).** Stop fighting harness subagents on ACP brains.
+The product splits on **who owns the tool loop**:
+
+| Path | Brain | Who coordinates helpers | What Grokestrator does |
+|------|-------|-------------------------|------------------------|
+| **Supervised agent** | ACP (grok, Claude Code, …) | The harness (`task` / native subagents) | **Supervise the parent** — stream, permissions, attention, oracles |
+| **Orchestrated fleet** | API / local (Cerebras, Groq, OpenAI-compat, onboard, …) | Grokestrator (`delegate` MCP + child Connections) | **Orchestrate** — tree of purpose-built sub-sessions, tool policy, runs |
+
+For ACP agents we do **not** offer Grokestrator sub-sessions or app-side `delegate`
+orchestration — that path fights control-plane capture and cannot be enforced at
+the ACP boundary (see `12` §ACP vs API). For API/local brains there is no harness;
+Grokestrator's mediated fleet **is** the orchestration layer.
+
+Grokestrator's heart remains **observable, answerable supervision** on every
+path. On ACP that means the *parent* Connection (rung 0 attention, rung 1 lineage
+surfacing, rung 2 harness config). On API brains it additionally means *each child*
+is its own watchable, answerable Connection (orchestrated fleet).
+
+The orchestrated-fleet path is the substrate for the separate monetization bet in
+`strategy-general-case-ai.md` (general-case workflows on headless/API workers).
+ACP supervision serves the free founder/solo-dev tool on its own merits.
 
 ## The pivotal fact: grok already orchestrates
 
@@ -83,53 +97,54 @@ interact with the user," that opacity is exactly what separates the rungs below.
 
 ## The integration ladder
 
-Increasingly ambitious ways to integrate, with sharply different cost/value. The
-direction is **both, sequenced**: ship the cheap near-term wins (rung 0 + rung 1)
-and the config GUI (rung 2), *while building toward* the steerable fleet (rung 3)
-as the explicit destination — because rung 3 is the only rung that delivers the
-headline vision (watch a worker live + answer it + non-coding supervision).
+Two ladders, one product — chosen by brain binding (see direction above).
+
+### ACP path — supervised agent (grok, Claude Code, …)
+
+Ride the harness. Grokestrator does not spawn sub-sessions for these brains.
 
 | Rung | What Grokestrator does | Cost | What you gain |
 |---|---|---|---|
-| **0 — Attention cue** ← near-term, no hierarchy | Badge a background Connection (and a global indicator) when it has a pending question/permission, so you click back to answer | Low | Human-in-the-loop across many conversations *today*; de-risks rung-3 UX |
-| **1 — Surface** ← near-term | Read grok's task lineage; render in-process subagents inline | Low | Visibility into what native subagents *did* (not live, not answerable) |
-| **2 — Configure** | Connection dialogs author `.grok/` agent + role + persona files; reusable team templates; project/global scope | Low–med | Set up a team's roles/prompts once, reuse, share via the repo — and ride grok's tuned coordination |
-| **3 — Steerable fleet** ← **destination** | Each role = a real Connection (own ACP stream, own chat, own sidebar node), coordinated by a Grokestrator-hosted `delegate` MCP tool; soft `parentID` edge | High | **Watch a worker think live and grab the wheel from any device** — the one thing grok-native structurally can't do |
+| **0 — Attention cue** ✅ | Badge a background Connection (and a global indicator) when it has a pending question/permission | Low | Human-in-the-loop across many conversations *today* |
+| **1 — Surface** | Read grok's `task` lineage; render in-process subagents inline in the parent transcript | Low | Visibility into what harness helpers *did* (not live per-child, not answerable) |
+| **2 — Configure** | Connection dialogs author `.grok/` agent + role + persona files; harness team templates; project/global scope | Low–med | Set up harness roles/personas once; ride grok's tuned `task` coordination |
 
-How the rungs relate:
+ACP agents stay **flat** in the sidebar (one Connection). No `parentID` tree, no
+Orchestration MCP `delegate` on the parent.
 
-- **Rung 0** is independent of everything else and serves the vision immediately —
-  it works on **today's flat model** (every Connection is already an observable ACP
-  session; the wire protocol already carries `promptState.pendingPermissions`). It's
-  the cheapest possible down-payment on "answer the worker's question," and the UX
-  it establishes (a question on a background worker pulling you back) is exactly
-  what rung 3 needs at scale.
-- **Rung 1** folds in for free as we render the orchestrator's transcript — but it
-  is **explicitly partial**: you see what a child *did* (a `task` tool-call,
-  optionally labeled from the on-disk `subagents/` lineage), never live thinking,
-  and you cannot answer it. It is "read-only history of opaque workers."
-- **Rung 2** is the best value-per-effort for *configuring* a team without
-  re-implementing coordination, and the role/persona files it authors are **the
-  literal seeds rung 3 consumes**. It's a genuine stepping stone, not a throwaway.
-- **Rung 3** is the destination. It is *more work* than riding grok-native
-  coordination, and for a fully-autonomous single-repo coding flow grok-native is
-  still the better tool. But rung 3 is the **only** rung that reaches the axes the
-  north star now leads with — **live observability, human-in-the-loop on a child,
-  and cross-device steering** — which a non-technical operator supervising a
-  general-purpose job fundamentally needs. We build toward it deliberately, seeded
-  by rung 2, with rung 0's UX already proven.
+### API path — orchestrated fleet (Cerebras, Groq, local, …)
 
-### When grok-native is still the right answer
+No harness subagents — Grokestrator owns coordination.
 
-For a *fully autonomous* job where the human does **not** need to watch or answer a
-specific worker — "ship this one feature in this one repo, architect→code→review→
-PR→merge, don't bother me" — grok's in-process `task` system is **strictly better**:
-it already does spawning, routing, worktree isolation, depth limits, and tuned
-personas. Rung 3 is not a replacement for that; it's the path for the *supervised*,
-*cross-device*, *general-purpose* work grok-native structurally can't surface.
-Both coexist: a rung-2 Connection running grok-native subagents, with rung-0/1
-making them legible; rung-3 Connections when a worker must be watchable and
-answerable.
+| Phase | What Grokestrator does | Cost | What you gain |
+|---|---|---|---|
+| **Fleet core** ✅ (was rung 3) | Each role = a real Connection; soft `parentID` edge; Orchestration MCP `delegate`; team templates | High | **Watch each worker live, answer each worker, steer from any device** |
+| **Fleet + DB** | Schema-validated case file (`db.*` tools) | Med | Rigorous data exchange between orchestrator and children |
+| **Fleet + triggers** | Standing agents, cron/webhook/row triggers | Med | Push activation for headless workflows |
+
+Orchestrated-fleet is the **only** path where `role` + `parentID` tree nesting,
+`delegate`, Run/DAG views, and fleet team templates (Research, Code Review,
+Implementation) apply.
+
+How the paths relate:
+
+- **Rung 0** applies to **all** Connections (ACP and API) — any observable session
+  can raise a permission/question that pulls the human back.
+- **Rungs 1–2** are the **ACP supervision path** — make harness subagents legible
+  and configurable. They do **not** graduate into orchestrated fleet; they are the
+  complete ACP orchestration story.
+- **Orchestrated fleet** is the **API/local path** — for brains without harness
+  subagents, and for general-case workflows that need every step watchable and
+  gateable. Fleet team templates pin API/local brains on orchestrator + children.
+
+### When each path is the right answer
+
+| Job shape | Right path | Why |
+|-----------|------------|-----|
+| Coding with grok/Claude; harness `task` does the team work | **Supervised agent** (ACP) | Harness coordination is tuned; fighting it loses |
+| Headless/API worker; no harness; each step must be visible | **Orchestrated fleet** | Grokestrator is the only coordinator |
+| General-case SMB (quote → approve → send) on headless models | **Orchestrated fleet** | Mediated `delegate`, gates, case file |
+| "Ship this feature, don't bother me" on grok | **Supervised agent** + harness | Strictly better than app-side fleet on ACP |
 
 ## Near-term: the cross-conversation attention cue (rung 0)
 
@@ -315,45 +330,41 @@ tree, no sidebar nesting. Those all belong to rung 3.
 
 - **Re-implementing coordination.** grok's `task` system does the spawning and
   routing; we configure and surface it, full stop.
-- **A process hierarchy of Connections.** Belongs to rung 3 (the committed
-  destination), sequenced after the near-term wins — not in the config-GUI slice.
-- **Driving sub-agents directly / human-in-the-loop on a *child*.** Not possible
-  with grok-native subagents; it's the whole point of rung 3 and arrives there.
+- **A process hierarchy of Connections on ACP agents.** Belongs to orchestrated
+  fleet (API/local brains only) — not the ACP supervision path.
+- **Driving sub-agents directly / human-in-the-loop on a harness *child*.** Not
+  possible with grok-native subagents; orchestrated fleet provides per-child HITL
+  on API brains only.
   (Human-in-the-loop on a *coordinator* — answering its own questions across
   conversations — arrives earlier, via the rung-0 attention cue.)
 - **Changing the standalone single-connection experience.** "Plain" remains the
   default and is completely unchanged.
 
-## The destination: the steerable fleet (rung 3)
+## Orchestrated fleet (API / local brains only)
 
-The one thing grok-native subagents structurally cannot do is let a human **watch
-and grab the wheel of an individual worker, from any device**. Because that
-supervision UX is Grokestrator's heart — and the live prototype of the separate
-monetization bet (`strategy-general-case-ai.md`) — this is the **committed
-destination** the roadmap builds toward (seeded by rung 2, with rung 0's UX already
-proven), not an open-ended "maybe later." It's still sequenced *after* the cheap
-wins, and grok-native remains the right tool for fully-autonomous jobs (above) —
-but the direction is settled. The shape:
+Grok-native subagents cannot let a human **watch and grab the wheel of an individual
+harness helper** — but we no longer try to replicate harness coordination on ACP
+brains. Orchestrated fleet is **only for API/local brains**, where Grokestrator
+*is* the coordinator and every worker is a first-class Connection.
 
-- Each role becomes a **real Connection** (own grok process, own ACP stream, own
-  sidebar node, own chat) so it rides the existing broadcast/subscription plane
-  and is visible + steerable on every device.
-- A Grokestrator-hosted **MCP server** (feasible — `MediaHTTPServer` already
-  proves we can bind an in-app server, and grok supports `http`-transport MCP)
-  exposes a `delegate(role, task)` tool the coordinator calls; Grokestrator routes
-  it to the right Connection and returns the result.
-- Connections gain a soft `parentID` edge (no nested objects — the 1:1 instance
-  rule holds) and the sidebar gains one disclosure level.
-- The role/prompt definitions authored in **v1 become the seeds** fed to these
-  real connections — so rung 2 is a genuine stepping stone, not a throwaway.
+Shape (largely shipped for API brains; see `11`, `PROJECT_STATE`):
 
-First-stab calls already made for rung 3 (kept here so the path is concrete):
-PR-merge is a thin Grokestrator-gated action (reviewer-green **or** human-confirm)
-while `pr-babysit` does the PR/CI work; one shared MCP host routed by coordinator
-ID; role seeds capped + `/compact`-summarized; workers spun up per-feature and
-archived (opt-in keep-warm); `delegate` returns structured errors for the
-coordinator to retry, escalating to the human after repeats; orchestration is
-host-local (remote devices view + prompt, host drives).
+- Each role is a **real Connection** (own process/session, own chat, own sidebar
+  node) on the broadcast/subscription plane — visible + steerable on every device.
+- A Grokestrator-hosted **Orchestration MCP** exposes `delegate(child, task)`;
+  the router sends work to a named child and returns its result.
+- Soft `parentID` edge + sidebar tree nesting — **only** for orchestrated-fleet
+  Connections.
+- Fleet **team templates** (Research, Code Review, Implementation) create
+  orchestrator + children with **API/local brains** — not ACP agents.
+
+First-stab calls (unchanged):
+
+- PR-merge as a thin Grokestrator-gated action while workers do the PR/CI work.
+- `delegate` returns structured errors for retry; human escalation after repeats.
+- Orchestration host-local (GKSS drives; remote devices observe + answer).
+- Child results should use a **structured finding envelope** (not prose-only) so
+  synthesis and gates are mechanical (`11` Phase 2+).
 
 ## Open questions
 
@@ -408,10 +419,8 @@ host-local (remote devices view + prompt, host drives).
 
 ---
 
-*Created: 2026-05-30. Revised 2026-06-01: direction is now **both, sequenced** —
-near-term = rung 0 (cross-conversation attention cue) + rung 1 (surface
-grok-native subagents); rung 2 = the config GUI; **rung 3 (steerable fleet) is the
-committed destination**, not indefinitely deferred — because the north star now
-leads with observable, answerable, general-purpose supervision, which only rung 3
-delivers. Revised 2026-06-30: rung 0 + rung 3 shipped; rungs 1–2 remain. See
-`PROJECT_STATE.md`.*
+*Created: 2026-05-30. Revised 2026-06-01: both, sequenced — rungs 0–2 for ACP
+harness integration; rung 3 as steerable fleet. **Revised 2026-06-30: dual-path
+orchestration** — ACP agents use harness subagents (supervision path, rungs 0–2);
+API/local brains use orchestrated fleet (`delegate` + tree). Do not offer Grokestrator
+sub-sessions on ACP agents. See `PROJECT_STATE.md`, `11` §0, `12` §ACP vs API.*

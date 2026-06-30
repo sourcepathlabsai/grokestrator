@@ -1,11 +1,14 @@
 # Grokestrator — Orchestrated Agent Platform (Implementation Plan)
 
-Status: **Phase 1–2 largely implemented** (2026-06-30); Phase 3+ ahead. A deliberate
-scope expansion. Grokestrator
-becomes a heavy-duty **orchestrated multi-agent platform**: a tree of grok
-Connections where some are **orchestrators** (coordinate children) and some are
-**agents** (do the work), exchanging data rigorously, backed by an embedded database
-the orchestrators manage, and kept honest by **oracles** that detect, flag, and
+Status: **Phase 1–2 largely implemented** (2026-06-30) for **orchestrated-fleet**
+(API/local brains); Phase 3+ ahead. **Direction revised 2026-06-30:** dual-path
+orchestration — this platform applies to **orchestrated fleet** only; ACP agents
+(grok, Claude Code) use harness subagents and Grokestrator's **supervision path**
+(`10` rungs 0–2). Grokestrator becomes a heavy-duty **orchestrated multi-agent
+platform** for headless/API workers: a tree of Connections where some are
+**orchestrators** (coordinate children via `delegate`) and some are **agents** (do
+the work), exchanging data rigorously, backed by an embedded database the
+orchestrators manage, and kept honest by **oracles** that detect, flag, and
 isolate violating cells.
 
 This is the **convergence** of three threads already in the repo/vault:
@@ -17,11 +20,29 @@ This is the **convergence** of three threads already in the repo/vault:
   them) is the load-bearing asset; it's exactly what an orchestration platform needs.
 
 > **The standing rule still holds** (`connection-semantics`): one Connection = one
-> grok instance, **no nested chats**. The tree is a *soft `parentID` edge* between
+> agent instance, **no nested chats**. The tree is a *soft `parentID` edge* between
 > sibling Connections, not nested objects. Every node remains its own observable,
-> steerable Connection. That is *why* Grokestrator (not grok-native subagents) can
-> build this: grok subagents are invisible over ACP and can't talk to the user;
-> real Connections can be watched and answered.
+> steerable Connection.
+
+---
+
+## 0. Dual-path orchestration (which brain gets this platform)
+
+| | **Supervised agent** (ACP) | **Orchestrated fleet** (this doc) |
+|---|---|---|
+| **Brains** | grok, Claude Code, custom ACP | Cerebras, Groq, Gemini-compat, local, onboard |
+| **Coordination** | Harness `task` / native subagents | Orchestration MCP `delegate` + child Connections |
+| **Grokestrator sub-sessions** | **No** — do not offer tree/`delegate` on ACP | **Yes** — core product |
+| **Sidebar** | Flat (one Connection) | Tree (`parentID` nesting) |
+| **Tool policy enforcement** | Permission overlays + oracles at ACP boundary | Full app-owned tool loop + `ToolPolicy` |
+| **Team templates** | Harness config (`.grok/` roles/personas) — rung 2 | Fleet templates (Research, Code Review, …) |
+| **Design home** | `10` rungs 0–2 | `10` orchestrated fleet + this doc |
+
+**Why the split:** ACP harnesses already own sub-agent coordination and fire before
+Grokestrator can mediate it — fighting that path is control-plane capture with no
+enforceable win. API/local brains have no harness; Grokestrator's mediated fleet is
+the orchestration layer. One orchestration **engine** (`delegate`, runs, DB, gates);
+two **activation paths** chosen by `BrainBinding`.
 
 ---
 
@@ -270,9 +291,11 @@ design is shaped by reality and the oracle core stays small.
   build it with cathedral-grade care; keep everything it guards disposable.
 - **Semantic oracles are unsolved** (`~/dev/AI/03 §A`). Scope Phase 4 to *cheap,
   objective* oracles. "Bounded, measured error rate" > "provably correct."
-- **grok is a coding brain.** For coding orchestration it's ideal; for general
-  (non-coding) orchestration the brain may need swapping later — **keep ACP as the
-  generic wire** so the orchestrator/agent runtime isn't grok-locked.
+- **ACP agents are supervised, not fleet-orchestrated.** Do not offer Grokestrator
+  sub-sessions on grok/Claude Code; ride harness subagents (`10`). Fleet
+  orchestration targets API/local brains — the general-case substrate.
+- **Keep ACP as the generic wire** for supervised agents; fleet orchestration is
+  brain-binding gated, not grok-locked.
 - **Mediate everything.** The moment a Node writes shared state or calls a peer
   *without* going through the Orchestration MCP, you've created a coupling-contract
   and lost the ability to oracle-check it. The discipline *is* the architecture.
@@ -312,18 +335,14 @@ Two small features were queued just before this pivot — they aren't lost; they
 
 ## 7b. The brain is swappable (model-agnostic Nodes)
 
-A Node's LLM is a **swappable brain**; this platform is the **body** — it decides what
-the brain may *do*, executes it, observes it, and coordinates many brains. The brain
-can be grok, an OpenAI-compatible host (Groq, Cerebras, local llama.cpp/Ollama),
-Gemini, or onboard. Two choices here already enable this: coordination lives in the
-app (the `delegate` tool, not grok-native subagents), and capabilities are enforced at
-our boundary (granted tools + per-action gating), not by trusting the model. The seam
-is `AgentSession` (the ~10-method contract `GrokBuildConversation` already uses) with
-`ACPEvent` as the universal event language: grok speaks it natively, other backends
-synthesize it. This promotes the "keep ACP generic so the runtime isn't grok-locked"
-footnote to a first-class plan — see **`12-model-agnostic-runtime.md`** for the seam,
-capability model, and phased roadmap (Phase A: formalize the seam; Phase B: an
-OpenAI-compatible backend — the 80/20 unlock).
+A Node's LLM is a **swappable brain**; Grokestrator is the **body** — it decides what
+the brain may *do*, executes it, observes it, and (for API/local brains) coordinates
+many brains via orchestrated fleet. Two choices enable brain-swap: **coordination
+lives in the app for fleet nodes** (`delegate`, not harness subagents), and
+**capabilities are enforced at our boundary** for API brains (granted tools +
+per-action gating). ACP agents use the harness for coordination; Grokestrator
+supervises the parent. The seam is `AgentSession` + `ACPEvent` — see
+**`12-model-agnostic-runtime.md`**.
 
 ## 8. Relationship to other documents
 
@@ -341,9 +360,7 @@ OpenAI-compatible backend — the 80/20 unlock).
 
 ---
 
-*Created 2026-06-05. Revised 2026-06-09: added **Triggers / standing agents** (push
-activation — cron/event/DB-row, the "run periodically or on an event" capability) and
-**child guardrails as defense in depth** (pre-action permission policy → pre-output
-oracle gate → resource caps); clarified tool provisioning as **both, sequenced**
-(grant existing in Phase 2, synthesize oracle-gated cells in Phase 4+). Revised
-2026-06-30: Phase 1–2 largely shipped; Phase 3 parked. See `PROJECT_STATE.md`.*
+*Created 2026-06-05. Revised 2026-06-09: triggers, guardrails, tool provisioning.
+Revised 2026-06-30: Phase 1–2 largely shipped for fleet; Phase 3 parked.
+**Revised 2026-06-30: dual-path orchestration** — this platform is orchestrated-fleet
+(API/local) only; ACP agents use supervision path (`10` §0). See `PROJECT_STATE.md`.*
