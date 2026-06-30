@@ -64,6 +64,13 @@ public protocol ConversationDriver: Sendable {
     /// transfer); local drivers return the on-disk `file://` URL. `nil` when the
     /// host isn't addressable yet.
     func mediaURL(forHostPath path: String) -> URL?
+
+    /// Grok session id for harness subagent lineage reads (`design/10` rung 1).
+    func sessionID() async -> String?
+}
+
+extension ConversationDriver {
+    public func sessionID() async -> String? { nil }
 }
 
 #if os(macOS)
@@ -161,6 +168,10 @@ public struct LiveConversationDriver: ConversationDriver {
     public func mediaURL(forHostPath path: String) -> URL? {
         let url = URL(fileURLWithPath: path)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    public func sessionID() async -> String? {
+        await manager.sessionID(for: instanceID)
     }
 }
 #endif

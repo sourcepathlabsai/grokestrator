@@ -39,6 +39,11 @@ struct AddConnectionView: View {
     @State private var resolvingClaude = false
     /// Shown when Claude Code isn't installed yet — the detect/install flow.
     @State private var showingClaudeSetup = false
+    /// Harness team template for grok ACP path (#132).
+    @State private var harnessTemplateID: String = GrokHarnessTemplate.plain.id
+    private var harnessTemplate: GrokHarnessTemplate {
+        GrokHarnessTemplate.all.first(where: { $0.id == harnessTemplateID }) ?? .plain
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -92,6 +97,16 @@ struct AddConnectionView: View {
                     .buttonStyle(.borderless).font(.caption)
                 } header: {
                     Text("Brain").font(.caption).foregroundStyle(.secondary)
+                }
+
+                if isGrok, parent == nil {
+                    Picker("Harness team", selection: $harnessTemplateID) {
+                        ForEach(GrokHarnessTemplate.all) { t in
+                            Text(t.title).tag(t.id)
+                        }
+                    }
+                    Text(harnessTemplate.summary)
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
 
                 if isGrok {
@@ -312,6 +327,15 @@ struct AddConnectionView: View {
         model.addRealConnection(name: finalName, command: command, arguments: args,
                                 workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
                                 parentID: parent?.id, brain: brain)
+        if isGrok, parent == nil, harnessTemplate.id != "plain" {
+            let plan = GrokConfigWriter.plan(
+                template: harnessTemplate,
+                scope: .project,
+                projectCWD: resolvedWorkingDirectory,
+                agentNameOverride: finalName.lowercased().replacingOccurrences(of: " ", with: "-")
+            )
+            try? GrokConfigWriter.apply(plan, overwriteExisting: false)
+        }
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not

@@ -57,6 +57,9 @@ final class GrokestratorModel {
     /// Active + recent delegation runs for the sidebar Run view (#134).
     let delegationRuns = DelegationRunStore()
 
+    /// Scheduled triggers + task.report ledger (#135).
+    let orchestrationTriggers = OrchestrationTriggerStore()
+
     /// Embedded workflow DB for schema-validated task exchange (#133).
     let orchestrationDB = OrchestrationDatabaseImpl(
         fileURL: ConnectionStore.supportDir.appendingPathComponent("orchestration.db")
@@ -128,6 +131,22 @@ final class GrokestratorModel {
                 await orchestrationMCP.setDelegateHandler { caller, child, task, timeout in
                     await manager.delegate(callerID: caller, toChildNamed: child, task: task,
                                            timeout: timeout ?? 120)
+                }
+                await orchestrationMCP.setTaskReportHandler { caller, status, result in
+                    await MainActor.run {
+                        self.handleTaskReport(callerID: caller, status: status, result: result)
+                    }
+                }
+                await orchestrationMCP.setNodeConfigureHandler { caller, child, policyJSON in
+                    await self.handleNodeConfigure(callerID: caller, childName: child, policyJSON: policyJSON)
+                }
+                await orchestrationMCP.setTriggerScheduleHandler { caller, child, when, task in
+                    await MainActor.run {
+                        self.handleTriggerSchedule(callerID: caller, childName: child, when: when, task: task)
+                    }
+                }
+                await orchestrationMCP.setTriggerFireHandler { caller, event, payload in
+                    await self.handleTriggerFire(callerID: caller, event: event, payload: payload)
                 }
                 OrchestrationMCPServer.isActive = true
                 NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
