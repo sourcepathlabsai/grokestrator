@@ -68,6 +68,10 @@ When you complete a slice:
 5. **Gate** — **do not start another slice** until that PR is merged. If the human
    asks for more work while a PR is open, warn them: *merge the open PR first* (or
    confirm they want to stack/revise scope).
+6. **On merge reported** — when the human confirms a PR is merged, **comment on each
+   fixed issue** with which PR resolved it (link + one-line summary) and **close the
+   issue** if it is still open. Do not assume issues auto-closed from the PR body
+   alone — verify and leave an audit trail.
 
 This is standing policy — re-read it at session start so it does not need to be
 re-prompted every time.
