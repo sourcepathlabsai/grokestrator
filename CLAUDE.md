@@ -18,4 +18,5 @@ goals / oracles / reasoning — not operational decisions).
 
 See **AGENTS.md §4**. Every completed slice → **open a PR** → list fixed issues →
 **give the PR link** → **await merge** → do not start the next slice until merged.
-Warn the human if they ask for more work while a PR is still open.
+When merge is reported → **comment on each fixed issue** (which PR, link) and **close**
+if still open. Warn the human if they ask for more work while a PR is still open.
