@@ -2,10 +2,57 @@
 
 Read this first. It is the **orient-on-read** entry point for any intelligence
 (Claude, Codex, grok, …) working this repo. The point of the project's design corpus
-is that *any* capable model can orient on it and contribute correctly; these are the
-two standing duties that keep that true.
+is that *any* capable model can orient on it and contribute correctly.
 
-## 1. Orient before substantial work
+**You must work in the OODA helix** (§0). Orientation — not raw model capability — is
+the lever. The standing duties below are how that loop is made operational here.
+
+## 0. Mandatory mode of operation: the OODA helix
+
+Every intelligence working this repo **must** run Boyd's loop — **Observe → Orient →
+Decide → Act** — as the actual rhythm of work, not as decorative vocabulary. Canonical
+concept notes: Obsidian `4-Concepts/OODA Loop and Mission Orientation`, `OODA Is a Helix
+Not a Loop`, `Design Oracle (Operational Form)`; repo projection: `design/14-ooda-helix.md`.
+
+### The four stations (each is required)
+
+| Station | What it is | Failure mode if skipped |
+|---------|------------|-------------------------|
+| **Observe** | Take in the instruction, repo/system state, side effects, constraints, and what already happened (git, issues, PRs, runtime). | Under-observe → act on stale or partial reality. |
+| **Orient** | **Load-bearing.** Synthesis: filter observation through doctrine, memory, and design intent. Derive the *real mission*, not a proxy reading of the instruction. Where proxy-vs-mission lives. | **Barreling** — Observe straight to Act on the literal token. |
+| **Decide** | Commit to an approach aligned with the oriented mission (scope, sequencing, what *not* to do). | Timidity — cycling Observe→Orient forever, never closing the loop. |
+| **Act** | Execute decisively; feed results back into the next Observe. | A loop that never Act's loses tempo and never learns. |
+
+When behavior goes wrong, diagnose **which station broke** — not a vague caution↔boldness dial.
+
+### Helix, not loop
+
+Orient is not a station you return to unchanged — it is the **displacement operator**.
+Each Act's results re-found the frame (re-Orient); you advance along an axis of
+accumulated orientation change, not a flat circle. Delegation spawns **sub-helices**
+(orchestrator Act → child OODA → …). Convergence requires **honest Observe** (oracles,
+verification) and **grounded Orient** (the design oracle / maintained corpus) —
+formal reason orientation beats model size.
+
+The design oracle (`design/oracle/`, `design/13`, Obsidian strategic record) is
+**institutionalized Orient** — the compressed axis agents read; PRs, commits, and issue
+comments are provenance on the helix.
+
+### What this means in practice (every session, every slice)
+
+1. **Observe** — read the ask, current `main`, open PRs, relevant code/docs, and constraints
+   before proposing or editing.
+2. **Orient** — before substantial work, load the corpus (§1). State what mission you
+   derived and which design goals/invariants govern the slice. **Do not skip this step.**
+3. **Decide** — pick scope and approach explicitly; say what is out of scope.
+4. **Act** — implement; land via PR (§4).
+5. **Observe → re-Orient** — after Act: tests/build, PR handoff, on merge report update
+   issues; if strategic intent shifted, draft Obsidian updates (§2).
+
+Meta-loop over the corpus itself: talk → work out details → write it down → maintain the
+oracle — that is OODA over the design record (§3).
+
+## 1. Orient before substantial work (the Orient station, made concrete)
 
 Before non-trivial work, orient on:
 - **The project oracle** — `design/oracle/` (invariants this project must hold; one
@@ -47,11 +94,12 @@ how a particular change was carried out → operational → stays in the repo.
 > Canonical cross-project convention: `~/dev/.agents/COMMON_STRATEGIC_RECORD.md`
 > (shared by every project so the strategic record stays aligned across all of them).
 
-## 3. The working rhythm
+## 3. The working rhythm (meta-OODA over the design corpus)
 
 Talk → work out the details → write it down → maintain the low-level oracle of design
-goals. That loop (a meta-OODA over the design corpus) is what has let multiple model
-families contribute here without breaking things. Keep it running.
+goals. That is the **re-Orient** pass after each Act on the strategic record — the
+meta-helix that keeps the Orient axis true so any model family can contribute without
+breaking things. Keep it running.
 
 ## 4. Delivery: every slice lands via PR — then stop
 
