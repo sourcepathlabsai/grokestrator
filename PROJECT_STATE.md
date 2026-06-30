@@ -35,8 +35,11 @@ Two tracks, kept separate:
 2. **General-case AI** (`design/strategy-general-case-ai.md`) — separate monetization bet;
    must not redefine the free tool.
 
-Committed destination: **orchestration rung 3** — each role a real, steerable Connection
-with `parentID` edges and app-side `delegate` MCP (not grok-native subagents).
+Committed architecture: **dual-path orchestration** (revised 2026-06-30):
+- **ACP agents** (grok, Claude Code): harness subagents; Grokestrator supervises the
+  parent (`10` rungs 0–2). No Grokestrator sub-sessions on these brains.
+- **API/local brains**: **orchestrated fleet** — `parentID` tree + app-side
+  `delegate` MCP (`10` orchestrated fleet, `11`).
 
 **Agent operating doctrine:** OODA helix mandatory (`AGENTS.md` §0). Orient on this file +
 `design/` + `design/oracle/` before substantial work.
@@ -63,10 +66,11 @@ with `parentID` edges and app-side `delegate` MCP (not grok-native subagents).
 - MCP registry + per-Node grants; in-app MCP client for API brains
 - `AutoApproval` for unattended delegation
 
-### Orchestration platform (`design/11` Phase 1–2)
+### Orchestration platform (`design/11` Phase 1–2) — orchestrated fleet
 
 - `role` + `parentID` tree; `OrchestrationMCPServer` + enriched `delegate`
-- Team templates: Code Review, Implementation, Research (#124)
+- Team templates: Code Review, Implementation, Research (#124) — **intended for
+  API/local brains**; ACP path not yet gated in UI/logic
 - Per-Node role prompts, tool policy; live child transcripts during delegation
 
 ### Design oracle (`design/13` runtime slices 1–3)
@@ -83,8 +87,9 @@ with `parentID` edges and app-side `delegate` MCP (not grok-native subagents).
 | Area | Status | Reference |
 |------|--------|-----------|
 | First-class verb normalization layer | Open (#154) | `GovernanceEngine` adapters today |
-| Rung 1 — grok-native subagent surfacing | Not built (#131) | `design/10` |
-| Rung 2 — `.grok/` config GUI | Partial (#132) | `TeamTemplate` only |
+| Dual-path orchestration enforcement (UI + logic) | Not built (#158 epic, #159–#167) | `design/10` §0, `11` §0 |
+| Rung 1 — grok-native subagent surfacing (ACP path) | Not built (#131) | `design/10` |
+| Rung 2 — `.grok/` config GUI (ACP path) | Partial (#132) | `TeamTemplate` only |
 | Orchestration Phase 3 — SQLite | **Parked** (#133) | `feat/orchestration-db` |
 | Run/DAG view | Not built (#134) | `design/11` |
 | Oracle depth (verify-against-intent, corpus maintenance) | Open (#141–#142) | `design/13` |
@@ -111,10 +116,11 @@ with `parentID` edges and app-side `delegate` MCP (not grok-native subagents).
 
 | Priority | Issue | Topic |
 |----------|-------|-------|
-| 1 | [#154](https://github.com/sourcepathlabsai/grokestrator/issues/154) | Verb normalization as first-class harness layer |
-| 2 | [#134](https://github.com/sourcepathlabsai/grokestrator/issues/134) | Run view — delegation DAG + oracle verdicts |
-| 3 | [#133](https://github.com/sourcepathlabsai/grokestrator/issues/133) | SQLite Phase 3 (parked — exercise Phase 1–2 first) |
-| 4 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
+| 1 | [#158](https://github.com/sourcepathlabsai/grokestrator/issues/158) | Dual-path orchestration epic (#159–#167) |
+| 2 | [#131](https://github.com/sourcepathlabsai/grokestrator/issues/131) | ACP path: surface harness subagent lineage |
+| 3 | [#134](https://github.com/sourcepathlabsai/grokestrator/issues/134) | Fleet: Run view — delegation DAG + oracle verdicts |
+| 4 | [#133](https://github.com/sourcepathlabsai/grokestrator/issues/133) | Fleet: SQLite Phase 3 (parked) |
+| 5 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
 | — | [#130–#154](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 
 ---

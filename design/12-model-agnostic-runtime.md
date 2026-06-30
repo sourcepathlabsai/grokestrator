@@ -14,15 +14,19 @@ onboard model. The durable, hard-to-copy value is the body — capability contro
 guardrails, observability, orchestration, cross-device supervision. The brain is a
 commodity you plug in.
 
-Two decisions already align the codebase with this:
+Two decisions align the codebase with this — **with a brain-binding split** (revised
+2026-06-30; see `10` §direction, `11` §0):
 
-1. **Coordination lives in the app, not in any model.** We deliberately did *not*
-   use grok-native subagents; delegation is the app's `delegate` tool + router, so a
-   model only needs to *reason and call a tool*. "The app doesn't need to spawn
-   anything in the model" — the app spawns/routes/awaits. (See `10`, `11`.)
-2. **Capabilities are enforced at our boundary, not by trusting the model.** What a
-   Node can do = *(the tools we expose)* + *(per-action permission gating)*. The
-   model can't use what we don't grant, and even granted tools are gated per call.
+1. **Coordination path depends on brain type.**
+   - **ACP agents** (grok, Claude Code): the **harness** coordinates via native
+     `task` / subagents. Grokestrator **supervises** the parent Connection — it does
+     *not* offer sub-sessions or app-side `delegate` on these brains.
+   - **API / local brains**: coordination lives in the app — `delegate` MCP + child
+     Connections. The app spawns/routes/awaits; the model reasons and calls tools.
+2. **Capabilities are enforced at our boundary for API brains.** What an API Node
+   can do = *(the tools we expose)* + *(per-action gating via `ToolPolicy`)*. ACP
+   agents manage their own tools over ACP; Grokestrator mediates via permission
+   overlays + oracles at the ACP boundary.
 
 **The mediation invariant** is what makes "any LLM" safe rather than scary: *a Node
 acts only through tools we implement.* For a raw-API brain we own the entire
@@ -89,6 +93,20 @@ For the **grok backend**, some tools run inside grok; we gate via ACP
 the loop ourselves, so the tool registry + policy are enforced directly and totally —
 the cleaner case. Long-term, prefer app-implemented tools over model-native ones so
 enforcement is uniform.
+
+### ACP vs API: orchestration mode (derived from brain binding)
+
+| | ACP (`GrokBuildSessionClient`) | API (`OpenAICompatSession`, onboard) |
+|---|---|---|
+| **Orchestration mode** | `supervisedAgent` | `orchestratedFleet` (when in a tree) |
+| **Sub-sessions** | Harness only — no Grokestrator `delegate` tree | App `delegate` + child Connections |
+| **Orchestration MCP** | Not registered on parent | Registered on fleet orchestrator + children |
+| **`ToolPolicy`** | Advisory for grok (ACP owns tools); enforced for API | Enforced in app tool loop |
+| **Sidebar tree** | Flat | `parentID` nesting when fleet |
+
+Implementation: derive `OrchestrationMode` from `BrainBinding` at Node creation;
+gate fleet features (tree UI, `delegate`, fleet team templates) on
+`orchestratedFleet`. See GitHub issues from the dual-path design PR.
 
 ## Brain binding: pinned vs dynamic (evidence-driven escalation)
 
