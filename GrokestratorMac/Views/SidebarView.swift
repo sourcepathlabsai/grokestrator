@@ -68,6 +68,13 @@ struct SidebarView: View {
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
+        .task(id: model.delegationRuns.parentsWithActiveRuns) {
+            guard !model.delegationRuns.parentsWithActiveRuns.isEmpty else { return }
+            while !Task.isCancelled {
+                model.delegationRuns.refreshActiveOracleCounts()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         .confirmationDialog(
             "Delete “\(pendingDelete?.name ?? "")” permanently?",
             isPresented: Binding(get: { pendingDelete != nil },
@@ -150,14 +157,48 @@ struct SidebarView: View {
         ForEach(roots) { root in
             if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
                 DisclosureGroup(isExpanded: expansionBinding(root.id)) {
+                    DelegationRunsSidebarSection(
+                        runs: model.delegationRuns.runs(for: root.id),
+                        onSelectChild: { model.selectedInstanceID = $0 }
+                    )
                     ForEach(kids) { kid in instanceRow(kid, in: group) }
                 } label: {
-                    instanceRow(root, in: group)
+                    orchestratorLabel(root, in: group)
+                }
+            } else if root.role == .orchestrator {
+                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
+                    DelegationRunsSidebarSection(
+                        runs: model.delegationRuns.runs(for: root.id),
+                        onSelectChild: { model.selectedInstanceID = $0 }
+                    )
+                } label: {
+                    orchestratorLabel(root, in: group)
                 }
             } else {
                 instanceRow(root, in: group)
             }
         }
+    }
+
+    /// Orchestrator row label — shows active-run count badge when delegating.
+    @ViewBuilder
+    private func orchestratorLabel(_ instance: InstanceItem, in group: SidebarServerGroup) -> some View {
+        let active = model.delegationRuns.activeRuns(for: instance.id).count
+        HStack(spacing: 0) {
+            InstanceRow(instance: instance, brain: model.brainDescriptor(for: instance), serverDown: group.isDown)
+            if active > 0 {
+                Text("\(active)")
+                    .font(Theme.mono(9))
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Theme.accent.opacity(0.15), in: Capsule())
+                    .help("\(active) active delegation\(active == 1 ? "" : "s")")
+            }
+        }
+        .tag(instance.id)
+        .contextMenu { rowMenu(instance) }
     }
 
     /// One selectable row + its context menu, shared by parent and child rows.

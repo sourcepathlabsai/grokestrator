@@ -54,6 +54,14 @@ final class GrokestratorModel {
     /// `delegate`; Phase 1c installs the real router via `setDelegateHandler`.
     let orchestrationMCP = OrchestrationMCPServer()
 
+    /// Active + recent delegation runs for the sidebar Run view (#134).
+    let delegationRuns = DelegationRunStore()
+
+    /// Embedded workflow DB for schema-validated task exchange (#133).
+    let orchestrationDB = OrchestrationDatabaseImpl(
+        fileURL: ConnectionStore.supportDir.appendingPathComponent("orchestration.db")
+    )
+
     /// Persistent remote-server configs + their live connection state.
     var remoteLinks: [RemoteServerLink]
 
@@ -106,9 +114,15 @@ final class GrokestratorModel {
         // regardless of the remote-serving toggle so launched Nodes can delegate.
         let orchestrationMCP = self.orchestrationMCP
         let manager = self.manager
+        let delegationRuns = self.delegationRuns
+        let orchestrationDB = self.orchestrationDB
         Task {
             do {
                 try await orchestrationMCP.start(port: OrchestrationMCPServer.defaultPort)
+                await orchestrationMCP.setDatabase(orchestrationDB)
+                await manager.setDelegationRunCallback { update in
+                    Task { @MainActor in delegationRuns.apply(update) }
+                }
                 // Install the real router (Phase 1c): delegate(child, task) sends
                 // the task to the named child Node and returns its final answer.
                 await orchestrationMCP.setDelegateHandler { caller, child, task, timeout in
@@ -999,6 +1013,26 @@ final class GrokestratorModel {
                 await server.stop()
             }
         }
+    }
+
+    // MARK: - Orchestration DB inspector (#133)
+
+    func orchestrationTables() async -> [String] {
+        (try? await orchestrationDB.listTables()) ?? []
+    }
+
+    func orchestrationDBSummary() async -> String {
+        await orchestrationDB.debugDump()
+    }
+
+    func orchestrationTablePreview(_ name: String, limit: Int = 5) async -> String {
+        guard let rows = try? await orchestrationDB.query(table: name, predicate: nil, limit: limit) else {
+            return "(unable to query \(name))"
+        }
+        if rows.isEmpty { return "(no rows)" }
+        return rows.map { row in
+            row.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
+        }.joined(separator: "\n")
     }
 
     // MARK: - App-quit cleanup

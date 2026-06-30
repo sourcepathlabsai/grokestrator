@@ -17,7 +17,10 @@ let package = Package(
     targets: [
         .target(
             name: "GrokestratorCore",
-            dependencies: []
+            dependencies: [],
+            linkerSettings: [
+                .linkedLibrary("sqlite3"),
+            ]
         ),
         .testTarget(
             name: "GrokestratorCoreTests",

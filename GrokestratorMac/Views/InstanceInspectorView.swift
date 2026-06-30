@@ -15,6 +15,8 @@ struct InstanceInspectorView: View {
     /// Recent design-oracle verdicts for the selected node (read from the ledger; not
     /// reactive, so we reload on selection + via the section's refresh).
     @State private var oracleEvents: [GovernanceEvent] = []
+    @State private var orchestrationTables: [String] = []
+    @State private var orchestrationDBText: String = ""
 
     var body: some View {
         Group {
@@ -25,6 +27,13 @@ struct InstanceInspectorView: View {
                         instance.conversation.loadCapabilities()
                         instance.conversation.refreshUsage()
                         oracleEvents = OracleLedger.shared.recent(nodeID: instance.id, limit: 30)
+                        if instance.role == .orchestrator {
+                            orchestrationTables = await model.orchestrationTables()
+                            orchestrationDBText = await model.orchestrationDBSummary()
+                        } else {
+                            orchestrationTables = []
+                            orchestrationDBText = ""
+                        }
                     }
             } else {
                 ContentUnavailableView("No instance", systemImage: "sidebar.right",
@@ -47,6 +56,9 @@ struct InstanceInspectorView: View {
                     if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps)
                     oracleSection(instance)
+                    if instance.role == .orchestrator {
+                        orchestrationDBSection(instance)
+                    }
                     commandsSection(caps.commands, instance: instance)
                 } else {
                     HStack(spacing: 8) {
@@ -216,6 +228,45 @@ struct InstanceInspectorView: View {
         VStack(alignment: .leading, spacing: 1) {
             Text("\(value)").font(Theme.mono(13)).foregroundStyle(value > 0 ? tint : Theme.textFaint)
             Text(label).font(Theme.body(9)).foregroundStyle(Theme.textFaint)
+        }
+    }
+
+    /// Orchestration workflow DB (#133) — tables registered via `db.createSchema`.
+    private func orchestrationDBSection(_ instance: InstanceItem) -> some View {
+        section("Orchestration DB", systemImage: "cylinder.split.1x2", count: orchestrationTables.isEmpty ? nil : orchestrationTables.count) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Schema-validated task tables for this Mac. Agents access via `db.*` MCP tools.")
+                    .font(Theme.body(10)).foregroundStyle(Theme.textFaint)
+                if orchestrationTables.isEmpty {
+                    Text("No tables yet — orchestrators call `db.createSchema` to register one.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                } else {
+                    ForEach(orchestrationTables, id: \.self) { table in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(table).font(Theme.body(12, .medium)).foregroundStyle(Theme.textBody)
+                        }
+                    }
+                    if !orchestrationDBText.isEmpty {
+                        Divider().overlay(Theme.border)
+                        Text(orchestrationDBText)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.textMuted)
+                            .textSelection(.enabled)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button {
+                        Task {
+                            orchestrationTables = await model.orchestrationTables()
+                            orchestrationDBText = await model.orchestrationDBSummary()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderless).help("Refresh DB inspector")
+                }
+            }
         }
     }
 
