@@ -182,6 +182,9 @@ struct PermissionParams: Decodable {
         struct RawInput: Decodable {
             let variant: String?
             let command: String?
+            let file_path: String?
+            let old_string: String?
+            let new_string: String?
         }
     }
 

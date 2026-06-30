@@ -130,8 +130,8 @@ public extension ProposedAction {
                                   nodeName: String?) -> ProposedAction {
         let payload = command ?? title
         return ProposedAction(
-            verb: normalizeACPVerb(kind: kind, variant: variant),
-            rawVerb: variant ?? kind ?? "permission",
+            verb: normalizeACPVerb(kind: kind, variant: variant, command: command, title: title),
+            rawVerb: variant ?? kind ?? title ?? "permission",
             arguments: command.map { ["command": $0] },
             payloadText: payload,
             context: .init(workingDirectory: cwd, nodeName: nodeName),
@@ -153,18 +153,56 @@ public extension ProposedAction {
         }
     }
 
-    /// Normalize an ACP `kind`/`variant` into the shared verb vocabulary. The agent's
-    /// `variant` ("Bash") is more precise than its `kind` ("execute") when present.
-    static func normalizeACPVerb(kind: String?, variant: String?) -> String {
+    /// Normalize an ACP permission into the shared verb vocabulary.
+    ///
+    /// grok sends `kind` (+ optional `variant`). The Claude Code adapter often sends
+    /// **no `kind`** on `session/request_permission` — only `title` and tool `rawInput`
+    /// (e.g. `{ command }` for Bash, `{ file_path }` for Read). Title/command inference
+    /// covers that gap; see `claude-code-acp` `toolInfoFromToolUse` title patterns.
+    static func normalizeACPVerb(kind: String?, variant: String?, command: String? = nil,
+                                 title: String? = nil) -> String {
         if let v = variant?.lowercased() {
             if v.contains("bash") || v.contains("shell") || v.contains("command") { return "shell" }
         }
-        switch kind {
-        case "read", "search", "fetch": return "fs.read"
-        case "edit", "move":            return "fs.write"
-        case "execute":                 return "shell"
-        case "delete":                  return "shell"   // destructive; routes through shell-class scrutiny
-        default:                        return kind ?? "unknown"
+        if let cmd = command?.trimmingCharacters(in: .whitespacesAndNewlines), !cmd.isEmpty {
+            return "shell"
         }
+        if let k = kind?.lowercased() {
+            switch k {
+            case "read":                          return "fs.read"
+            case "search":                        return "fs.list"
+            case "fetch":                         return "fetch"   // unclassified ⇒ escalate (often external)
+            case "edit", "move":                  return "fs.write"
+            case "execute", "delete":             return "shell"
+            case "think", "other", "switch_mode": break           // infer from title below
+            default:                              break
+            }
+        }
+        if let verb = inferACPVerbFromTitle(title) { return verb }
+        if let k = kind?.lowercased(), k != "other" { return k }
+        return "unknown"
+    }
+
+    /// Claude Code permission titles (from `toolInfoFromToolUse`) when `kind` is absent.
+    private static func inferACPVerbFromTitle(_ title: String?) -> String? {
+        guard let raw = title?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let lower = raw.lowercased()
+        // Bash: title is the backtick-wrapped command string.
+        if raw.hasPrefix("`"), raw.hasSuffix("`"), raw.count > 2 { return "shell" }
+        if lower.hasPrefix("read ") || lower == "read file" || lower.hasPrefix("read notebook") {
+            return "fs.read"
+        }
+        if lower.hasPrefix("edit ") || lower.hasPrefix("edit `") { return "fs.write" }
+        if lower.hasPrefix("write ") { return "fs.write" }
+        if lower.hasPrefix("list the ") { return "fs.list" }
+        if lower.hasPrefix("find ") || lower.hasPrefix("grep") { return "fs.list" }
+        if lower.hasPrefix("fetch ") { return "fetch" }
+        if lower == "terminal" || lower == "tail logs" || lower.hasPrefix("kill process") {
+            return "shell"
+        }
+        if lower.hasPrefix("update todos") || lower == "ready to code?" { return "think" }
+        return nil
     }
 }
