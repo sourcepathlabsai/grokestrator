@@ -328,11 +328,11 @@ public actor OrchestrationMCPServer {
         [
             "name": "delegate",
             "description": """
-                Delegate a task to one of your child agents and return its result. \
-                Each child is a separate, observable session with its own tools and \
-                role orientation — it can reason deeply and spawn its own subagents.
+                Delegate a task to one of your named child agents and return its result. \
+                Each child is a separate, observable Connection with its own tools — \
+                a leaf worker, not a nested orchestrator.
 
-                WHEN TO USE: You are a coordination orchestrator. Do NOT perform \
+                WHEN TO USE: You are a fleet orchestrator (API/local brain). Do NOT perform \
                 substantial work yourself (writing code, running commands, deep \
                 analysis). Instead, decompose the work into cohesive units and \
                 delegate each to the appropriate child agent by name. Synthesize \
@@ -351,6 +351,9 @@ public actor OrchestrationMCPServer {
                 TIMEOUT: Default 120 seconds. If a child times out, it keeps \
                 running — you'll get a timeout notice but no result. Set a longer \
                 timeout for complex tasks.
+
+                Children should return a JSON finding envelope (`envelope_version`, `status`, \
+                `summary`, `findings[]`, `gaps[]`). Prose-only returns are wrapped with a warning.
 
                 The human can watch each child's live transcript in a separate pane.
                 """,
