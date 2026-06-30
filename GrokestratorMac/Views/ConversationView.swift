@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import GrokestratorCore
 
 /// The main working surface: a console-like transcript plus a prompt composer.
@@ -130,55 +131,125 @@ struct ConversationView: View {
     private var composer: some View {
         // Local @Bindable wrapper so the TextField can bind to the VM's `draft`.
         @Bindable var conv = instance.conversation
-        return HStack(alignment: .bottom, spacing: 8) {
-            // Backed by a real NSTextView so the prompt reflows at the
-            // composer's current width — both when the panel resizes it and for
-            // a freshly typed line in the narrowed box.
-            ComposerTextView(
-                text: $conv.draft,
-                placeholder: "Message \(instance.name)…  (type / for commands)",
-                fontSize: 13,
-                isFocused: $composerFocused,
-                onSubmit: send,
-                onKey: handleComposerKey
-            )
-            .onChange(of: slashToken) { _, new in
-                slashHighlight = 0; slashDismissed = false
-                // Opening the `/` popup pulls the freshest command list,
-                // including any MCP commands registered since launch.
-                if new != nil { conversation.refreshCapabilities() }
+        return VStack(spacing: 0) {
+            // Attachment strip — shown when files are attached.
+            if !conversation.attachedFiles.isEmpty {
+                attachmentStrip
             }
-            .frame(maxWidth: .infinity)   // always fill the row width (don't collapse to the text's ideal width)
-            .padding(8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
-            if conversation.isStreaming {
-                Button(action: { conversation.cancelCurrent() }) {
-                    Image(systemName: "stop.circle.fill")
+            HStack(alignment: .bottom, spacing: 8) {
+                // Backed by a real NSTextView so the prompt reflows at the
+                // composer's current width — both when the panel resizes it and for
+                // a freshly typed line in the narrowed box.
+                ComposerTextView(
+                    text: $conv.draft,
+                    placeholder: "Message \(instance.name)…  (type / for commands)",
+                    fontSize: 13,
+                    isFocused: $composerFocused,
+                    onSubmit: send,
+                    onKey: handleComposerKey
+                )
+                .onChange(of: slashToken) { _, new in
+                    slashHighlight = 0; slashDismissed = false
+                    // Opening the `/` popup pulls the freshest command list,
+                    // including any MCP commands registered since launch.
+                    if new != nil { conversation.refreshCapabilities() }
+                }
+                .frame(maxWidth: .infinity)   // always fill the row width (don't collapse to the text's ideal width)
+                .padding(8)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+
+                if conversation.isStreaming {
+                    Button(action: { conversation.cancelCurrent() }) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.red)
+                            .shadow(color: .red.opacity(0.5), radius: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop the current turn")
+                }
+                Button(action: send) {
+                    Image(systemName: conversation.isStreaming ? "text.badge.plus" : "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(.red)
-                        .shadow(color: .red.opacity(0.5), radius: 4)
+                        .foregroundStyle(Theme.accent)
+                        .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
                 }
                 .buttonStyle(.plain)
-                .help("Stop the current turn")
+                .disabled(!canSend)
+                .help(conversation.isStreaming ? "Queue this message (sends after current turn)" : "Send")
             }
-            Button(action: send) {
-                Image(systemName: conversation.isStreaming ? "text.badge.plus" : "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(Theme.accent)
-                    .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .help(conversation.isStreaming ? "Queue this message (sends after current turn)" : "Send")
+            .padding(12)
         }
-        .padding(12)
         .background(Theme.bgDeep)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
     }
 
     private var canSend: Bool {
         !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !conversation.attachedFiles.isEmpty
+    }
+
+    // MARK: - Attachment strip
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(conversation.attachedFiles) { file in
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc")
+                            .font(.caption)
+                            .foregroundStyle(Theme.accent)
+                        Text(file.name)
+                            .font(Theme.body(11, .medium))
+                            .foregroundStyle(Theme.textBody)
+                            .lineLimit(1)
+                        Text(Self.formatSize(file.size))
+                            .font(Theme.body(10))
+                            .foregroundStyle(Theme.textFaint)
+                        Button {
+                            conversation.removeAttachedFile(file)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textFaint)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Theme.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Theme.border))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var accepted = false
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, url.isFileURL else { return }
+                Task { @MainActor in
+                    conversation.addFiles([url])
+                }
+            }
+            accepted = true
+        }
+        return accepted
+    }
+
+    private static func formatSize(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 { return String(format: "%.0f KB", kb) }
+        let mb = kb / 1024
+        return String(format: "%.1f MB", mb)
     }
 
     // MARK: - Slash command popup
