@@ -362,7 +362,7 @@ public actor OpenAICompatSession: AgentSession {
             guard let handler = delegateHandler else { return ("delegation not available for this node", true) }
             let child = args["child"] as? String ?? ""
             let task = args["task"] as? String ?? ""
-            return (await handler(child, task), false)
+            return (cap(await handler(child, task)), false)
         default:
             return ("error: unknown tool \(name)", true)
         }

@@ -458,6 +458,13 @@ public actor GrokBuildSessionClient {
                 respond(id: id, result: .object(["outcome": .object(["outcome": .string("cancelled")])]))
                 return
             }
+            // DIAGNOSTIC (ACP classification): the ledger shows every Claude action → verb
+            // "unknown". Capture what the adapter ACTUALLY sends (kind/variant/title + raw)
+            // so we can map real verbs. Written to a file (Xcode-run NSLog isn't queryable).
+            Self.capturePermission(agent: agentDisplayName, kind: p.toolCall?.kind,
+                                   variant: p.toolCall?.rawInput?.variant,
+                                   command: p.toolCall?.rawInput?.command,
+                                   title: p.toolCall?.title, line: line)
             // Design-oracle SHADOW (design/13): observe every permission request and
             // log (NSLog, NOT the transcript) the verdict the governance engine *would*
             // reach — it does NOT change who answers (always-allow / auto-approval /
@@ -746,6 +753,25 @@ public actor GrokBuildSessionClient {
 }
 
 extension GrokBuildSessionClient {
+    /// DIAGNOSTIC: append a permission request's parsed fields + raw JSON to a temp file,
+    /// so we can see what the ACP adapter actually sends (and why the verb resolves to
+    /// "unknown"). Removed once classification is mapped.
+    static let permCaptureURL = FileManager.default.temporaryDirectory.appendingPathComponent("grokestrator-acp-perms.log")
+    static func capturePermission(agent: String?, kind: String?, variant: String?, command: String?, title: String?, line: Data) {
+        let raw = String(data: line, encoding: .utf8) ?? ""
+        let entry = """
+
+        === permission [\(agent ?? "?")] kind=\(kind ?? "nil") variant=\(variant ?? "nil") ===
+        title: \(title ?? "nil")
+        command: \(command ?? "nil")
+        raw: \(raw.prefix(1400))
+
+        """
+        guard let data = entry.data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: permCaptureURL) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: permCaptureURL) }
+    }
+
     /// Extracts an image artifact path from a `tool_call_update` line's `rawOutput`
     /// (grok's image tools report `{ type, path, filename }` there). Decoded
     /// *independently* of the main `Update` decode so an unrelated tool's differently

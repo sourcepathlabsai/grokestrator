@@ -555,10 +555,14 @@ private struct iOSPermissionOverlay: View {
         .shadow(radius: 16, y: 6)
     }
 
+    /// Cap for permission description text — anything beyond this is truncated
+    /// so the overlay stays readable (the full text is still selectable).
+    private static let descriptionCap = 500
+
     /// Description + option buttons — the scrollable part when it overflows.
     private var permissionBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(request.description)
+            Text(Self.cappedDescription(request.description))
                 .font(.callout)
                 .textSelection(.enabled)
             VStack(spacing: 8) {
@@ -572,6 +576,11 @@ private struct iOSPermissionOverlay: View {
                 }
             }
         }
+    }
+
+    private static func cappedDescription(_ text: String) -> String {
+        guard text.count > descriptionCap else { return text }
+        return String(text.prefix(descriptionCap)) + "\n…[truncated]"
     }
 }
 

@@ -44,9 +44,16 @@ enum QuickReplyDetector {
     private static func markedList(_ text: String) -> [String]? {
         let itemPattern = #"(?m)^\s*(?:\(?[a-zA-Z]\)|\(?\d+[.)]|[-*•])\s+(.+?)\s*$"#
         guard let re = try? NSRegularExpression(pattern: itemPattern) else { return nil }
+        // Only consider list items near the last question mark (within ~200
+        // chars). A list describing past work far before any "?" is descriptive,
+        // not interrogative (e.g. "I made these changes: - X - Y. Any questions?").
+        let lastQ = text.distance(from: text.startIndex, to: text.lastIndex(of: "?") ?? text.endIndex)
         var items: [String] = []
         for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            if let r = Range(m.range(at: 1), in: text) { items.append(String(text[r])) }
+            if let r = Range(m.range(at: 1), in: text) {
+                let itemStart = m.range.location
+                if itemStart >= lastQ - 200 { items.append(String(text[r])) }
+            }
         }
         let options = clean(items)
         return options.count >= 2 ? options : nil
@@ -63,6 +70,14 @@ enum QuickReplyDetector {
             segment = String(text[text.index(after: colon)...])
         }
         guard let seg = segment else { return nil }
+        // A colon-delimited list in a declarative sentence ("I used: X, Y, Z")
+        // is not a question. Require a `?` somewhere near the segment.
+        let hasQuestion = seg.contains("?") || {
+            guard let segRange = text.range(of: seg) else { return false }
+            let after = text[segRange.upperBound...]
+            return after.contains("?")
+        }()
+        guard hasQuestion else { return nil }
         let raw = seg
             .replacingOccurrences(of: #"\bor\b"#, with: ",", options: .regularExpression)
             .components(separatedBy: ",")
@@ -74,6 +89,11 @@ enum QuickReplyDetector {
 
     private static func binaryOr(_ text: String) -> [String]? {
         guard let q = text.split(whereSeparator: { $0 == "?" }).first.map(String.init) else { return nil }
+        // Reject common rhetorical question patterns.
+        let lower = q.lowercased()
+        let rhetorical = ["do you have any", "is there anything", "do you need anything",
+                          "would you like anything", "any other questions", "anything else"]
+        if rhetorical.contains(where: { lower.contains($0) }) { return nil }
         guard !q.contains(","), let orRange = q.range(of: #"\bor\b"#, options: .regularExpression) else { return nil }
         // Exactly one "or"
         if q.range(of: #"\bor\b"#, options: .regularExpression, range: orRange.upperBound..<q.endIndex) != nil { return nil }

@@ -167,6 +167,22 @@ final class ConversationViewModel {
     private var deltaFlushScheduled = false
     private let flushIntervalNanos: UInt64 = 50_000_000   // ~20 Hz
 
+    // Thought accumulator: all thought text for the current turn is buffered
+    // here and rendered via a single `.thoughtSummary` entry (stable id) that
+    // updates in place. No individual `.thought` rows are created during normal
+    // streaming, eliminating the batch remove-and-insert in `collapseThoughts`.
+    private var thoughtBuffer = ""
+    private var thoughtSummaryID: UUID?
+
+    // Activity accumulator: same pattern as the thought accumulator. Tool calls,
+    // progress notes, and activity notes are collected here and rendered via a
+    // single `.toolActivitySummary` entry that upserts in place — never creating
+    // individual `.update` rows during streaming. This keeps the live transcript
+    // to ~3 rows (prompt, thought, activity) instead of 50–200+ during the
+    // tool-use phase, preventing SwiftUI layout exhaustion on long turns.
+    private var activityLines: [String] = []
+    private var activitySummaryID: UUID?
+
     init(driver: ConversationDriver) {
         self.driver = driver
         self.mediaLoader = MediaLoader(
@@ -289,6 +305,8 @@ final class ConversationViewModel {
         sessionReady = capabilities != nil
         endStreaming()
         discardPendingDelta()
+        resetThoughtAccumulator()
+        resetActivityAccumulator()
         promptQueue.removeAll()
         streamTick += 1
 
@@ -386,6 +404,8 @@ final class ConversationViewModel {
     /// `displayText` controls what the transcript shows (defaults to the wire text).
     private func firePrompt(_ trimmed: String, echoInTranscript: Bool = true, displayText: String? = nil) {
         quickReplies = []
+        resetThoughtAccumulator()
+        resetActivityAccumulator()
         isStreaming = true
         activityStatus = "Thinking…"
         startUsagePolling()                 // live context meter during the turn
@@ -417,12 +437,7 @@ final class ConversationViewModel {
             for msg in turn.messages {
                 switch msg.role {
                 case .assistant, .system:
-                    if msg.content.hasPrefix("[thought] ") {
-                        let stripped = String(msg.content.dropFirst("[thought] ".count))
-                        rebuilt.append(TranscriptEntry(kind: .thought(stripped)))
-                    } else {
-                        rebuilt.append(TranscriptEntry(kind: kind(forMessageContent: msg.content)))
-                    }
+                    rebuilt.append(TranscriptEntry(kind: kind(forMessageContent: msg.content)))
                 case .tool:
                     rebuilt.append(TranscriptEntry(kind: .update(
                         .activityNote("tool: \(msg.content)", kind: "tool", metadata: nil)
@@ -440,6 +455,8 @@ final class ConversationViewModel {
         isStreaming = false
         endStreaming()
         discardPendingDelta()
+        resetThoughtAccumulator()
+        resetActivityAccumulator()
         promptQueue.removeAll()   // snapshot wipes transient state
         streamTick += 1
         refreshUsage()
@@ -492,6 +509,8 @@ final class ConversationViewModel {
     func cancel() {
         endStreaming()
         discardPendingDelta()
+        resetThoughtAccumulator()
+        resetActivityAccumulator()
         clearPromptQueue()
         isStreaming = false
     }
@@ -507,6 +526,8 @@ final class ConversationViewModel {
         guard isStreaming else { return }
         endStreaming()
         discardPendingDelta()
+        resetThoughtAccumulator()
+        resetActivityAccumulator()
         isStreaming = false
         clearPromptQueue()
         let driver = self.driver
@@ -645,7 +666,17 @@ final class ConversationViewModel {
                 isStreaming = true
                 activityStatus = label
             }
-            appendEntry(.update(update))
+            // Route collapsible activity through the accumulator (single live
+            // summary row) instead of appending individual `.update` entries.
+            // `toolActivityLine` returns `nil` for updates that should stay
+            // inline (session status, user-decision records, unknown events).
+            if let line = toolActivityLine(update) {
+                activityLines.append(line)
+                upsertActivitySummary()
+                streamTick += 1
+            } else {
+                appendEntry(.update(update))
+            }
         }
     }
 
@@ -713,22 +744,31 @@ final class ConversationViewModel {
     }
 
     private func appendDelta(_ text: String, kind: StreamKind) {
-        // The answer is starting to arrive — tuck the turn's thinking and tool
-        // calls into collapsed groups right away (idempotent once collapsed).
+        // The answer is starting to arrive — tuck the turn's tool calls into
+        // collapsed groups right away (idempotent once collapsed).
         if kind == .message { collapseWork() }
-        if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
-            switch entries[idx].kind {
-            case .assistantMessage(let s): entries[idx].kind = .assistantMessage(s + text)
-            case .thought(let s): entries[idx].kind = .thought(s + text)
-            default: break
+
+        if kind == .thought {
+            // Accumulate into the single thought summary row — never create
+            // individual `.thought` entries.
+            thoughtBuffer += text
+            upsertThoughtSummary()
+            streamTick += 1
+            return
+        }
+
+        // Message path: grow the existing bubble or start a new one.
+        if streamingKind == .message, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
+            if case .assistantMessage(let s) = entries[idx].kind {
+                entries[idx].kind = .assistantMessage(s + text)
             }
             streamTick += 1
         } else {
             endStreaming()
-            let entry = TranscriptEntry(kind: kind == .message ? .assistantMessage(text) : .thought(text))
+            let entry = TranscriptEntry(kind: .assistantMessage(text))
             entries.append(entry)
             streamingID = entry.id
-            streamingKind = kind
+            streamingKind = .message
             streamTick += 1
         }
     }
@@ -736,12 +776,24 @@ final class ConversationViewModel {
     /// A coalesced full message/thought arrived — finalize the streaming bubble
     /// (replacing with authoritative text) or add a finalized entry if none.
     private func finalize(_ full: String, kind: StreamKind) {
-        // A finalized answer collapses the turn's thinking + tool calls even if
-        // no `.message` deltas (and no `.turnComplete`) ever arrived — the case
-        // that left the old erase-on-turnComplete path stranding live thoughts.
-        if kind == .message { collapseWork() }
+        if kind == .thought {
+            // Finalized thought: append the authoritative text to the buffer.
+            // If the streaming deltas already accumulated the same text, skip
+            // the dup; otherwise append (handles the no-deltas-before-finalize case).
+            let trimmed = full.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, !thoughtBuffer.hasSuffix(trimmed) {
+                if !thoughtBuffer.isEmpty { thoughtBuffer += "\n\n" }
+                thoughtBuffer += trimmed
+            }
+            upsertThoughtSummary()
+            if streamingKind == .thought { endStreaming() }
+            streamTick += 1
+            return
+        }
+        // Message path: collapse work, finalize the streaming bubble.
+        collapseWork()
         let finalKind = finalizedKind(full, kind: kind)
-        if streamingKind == kind, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
+        if streamingKind == .message, let id = streamingID, let idx = entries.firstIndex(where: { $0.id == id }) {
             entries[idx].kind = finalKind
         } else {
             endStreaming()
@@ -753,9 +805,9 @@ final class ConversationViewModel {
 
     /// A finalized assistant message is analyzed for quick-reply options (which
     /// also strips any `[[CHOICES]]` block from the displayed text) and parsed for
-    /// inline content (images). Thoughts pass through unchanged.
+    /// inline content (images). Only called for messages (thoughts route through
+    /// the accumulator).
     private func finalizedKind(_ full: String, kind: StreamKind) -> TranscriptEntry.Kind {
-        guard kind == .message else { return .thought(full) }
         let (display, options) = QuickReplyDetector.analyze(full)
         quickReplies = options
         return self.kind(forMessageContent: display)
@@ -782,9 +834,46 @@ final class ConversationViewModel {
         streamingKind = nil
     }
 
-    /// Tuck the just-finished turn's transient work — live thinking and the
-    /// `🔧 tool(...)` / progress rows — into collapsed, expandable groups so the
-    /// finished turn reads as just its answer.
+    /// Clears the thought accumulator for a new turn.
+    private func resetThoughtAccumulator() {
+        thoughtBuffer = ""
+        thoughtSummaryID = nil
+    }
+
+    /// Clears the activity accumulator for a new turn.
+    private func resetActivityAccumulator() {
+        activityLines = []
+        activitySummaryID = nil
+    }
+
+    /// Inserts or updates the turn's single `.thoughtSummary` entry.
+    private func upsertThoughtSummary() {
+        let text = thoughtBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if let id = thoughtSummaryID, let idx = entries.firstIndex(where: { $0.id == id }) {
+            entries[idx].kind = .thoughtSummary(text)
+        } else {
+            let entry = TranscriptEntry(kind: .thoughtSummary(text))
+            entries.append(entry)
+            thoughtSummaryID = entry.id
+        }
+    }
+
+    /// Inserts or updates the turn's single `.toolActivitySummary` entry.
+    private func upsertActivitySummary() {
+        guard !activityLines.isEmpty else { return }
+        if let id = activitySummaryID, let idx = entries.firstIndex(where: { $0.id == id }) {
+            entries[idx].kind = .toolActivitySummary(activityLines)
+        } else {
+            let entry = TranscriptEntry(kind: .toolActivitySummary(activityLines))
+            entries.append(entry)
+            activitySummaryID = entry.id
+        }
+    }
+
+    /// Tuck the just-finished turn's transient work into collapsed, expandable
+    /// groups so the finished turn reads as just its answer. `collapseThoughts`
+    /// is now a safety-net no-op (thoughts route through the accumulator).
     private func collapseWork() {
         collapseThoughts()
         collapseToolActivity()
@@ -813,55 +902,51 @@ final class ConversationViewModel {
         }
     }
 
-    /// Coalesce the current turn's loose tool-call / progress rows into one
-    /// collapsed `.toolActivitySummary`, placed where the first one was. Same
-    /// incremental, idempotent contract as `collapseThoughts`: a prior turn's
-    /// summary is a different kind, so only this turn's loose rows are folded.
+    /// Safety net: in the accumulator model, all tool activity routes directly
+    /// to `.toolActivitySummary` via `upsertActivitySummary`. If stray `.update`
+    /// entries with tool-activity content exist (a code path we missed), fold
+    /// them into the accumulator. In normal operation this is a no-op.
     private func collapseToolActivity() {
         func isWork(_ kind: TranscriptEntry.Kind) -> Bool {
             if case .update(let u) = kind { return toolActivityLine(u) != nil }
             return false
         }
-        // Scope to the current (last) turn only: work items before the most recent
-        // userPrompt belong to history and must not be touched.
         let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
         let workIndices = entries.indices.filter { $0 > currentTurnStart && isWork(entries[$0].kind) }
-        guard let firstIdx = workIndices.first else { return }
-        let lines: [String] = workIndices.compactMap { idx in
+        guard !workIndices.isEmpty else { return }
+        let strayLines: [String] = workIndices.compactMap { idx in
             if case .update(let u) = entries[idx].kind { return toolActivityLine(u) }
             return nil
         }
-        // Remove from the end so earlier indices stay valid
         for idx in workIndices.reversed() { entries.remove(at: idx) }
-        guard !lines.isEmpty else { streamTick += 1; return }
-        let insertAt = min(firstIdx, entries.count)
-        entries.insert(TranscriptEntry(kind: .toolActivitySummary(lines)), at: insertAt)
+        if !strayLines.isEmpty {
+            activityLines.append(contentsOf: strayLines)
+            upsertActivitySummary()
+        }
         streamTick += 1
     }
 
-    /// Coalesce the current turn's loose live `.thought` rows into a single
-    /// collapsed `.thoughtSummary` placed where the first thought was (i.e. just
-    /// above the answer). Idempotent — once collapsed there are no loose thoughts
-    /// left, so repeat calls do nothing. Only this turn's thoughts are affected;
-    /// a prior turn's already-collapsed summary is a different kind and untouched.
+    /// Safety net: in the accumulator model, all thought text routes directly to
+    /// `.thoughtSummary`. If a stray `.thought` entry appears (a code path we
+    /// missed), fold it into the accumulator. In normal operation this is a no-op.
     private func collapseThoughts() {
         let currentTurnStart = entries.lastIndex(where: { if case .userPrompt = $0.kind { return true } else { return false } }) ?? -1
         let thoughtIndices = entries.indices.filter { idx in
             idx > currentTurnStart && { if case .thought = entries[idx].kind { return true } else { return false } }()
         }
-        guard let firstIdx = thoughtIndices.first else { return }
-        let texts: [String] = thoughtIndices.compactMap { idx in
+        guard !thoughtIndices.isEmpty else { return }
+        let strayTexts: [String] = thoughtIndices.compactMap { idx in
             if case .thought(let t) = entries[idx].kind { return t }
             return nil as String?
         }
-        let combined = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
         for idx in thoughtIndices.reversed() { entries.remove(at: idx) }
-        guard !combined.isEmpty else { streamTick += 1; return }
-        // If this thought entry was the one being streamed into, clear the marker
-        // so a trailing thoughtDelta doesn't try to grow a now-removed row.
+        let combined = strayTexts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !combined.isEmpty {
+            if !thoughtBuffer.isEmpty { thoughtBuffer += "\n\n" }
+            thoughtBuffer += combined
+            upsertThoughtSummary()
+        }
         if streamingKind == .thought { endStreaming() }
-        let insertAt = min(firstIdx, entries.count)
-        entries.insert(TranscriptEntry(kind: .thoughtSummary(combined)), at: insertAt)
         streamTick += 1
     }
 }
