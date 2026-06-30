@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import GrokestratorCore
 
 /// iPhone/iPad conversation view: transcript + composer + permission overlay.
@@ -17,6 +18,8 @@ struct iOSConversationView: View {
     /// Bumped whenever the user sends, to force the transcript back to the
     /// bottom (and re-arm stick) even if they had scrolled up to read.
     @State private var pinToken = 0
+    /// Drives the file-picker sheet for attaching files to a prompt.
+    @State private var showFilePicker = false
 
     private var conversation: ConversationViewModel { instance.conversation }
 
@@ -147,53 +150,140 @@ struct iOSConversationView: View {
 
     private var composer: some View {
         @Bindable var conv = instance.conversation
-        return HStack(alignment: .bottom, spacing: 8) {
-            // Backed by a real UITextView so the prompt reflows at the
-            // composer's current width — both when the panel resizes it and for
-            // a freshly typed line in the narrowed box.
-            ComposerTextView(
-                text: $conv.draft,
-                placeholder: "Message \(instance.name)…",
-                fontSize: 15,
-                isFocused: $composerFocused,
-                onSubmit: send
-            )
-            .onChange(of: slashToken) { _, new in
-                if new != nil { conversation.refreshCapabilities() }
+        return VStack(spacing: 0) {
+            // Attachment strip — shown when files are attached.
+            if !conversation.attachedFiles.isEmpty {
+                iOSAttachmentStrip(conversation: conversation)
             }
-            .padding(10)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
 
-            if conversation.isStreaming {
-                Button(action: { conversation.cancelCurrent() }) {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
-                        .shadow(color: .red.opacity(0.5), radius: 4)
+            HStack(alignment: .bottom, spacing: 8) {
+                Button { showFilePicker = true } label: {
+                    Image(systemName: "paperclip")
+                        .font(.title3)
+                        .foregroundStyle(Theme.textMuted)
                 }
-            } else {
+
+                // Backed by a real UITextView so the prompt reflows at the
+                // composer's current width — both when the panel resizes it and for
+                // a freshly typed line in the narrowed box.
+                ComposerTextView(
+                    text: $conv.draft,
+                    placeholder: "Message \(instance.name)…",
+                    fontSize: 15,
+                    isFocused: $composerFocused,
+                    onSubmit: send
+                )
+                .onChange(of: slashToken) { _, new in
+                    if new != nil { conversation.refreshCapabilities() }
+                }
+                .padding(10)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusSm))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.border))
+
+                if conversation.isStreaming {
+                    Button(action: { conversation.cancelCurrent() }) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.red)
+                            .shadow(color: .red.opacity(0.5), radius: 4)
+                    }
+                }
                 Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
+                    Image(systemName: conversation.isStreaming ? "text.badge.plus" : "arrow.up.circle.fill")
                         .font(.title2)
                         .foregroundStyle(Theme.accent)
                         .shadow(color: Theme.glow, radius: canSend ? 6 : 0)
                 }
                 .disabled(!canSend)
             }
+            .padding(12)
         }
-        .padding(12)
         .background(Theme.bgDeep)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            iOSHandleDrop(providers)
+        }
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                let accessible = urls.compactMap { url -> URL? in
+                    guard url.startAccessingSecurityScopedResource() else { return nil }
+                    return url
+                }
+                conversation.addFiles(accessible)
+            }
+        }
     }
 
     private var canSend: Bool {
-        !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !conversation.isStreaming
+        !conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !conversation.attachedFiles.isEmpty
     }
 
     private func send() {
         conversation.send(conversation.draft)
         conversation.draft = ""
         pinToken += 1
+    }
+
+    private func iOSHandleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var accepted = false
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, url.isFileURL else { return }
+                Task { @MainActor in
+                    conversation.addFiles([url])
+                }
+            }
+            accepted = true
+        }
+        return accepted
+    }
+}
+
+// MARK: - iOS attachment strip
+
+private struct iOSAttachmentStrip: View {
+    let conversation: ConversationViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(conversation.attachedFiles) { file in
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc")
+                            .font(.caption)
+                            .foregroundStyle(Theme.accent)
+                        Text(file.name)
+                            .font(Theme.body(12, .medium))
+                            .foregroundStyle(Theme.textBody)
+                            .lineLimit(1)
+                        Text(formatSize(file.size))
+                            .font(Theme.body(10))
+                            .foregroundStyle(Theme.textFaint)
+                        Button {
+                            conversation.removeAttachedFile(file)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textFaint)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Theme.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Theme.border))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
+    }
+
+    private func formatSize(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 { return String(format: "%.0f KB", kb) }
+        let mb = kb / 1024
+        return String(format: "%.1f MB", mb)
     }
 }
 
@@ -358,6 +448,16 @@ private struct iOSTranscriptRow: View {
             row(icon: "person.fill", tint: Theme.textMuted) {
                 Text(text).font(Theme.body(15, .semibold)).foregroundStyle(Theme.textPrimary).textSelection(.enabled)
             }
+        case .queuedPrompt(let text):
+            row(icon: "clock", tint: Theme.textFaint) {
+                HStack(spacing: 6) {
+                    Text(text).font(Theme.body(15, .semibold)).foregroundStyle(Theme.textMuted)
+                    Text("queued").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Theme.surface, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Theme.border))
+                }
+            }
         case .assistantMessage(let text):
             row(icon: "sparkle", tint: Theme.accent) {
                 if entry.id == streamingMessageID {
@@ -455,10 +555,14 @@ private struct iOSPermissionOverlay: View {
         .shadow(radius: 16, y: 6)
     }
 
+    /// Cap for permission description text — anything beyond this is truncated
+    /// so the overlay stays readable (the full text is still selectable).
+    private static let descriptionCap = 500
+
     /// Description + option buttons — the scrollable part when it overflows.
     private var permissionBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(request.description)
+            Text(Self.cappedDescription(request.description))
                 .font(.callout)
                 .textSelection(.enabled)
             VStack(spacing: 8) {
@@ -472,6 +576,11 @@ private struct iOSPermissionOverlay: View {
                 }
             }
         }
+    }
+
+    private static func cappedDescription(_ text: String) -> String {
+        guard text.count > descriptionCap else { return text }
+        return String(text.prefix(descriptionCap)) + "\n…[truncated]"
     }
 }
 
