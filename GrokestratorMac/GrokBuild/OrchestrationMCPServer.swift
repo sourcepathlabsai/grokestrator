@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import GrokestratorCore
 
 /// The spine of the orchestration platform: a tiny in-app MCP server that grok
 /// Nodes connect to so an orchestrator can drive its children through tools we
@@ -29,6 +30,9 @@ public actor OrchestrationMCPServer {
     /// `timeout` is nil when the caller didn't specify one (use the default).
     private var delegateHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ task: String, _ timeout: TimeInterval?) async -> String)?
 
+    /// Phase 3 workflow DB — schema-validated task exchange (`design/11`).
+    private var database: OrchestrationDatabaseImpl?
+
     /// Header grok forwards on every MCP request, carrying the calling Node's id.
     public static let nodeHeader = "X-Grokestrator-Node"
 
@@ -37,6 +41,11 @@ public actor OrchestrationMCPServer {
     /// Install the real delegation router (Phase 1c). Safe to call before/after start.
     public func setDelegateHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ task: String, _ timeout: TimeInterval?) async -> String) {
         self.delegateHandler = handler
+    }
+
+    /// Wire the embedded orchestration DB (Phase 3). Safe to call before/after start.
+    public func setDatabase(_ database: OrchestrationDatabaseImpl) {
+        self.database = database
     }
 
     /// Start on `port`, bound to 127.0.0.1. Idempotent.
@@ -79,6 +88,105 @@ public actor OrchestrationMCPServer {
         if let handler = delegateHandler { return await handler(callerID, child, task, timeout) }
         return "Delegation is not wired yet (orchestration Phase 1c). "
              + "Received child=\"\(child)\", task=\"\(task)\"."
+    }
+
+    fileprivate func runTool(name: String?, argsData: Data, callerID: UUID?) async -> (String, Bool) {
+        let args = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+        switch name {
+        case "delegate":
+            let child = args["child"] as? String ?? ""
+            let task = args["task"] as? String ?? ""
+            let timeout = (args["timeout"] as? Int).map { TimeInterval($0) }
+            let text = await runDelegate(callerID: callerID, child: child, task: task, timeout: timeout)
+            return (text, false)
+        case "db.createSchema", "db.insert", "db.query", "db.update", "db.listTables":
+            return await runDBTool(name: name!, args: args, callerID: callerID)
+        default:
+            return ("Unknown tool: \(name ?? "nil")", true)
+        }
+    }
+
+    fileprivate func runDBTool(name: String, args: [String: Any], callerID: UUID?) async -> (String, Bool) {
+        guard let database else {
+            return ("Orchestration DB is not available.", true)
+        }
+        let contextID = callerID?.uuidString
+        do {
+            switch name {
+            case "db.createSchema":
+                let tableName = args["name"] as? String ?? ""
+                guard let schemaObj = args["schema"],
+                      let schemaData = try? JSONSerialization.data(withJSONObject: schemaObj),
+                      let schema = try? JSONDecoder().decode(TableSchema.self, from: schemaData) else {
+                    return ("db.createSchema requires `name` and `schema` (TableSchema JSON).", true)
+                }
+                try await database.createSchema(name: tableName, schema: schema)
+                return ("Created schema for table \"\(tableName)\" (\(schema.columns.count) columns).", false)
+
+            case "db.insert":
+                let table = args["table"] as? String ?? ""
+                guard let rowObj = args["row"] as? [String: Any] else {
+                    return ("db.insert requires `table` and `row`.", true)
+                }
+                let row = Self.parseDBRow(rowObj)
+                let rowID = try await database.insert(table: table, row: row, contextID: contextID)
+                return ("Inserted row \(rowID) into \"\(table)\".", false)
+
+            case "db.query":
+                let table = args["table"] as? String ?? ""
+                let predicate = (args["predicate"] as? [String: Any]).map(Self.parseDBRow)
+                let limit = args["limit"] as? Int
+                let rows = try await database.query(table: table, predicate: predicate, limit: limit)
+                let json = try String(data: JSONEncoder().encode(rows), encoding: .utf8) ?? "[]"
+                return (json, false)
+
+            case "db.update":
+                let table = args["table"] as? String ?? ""
+                guard let valuesObj = args["values"] as? [String: Any] else {
+                    return ("db.update requires `table` and `values`.", true)
+                }
+                let values = Self.parseDBRow(valuesObj)
+                let predicate = (args["predicate"] as? [String: Any]).map(Self.parseDBRow)
+                let changed = try await database.update(table: table, values: values, predicate: predicate)
+                return ("Updated \(changed) row(s) in \"\(table)\".", false)
+
+            case "db.listTables":
+                let tables = try await database.listTables()
+                let json = try String(data: JSONEncoder().encode(tables), encoding: .utf8) ?? "[]"
+                return (json, false)
+
+            default:
+                return ("Unknown db tool: \(name)", true)
+            }
+        } catch let err as OrchestrationDBError {
+            return (err.localizedDescription ?? String(describing: err), true)
+        } catch {
+            return (error.localizedDescription, true)
+        }
+    }
+
+    private static func parseDBRow(_ dict: [String: Any]) -> DBRow {
+        var row: DBRow = [:]
+        for (key, value) in dict { row[key] = parseDBValue(value) }
+        return row
+    }
+
+    private static func parseDBValue(_ value: Any) -> DBValue {
+        if value is NSNull { return .null }
+        if let s = value as? String { return .text(s) }
+        if let i = value as? Int { return .integer(Int64(i)) }
+        if let i = value as? Int64 { return .integer(i) }
+        if let d = value as? Double { return .real(d) }
+        if let b = value as? Bool { return .boolean(b) }
+        if let nested = value as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: nested),
+           let decoded = try? JSONDecoder().decode(DBValue.self, from: data) {
+            return decoded
+        }
+        return .text(String(describing: value))
+    }
+
+    private static var allToolSchemas: [[String: Any]] {
+        [delegateToolSchema, dbCreateSchemaTool, dbInsertTool, dbQueryTool, dbUpdateTool, dbListTablesTool]
     }
 
     // MARK: - Connection loop (keep-alive: many requests per connection)
@@ -125,20 +233,14 @@ public actor OrchestrationMCPServer {
                 "serverInfo": ["name": "grokestrator", "version": "0.1"],
             ]
         case "tools/list":
-            result = ["tools": [delegateToolSchema]]
+            result = ["tools": Self.allToolSchemas]
         case "tools/call":
             let callParams = params
             let name = callParams["name"] as? String
             let args = callParams["arguments"] as? [String: Any] ?? [:]
-            if name == "delegate" {
-                let child = args["child"] as? String ?? ""
-                let task = args["task"] as? String ?? ""
-                let timeout = (args["timeout"] as? Int).map { TimeInterval($0) }
-                let text = await server.runDelegate(callerID: req.nodeID, child: child, task: task, timeout: timeout)
-                result = ["content": [["type": "text", "text": text]], "isError": false]
-            } else {
-                result = ["content": [["type": "text", "text": "Unknown tool: \(name ?? "nil")"]], "isError": true]
-            }
+            let argsData = (try? JSONSerialization.data(withJSONObject: args)) ?? Data()
+            let (text, isError) = await server.runTool(name: name, argsData: argsData, callerID: req.nodeID)
+            result = ["content": [["type": "text", "text": text]], "isError": isError]
         case "ping":
             result = [:]
         default:
@@ -150,6 +252,76 @@ public actor OrchestrationMCPServer {
             return httpResponse(500, "Internal Server Error")
         }
         return jsonResponse(json)
+    }
+
+    private static var dbCreateSchemaTool: [String: Any] {
+        [
+            "name": "db.createSchema",
+            "description": "Register a task table schema. The schema is the first data oracle — malformed writes are rejected.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "name": ["type": "string", "description": "Table name."],
+                    "schema": ["type": "object", "description": "TableSchema JSON: { name, columns: [{ name, type, isRequired?, isUnique? }], description? }."],
+                ],
+                "required": ["name", "schema"],
+            ],
+        ]
+    }
+
+    private static var dbInsertTool: [String: Any] {
+        [
+            "name": "db.insert",
+            "description": "Insert a validated row into a registered table.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "table": ["type": "string"],
+                    "row": ["type": "object", "description": "Column name → value map."],
+                ],
+                "required": ["table", "row"],
+            ],
+        ]
+    }
+
+    private static var dbQueryTool: [String: Any] {
+        [
+            "name": "db.query",
+            "description": "Query rows from a registered table (equality predicate, optional limit).",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "table": ["type": "string"],
+                    "predicate": ["type": "object", "description": "Optional column = value filters."],
+                    "limit": ["type": "integer"],
+                ],
+                "required": ["table"],
+            ],
+        ]
+    }
+
+    private static var dbUpdateTool: [String: Any] {
+        [
+            "name": "db.update",
+            "description": "Update rows matching an optional predicate. Values are schema-validated.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "table": ["type": "string"],
+                    "values": ["type": "object"],
+                    "predicate": ["type": "object"],
+                ],
+                "required": ["table", "values"],
+            ],
+        ]
+    }
+
+    private static var dbListTablesTool: [String: Any] {
+        [
+            "name": "db.listTables",
+            "description": "List registered orchestration tables.",
+            "inputSchema": ["type": "object", "properties": [:]],
+        ]
     }
 
     private static var delegateToolSchema: [String: Any] {

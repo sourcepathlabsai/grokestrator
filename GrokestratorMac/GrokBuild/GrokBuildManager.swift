@@ -12,6 +12,8 @@ import GrokestratorCore
 public actor GrokBuildManager {
     private let server = GrokBuildServer()
     private var instanceStates: [UUID: ManagedInstance] = [:]
+    /// Optional hook for the Run view sidebar — records delegation lifecycle events.
+    private var delegationRunCallback: (@Sendable (DelegationRunUpdate) -> Void)?
 
     public init() {
         // We will register death handlers when conversations are created
@@ -118,6 +120,11 @@ public actor GrokBuildManager {
 
     // MARK: - Orchestration (Phase 1c: delegate routing)
 
+    /// Wire delegation lifecycle events into `DelegationRunStore` (Run view sidebar).
+    public func setDelegationRunCallback(_ callback: (@Sendable (DelegationRunUpdate) -> Void)?) {
+        delegationRunCallback = callback
+    }
+
     /// The router behind the Orchestration MCP `delegate` tool: resolve a child
     /// Connection by name, send it `task` as a prompt (so the child's transcript
     /// shows the delegated turn live — watchable on every device), await the
@@ -140,14 +147,41 @@ public actor GrokBuildManager {
             let scope = callerID == nil ? "Available" : "Your child agents"
             return "No child agent named \"\(name)\". \(scope): \(names.isEmpty ? "(none — add child agents to this orchestrator)" : names)."
         }
+
+        let runID = UUID()
+        if let callerID {
+            delegationRunCallback?(.started(DelegationRun(
+                id: runID, parentID: callerID, childID: target.id,
+                childName: target.name, task: task
+            )))
+        }
+
+        let result: String
         do {
             // Subscribe before prompting so we don't miss the turn's events.
             let stream = try await subscribe(to: target.id)
             _ = try await sendPrompt(to: target.id, prompt: task)
-            return await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+            result = await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
         } catch {
-            return "Delegation to \"\(target.name)\" failed: \(error.localizedDescription)"
+            result = "Delegation to \"\(target.name)\" failed: \(error.localizedDescription)"
         }
+
+        if callerID != nil {
+            delegationRunCallback?(.finished(
+                id: runID,
+                status: Self.inferDelegationStatus(result: result),
+                resultPreview: result
+            ))
+        }
+        return result
+    }
+
+    private static func inferDelegationStatus(result: String) -> DelegationRunStatus {
+        if result.contains("delegation timed out") || result.contains("timed out") { return .timedOut }
+        if result.hasPrefix("Delegation to") && result.contains("failed") { return .failed }
+        if result.hasPrefix("Child \"") && result.contains("error:") { return .failed }
+        if result.hasPrefix("No child agent") { return .failed }
+        return .completed
     }
 
     /// Consume a child's broadcast stream until its turn completes (or times out),
