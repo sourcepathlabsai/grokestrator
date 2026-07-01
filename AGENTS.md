@@ -126,14 +126,18 @@ later," no starting the next slice while a PR is open.
 When you complete a slice:
 
 1. **Branch** — focused `feat/` or `fix/` branch from current `main`.
-2. **PR** — open a pull request before declaring the slice done.
-3. **Description** — list every GitHub issue fixed/closed (e.g. `Fixes #122, #147,
+2. **Certify** — run `scripts/certify-pr.sh` and confirm it passes before opening the
+   PR. Certification runs GrokestratorCore unit tests, a Mac Debug build, and an iOS
+   Simulator Debug build (no signing required). CI runs the same script on every PR
+   (`.github/workflows/pr-certify.yml`). A slice is not done if certification fails.
+3. **PR** — open a pull request before declaring the slice done.
+4. **Description** — list every GitHub issue fixed/closed (e.g. `Fixes #122, #147,
    #148`). Include a short summary of what changed and why.
-4. **Hand off** — give the human the **PR link** and explicitly **await merge**.
-5. **Gate** — **do not start another slice** until that PR is merged. If the human
+5. **Hand off** — give the human the **PR link** and explicitly **await merge**.
+6. **Gate** — **do not start another slice** until that PR is merged. If the human
    asks for more work while a PR is open, warn them: *merge the open PR first* (or
    confirm they want to stack/revise scope).
-6. **On merge reported** — when the human confirms a PR is merged, **comment on each
+7. **On merge reported** — when the human confirms a PR is merged, **comment on each
    fixed issue** with which PR resolved it (link + one-line summary) and **close the
    issue** if it is still open. Do not assume issues auto-closed from the PR body
    alone — verify and leave an audit trail.
