@@ -20,7 +20,7 @@ across devices over Tailscale.
 | **GrokestratoriOS** | Client-only remote companion |
 | **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
-**Release:** v0.3.3-alpha (2026-07-01). Prior: v0.3.2-alpha (2026-07-01).  
+**Release:** v0.3.5-alpha (2026-07-01). Prior: v0.3.4-alpha (2026-07-01).  
 **Engineering:** 175+ merged PRs; Core tests: 71/71 passing; PR certification
 (Core tests + Mac + iOS Simulator builds via `scripts/certify-pr.sh`).
 
@@ -135,7 +135,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | Multi-level tree + parallel delegate fan-out | Shipped (#136) | `design/11` |
 | ContextManager (summarization, retrieval, gist oracle) | Shipped (#137) | `design/12` Phase B′ |
 | Oracle depth (verify-against-intent, corpus maintenance, INV detectors) | Open (#140–#142) | `design/13` |
-| Signed/notarized Mac + TestFlight | Roadmap (#143) | README |
+| Signed/notarized Mac + TestFlight | Shipped (#143) | `scripts/build-release.sh`, `.github/workflows/signed-release.yml` |
 | Headless Linux GKSS server | Open (#144) | — |
 | Per-Connection MCP server overrides | Open (#146) | — |
 
@@ -160,9 +160,9 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 | Priority | Issue | Topic |
 |----------|-------|-------|
-| 1 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
-| 2 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
-| 3 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
+| — | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight — **shipped** |
+| 1 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
+| 2 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
 | — | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager — **shipped** |
 | — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140), [#137–#139](https://github.com/sourcepathlabsai/grokestrator/issues/137), [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Oracle detectors, runtime depth, infra |
 | — | [#135–#146](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
@@ -192,4 +192,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — ContextManager tier 1 (#137). Supersedes prior 2026-07-01 snapshot.*
+*Last updated: 2026-07-01 — signed release pipeline (#143). Supersedes prior 2026-07-01 snapshot.*

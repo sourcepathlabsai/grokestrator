@@ -6,11 +6,9 @@ name: Mac Unsigned Release
 #   • Run manually (workflow_dispatch) → builds + uploads the DMG as a workflow
 #     artifact you can download, without cutting a release.
 #
-# No signing secrets are required — this is the ad-hoc/unsigned path, so it
-# works the moment the repo exists. Recipients clear Gatekeeper once (the DMG
-# ships with "How to open Grokestrator.txt"). When the paid Apple Developer
-# account is ready, add APPLE_TEAM_ID + a notary profile and the existing
-# scripts/build-mac-release.sh switches to the signed+notarized path.
+# Unsigned fallback when signing secrets are not configured. For signed +
+# notarized Mac + TestFlight iOS, use the "Signed Release" workflow once
+# GitHub secrets are set (see scripts/release.env.example).
 
 on:
   push:

@@ -104,13 +104,29 @@ For deeper dives into the design:
 
 ---
 
+## Releasing (maintainers)
+
+Paid Apple Developer enrollment is active (team `GS8DPK5RPN`). Signed distribution:
+
+```bash
+cp scripts/release.env.example scripts/release.env   # fill in credentials
+scripts/release-preflight.sh                         # verify certs + API keys
+scripts/build-release.sh                             # Mac DMG + TestFlight iOS
+```
+
+- **Mac** — `scripts/build-mac-release.sh` signs with Developer ID, notarizes, staples. Output: `build/mac-release/Grokestrator-X.Y.Z.dmg` (Gatekeeper-clean).
+- **iOS** — `scripts/build-ios-release.sh` archives, exports `.ipa`, uploads to TestFlight via App Store Connect API key.
+- **CI** — `.github/workflows/signed-release.yml` runs the same pipeline on `v*` tags when GitHub secrets are configured (see `scripts/release.env.example`).
+- **Unsigned fallback** — `.github/workflows/mac-release.yml` still produces unsigned DMGs when signing secrets are absent.
+
+---
+
 ## Status
 
 Early access. The model is solid; rough edges remain. File issues for anything that surprises you.
 
 **Roadmap signal** (not promises):
 
-- Signed/notarized Mac app + TestFlight for iOS — so users don't have to build from source.
 - Live token-count streaming during a turn.
 - Per-Connection MCP overrides.
 - Headless Linux server build (drive your tailnet's GPU box from a laptop).

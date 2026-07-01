@@ -1,5 +1,15 @@
 # Grokestrator — Release Notes
 
+## v0.3.5-alpha — 2026-07-01
+
+### Signed distribution pipeline (#143)
+
+- **Paid Apple Developer enrollment live** — team `GS8DPK5RPN` wired in `project.yml`.
+- **`scripts/release-preflight.sh`** — verifies Developer ID cert, notarization creds, and App Store Connect API key before release.
+- **`scripts/build-release.sh`** — one command for signed Mac DMG + TestFlight iOS upload.
+- **API-key notarization** — `build-mac-release.sh` supports App Store Connect API keys (CI) in addition to local `notarytool` keychain profiles.
+- **`.github/workflows/signed-release.yml`** — tag/manual workflow for Gatekeeper-clean Mac GitHub Releases + TestFlight upload when repository secrets are set.
+
 ## v0.3.4-alpha — 2026-07-01
 
 ### ContextManager (#137)
