@@ -42,7 +42,7 @@ struct AddConnectionView: View {
     /// Harness team template for grok ACP path (#132).
     @State private var harnessTemplateID: String = GrokHarnessTemplate.plain.id
     private var harnessTemplate: GrokHarnessTemplate {
-        GrokHarnessTemplate.all.first(where: { $0.id == harnessTemplateID }) ?? .plain
+        model.allHarnessTemplates.first(where: { $0.id == harnessTemplateID }) ?? .plain
     }
 
     var body: some View {
@@ -101,7 +101,7 @@ struct AddConnectionView: View {
 
                 if isGrok, parent == nil {
                     Picker("Harness team", selection: $harnessTemplateID) {
-                        ForEach(GrokHarnessTemplate.all) { t in
+                        ForEach(model.allHarnessTemplates) { t in
                             Text(t.title).tag(t.id)
                         }
                     }

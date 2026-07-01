@@ -22,6 +22,9 @@ struct SettingsView: View {
     @State private var addingTeamTemplate = false
     @State private var editingTeamTemplate: TeamTemplate?
 
+    @State private var addingHarnessTemplate = false
+    @State private var editingHarnessTemplate: GrokHarnessTemplate?
+
     var body: some View {
         TabView {
             serverTab
@@ -48,6 +51,8 @@ struct SettingsView: View {
         .sheet(item: $editingMCPServer) { s in MCPServerEditorView(model: model, existing: s) }
         .sheet(isPresented: $addingTeamTemplate) { TeamTemplateEditorView(model: model) }
         .sheet(item: $editingTeamTemplate) { t in TeamTemplateEditorView(model: model, existing: t) }
+        .sheet(isPresented: $addingHarnessTemplate) { HarnessTemplateEditorView(model: model) }
+        .sheet(item: $editingHarnessTemplate) { t in HarnessTemplateEditorView(model: model, existing: t) }
     }
 
     // MARK: Team templates
@@ -76,8 +81,71 @@ struct SettingsView: View {
                         teamTemplateRow(template, builtin: false)
                     }
                 }
+
+                Divider().padding(.vertical, 8)
+
+                HStack {
+                    Text("Harness Templates (ACP)").font(Theme.display(12, .semibold))
+                    Spacer()
+                    Button { addingHarnessTemplate = true } label: { Label("New Template", systemImage: "plus") }
+                }
+                Text("Blueprints for **Add Connection** and **Grok Config** — writes `.grok/` agent, role, and persona files for grok's `task` tool. Supervised ACP path only.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("BUILT-IN").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)
+                harnessTemplateRow(.plain, builtin: true, locked: true)
+                ForEach(GrokHarnessTemplate.presetTemplates) { template in
+                    harnessTemplateRow(template, builtin: true, locked: false)
+                }
+
+                if !model.customHarnessTemplates.isEmpty {
+                    Text("CUSTOM").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)
+                        .padding(.top, 4)
+                    ForEach(model.customHarnessTemplates) { template in
+                        harnessTemplateRow(template, builtin: false, locked: false)
+                    }
+                }
             }
             .padding()
+        }
+    }
+
+    private func harnessTemplateRow(_ template: GrokHarnessTemplate, builtin: Bool, locked: Bool) -> some View {
+        GroupBox {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(template.title).font(Theme.body(12, .semibold))
+                        if builtin {
+                            Text(locked ? "default" : "built-in").font(Theme.mono(9)).foregroundStyle(Theme.textFaint)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Theme.surfaceSoft, in: Capsule())
+                        }
+                    }
+                    Text(template.summary).font(Theme.body(11)).foregroundStyle(Theme.textMuted).lineLimit(2)
+                    if template.writesFiles {
+                        Text("\(template.roles.count) roles · agent \(template.agent.name)")
+                            .font(Theme.mono(10)).foregroundStyle(Theme.textFaint)
+                    }
+                }
+                Spacer()
+                if locked {
+                    EmptyView()
+                } else if builtin {
+                    Button("Duplicate") {
+                        let copy = model.duplicateHarnessTemplate(template)
+                        model.saveCustomHarnessTemplate(copy)
+                        editingHarnessTemplate = copy
+                    }
+                } else {
+                    Button("Edit") { editingHarnessTemplate = template }
+                    Button(role: .destructive) { model.deleteCustomHarnessTemplate(id: template.id) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Delete template")
+                }
+            }
         }
     }
 

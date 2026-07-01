@@ -14,7 +14,7 @@ struct GrokConfigEditorView: View {
     @State private var personas: [GrokPersonaDraft] = []
     @State private var selectedTemplateID: String = GrokHarnessTemplate.plain.id
     private var selectedTemplate: GrokHarnessTemplate {
-        GrokHarnessTemplate.all.first(where: { $0.id == selectedTemplateID }) ?? .plain
+        model.allHarnessTemplates.first(where: { $0.id == selectedTemplateID }) ?? .plain
     }
     @State private var showingPreview = false
     @State private var pendingPlan: GrokConfigWritePlan?
@@ -135,12 +135,12 @@ struct GrokConfigEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             scopePicker
             Picker("Template", selection: $selectedTemplateID) {
-                ForEach(GrokHarnessTemplate.all) { t in
+                ForEach(model.allHarnessTemplates) { t in
                     Text(t.title).tag(t.id)
                 }
             }
             .onChange(of: selectedTemplateID) { _, id in
-                if let t = GrokHarnessTemplate.all.first(where: { $0.id == id }) { loadTemplate(t) }
+                if let t = model.allHarnessTemplates.first(where: { $0.id == id }) { loadTemplate(t) }
             }
 
             Text(selectedTemplate.summary)

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where harness config files are written (`design/10` rung 2).
-public enum GrokConfigScope: String, Sendable, CaseIterable, Identifiable {
+public enum GrokConfigScope: String, Sendable, CaseIterable, Identifiable, Codable {
     case project
     case userDefaults
 
@@ -24,15 +24,13 @@ public enum GrokConfigScope: String, Sendable, CaseIterable, Identifiable {
 #if os(macOS)
             return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
 #else
-            // iOS client has no user home ~/.grok for harness config authoring.
-            // GrokConfig UI and writer are only exercised on macOS targets.
             return FileManager.default.temporaryDirectory.appendingPathComponent(".grok", isDirectory: true)
 #endif
         }
     }
 }
 
-public struct GrokAgentDraft: Sendable, Equatable {
+public struct GrokAgentDraft: Sendable, Equatable, Codable {
     public var name: String
     public var description: String
     public var model: String
@@ -57,7 +55,7 @@ public struct GrokAgentDraft: Sendable, Equatable {
     }
 }
 
-public struct GrokRoleDraft: Sendable, Equatable, Identifiable {
+public struct GrokRoleDraft: Sendable, Equatable, Codable, Identifiable {
     public var id: String { name }
     public var name: String
     public var description: String
@@ -88,13 +86,16 @@ public struct GrokRoleDraft: Sendable, Equatable, Identifiable {
     }
 }
 
-public struct GrokPersonaDraft: Sendable, Equatable, Identifiable {
+public struct GrokPersonaDraft: Sendable, Equatable, Codable, Identifiable {
     public var id: String { name }
     public var name: String
+    /// Plain-language blurb for AI prompt drafting.
+    public var description: String
     public var instructions: String
 
-    public init(name: String, instructions: String) {
+    public init(name: String, description: String = "", instructions: String = "") {
         self.name = name
+        self.description = description
         self.instructions = instructions
     }
 
@@ -104,15 +105,63 @@ public struct GrokPersonaDraft: Sendable, Equatable, Identifiable {
     }
 }
 
-/// A harness team template — roles + personas for grok's `task` tool (ACP path).
-public struct GrokHarnessTemplate: Identifiable, Sendable {
+/// A harness team template — agent + roles + personas written to `.grok/` for
+/// grok's `task` tool (ACP supervision path, `design/10` rung 2).
+public struct GrokHarnessTemplate: Identifiable, Sendable, Codable, Equatable {
     public let id: String
-    public let title: String
-    public let summary: String
-    public let agent: GrokAgentDraft
-    public let roles: [GrokRoleDraft]
-    public let personas: [GrokPersonaDraft]
+    public var title: String
+    public var summary: String
+    public var agent: GrokAgentDraft
+    public var roles: [GrokRoleDraft]
+    public var personas: [GrokPersonaDraft]
 
+    public init(id: String, title: String, summary: String,
+                agent: GrokAgentDraft, roles: [GrokRoleDraft], personas: [GrokPersonaDraft]) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.agent = agent
+        self.roles = roles
+        self.personas = personas
+    }
+
+    public var isBuiltin: Bool { Self.builtinIDs.contains(id) }
+    /// Plain = no files written.
+    public var writesFiles: Bool { id != "plain" }
+
+    public static let builtinIDs: Set<String> = ["plain", "feature-team", "research-team"]
+
+    public static func blank(id: String = UUID().uuidString) -> GrokHarnessTemplate {
+        GrokHarnessTemplate(
+            id: id,
+            title: "New Harness Team",
+            summary: "Coordinator + harness subagent roles for grok's task tool.",
+            agent: GrokAgentDraft(
+                name: "coordinator",
+                description: "Coordinates work via harness subagents",
+                systemPrompt: ""
+            ),
+            roles: [
+                .init(name: "worker", description: "Performs one focused part of the job.",
+                      capabilityMode: "read-only", prompt: ""),
+            ],
+            personas: []
+        )
+    }
+
+    public static func slug(from title: String) -> String {
+        TeamTemplate.slug(from: title)
+    }
+}
+
+public struct HarnessTemplateRegistry: Codable, Sendable, Equatable {
+    public var custom: [GrokHarnessTemplate]
+    public init(custom: [GrokHarnessTemplate] = []) { self.custom = custom }
+}
+
+// MARK: - Built-in harness templates
+
+extension GrokHarnessTemplate {
     public static let plain = GrokHarnessTemplate(
         id: "plain",
         title: "Plain",
@@ -145,8 +194,10 @@ public struct GrokHarnessTemplate: Identifiable, Sendable {
                           prompt: "Produce concise design plans. No code changes."),
         ],
         personas: [
-            GrokPersonaDraft(name: "implementer", instructions: "Ship focused diffs. Run the build after edits."),
-            GrokPersonaDraft(name: "reviewer", instructions: "Structured findings: severity, location, fix."),
+            GrokPersonaDraft(name: "implementer", description: "Ships focused production diffs",
+                             instructions: "Ship focused diffs. Run the build after edits."),
+            GrokPersonaDraft(name: "reviewer", description: "Structured code review findings",
+                             instructions: "Structured findings: severity, location, fix."),
         ]
     )
 
@@ -170,11 +221,17 @@ public struct GrokHarnessTemplate: Identifiable, Sendable {
                           capabilityMode: "read-only", prompt: "Synthesize findings. Flag uncertainty."),
         ],
         personas: [
-            GrokPersonaDraft(name: "researcher", instructions: "Be thorough. Cite sources. No speculation without labeling it."),
+            GrokPersonaDraft(name: "researcher", description: "Thorough investigation with citations",
+                             instructions: "Be thorough. Cite sources. No speculation without labeling it."),
         ]
     )
 
-    public static let all: [GrokHarnessTemplate] = [.plain, .featureTeam, .researchTeam]
+    public static let builtins: [GrokHarnessTemplate] = [.plain, .featureTeam, .researchTeam]
+
+    /// Shipped built-ins (excludes Plain sentinel).
+    public static var presetTemplates: [GrokHarnessTemplate] {
+        builtins.filter { $0.id != "plain" }
+    }
 }
 
 public struct GrokConfigWritePlan: Sendable {
@@ -212,7 +269,7 @@ public enum GrokConfigWriter {
         projectCWD: String?,
         agentNameOverride: String? = nil
     ) -> GrokConfigWritePlan {
-        guard template.id != "plain" else {
+        guard template.writesFiles else {
             return GrokConfigWritePlan(scope: scope, operations: [])
         }
 

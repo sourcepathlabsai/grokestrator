@@ -90,6 +90,14 @@ final class GrokestratorModel {
         TeamTemplate.builtins + customTeamTemplates.filter(\.requiresOrchestratedFleet)
     }
 
+    /// User-authored ACP harness templates (built-ins live in code).
+    var customHarnessTemplates: [GrokHarnessTemplate] = ConnectionStore.loadHarnessTemplates().custom
+
+    /// Plain + built-in presets + custom harness templates for Add Connection / Grok Config.
+    var allHarnessTemplates: [GrokHarnessTemplate] {
+        [GrokHarnessTemplate.plain] + GrokHarnessTemplate.presetTemplates + customHarnessTemplates
+    }
+
     // MARK: - Server settings (mirrored to UserDefaults)
 
     private static let serverEnabledKey = "grokestrator.server.enabled.v1"
@@ -812,6 +820,86 @@ final class GrokestratorModel {
         """
         let command = Self.defaultGrokCommand
         let out = await Self.runGrokHeadless(command: command, prompt: meta, cwd: nil)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    // MARK: - Harness template registry
+
+    func saveCustomHarnessTemplate(_ template: GrokHarnessTemplate) {
+        guard !template.isBuiltin, template.writesFiles else { return }
+        var list = customHarnessTemplates
+        if let idx = list.firstIndex(where: { $0.id == template.id }) {
+            list[idx] = template
+        } else {
+            list.append(template)
+        }
+        customHarnessTemplates = list
+        ConnectionStore.saveHarnessTemplates(HarnessTemplateRegistry(custom: list))
+    }
+
+    func deleteCustomHarnessTemplate(id: String) {
+        guard !GrokHarnessTemplate.builtinIDs.contains(id) else { return }
+        customHarnessTemplates.removeAll { $0.id == id }
+        ConnectionStore.saveHarnessTemplates(HarnessTemplateRegistry(custom: customHarnessTemplates))
+    }
+
+    func duplicateHarnessTemplate(_ source: GrokHarnessTemplate) -> GrokHarnessTemplate {
+        let base = source.isBuiltin ? source.id : "\(source.id)-copy"
+        var candidate = GrokHarnessTemplate.slug(from: base)
+        var n = 2
+        while allHarnessTemplates.contains(where: { $0.id == candidate }) {
+            candidate = "\(base)-\(n)"
+            n += 1
+        }
+        return GrokHarnessTemplate(
+            id: candidate,
+            title: source.isBuiltin ? "\(source.title) (copy)" : "\(source.title) copy",
+            summary: source.summary,
+            agent: source.agent,
+            roles: source.roles,
+            personas: source.personas
+        )
+    }
+
+    func draftHarnessAgentPrompt(template: GrokHarnessTemplate) async -> String {
+        let roles = template.roles.map { "\($0.name) — \($0.description)" }.joined(separator: "; ")
+        let meta = """
+        You are authoring a grok harness team template "\(template.title)" (\(template.summary)).
+        Write a system prompt (second person, imperative) for the primary agent "\(template.agent.name)": \
+        \(template.agent.description). It coordinates via grok's task tool (harness subagents). \
+        Harness roles: \(roles.isEmpty ? "none yet" : roles). \
+        Decompose work, delegate to subagents, synthesize results. Do not do specialist work itself. \
+        Keep under ~150 words. Output ONLY the system prompt — no preamble or quotes.
+        """
+        let out = await Self.runGrokHeadless(command: Self.defaultGrokCommand, prompt: meta, cwd: nil)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    func draftHarnessRolePrompt(template: GrokHarnessTemplate, roleIndex: Int) async -> String {
+        guard roleIndex >= 0, roleIndex < template.roles.count else { return "" }
+        let role = template.roles[roleIndex]
+        let roster = template.roles.map(\.name).joined(separator: ", ")
+        let meta = """
+        Harness team "\(template.title)". Primary agent: \(template.agent.name) (\(template.agent.description)).
+        Write a role prompt for harness subagent "\(role.name)": \(role.description). \
+        Capability mode: \(role.capabilityMode). Team roster: \(roster). \
+        This runs inside grok's task tool — focused, actionable, cites paths when reading code. \
+        Keep under ~120 words. Output ONLY the role prompt text.
+        """
+        let out = await Self.runGrokHeadless(command: Self.defaultGrokCommand, prompt: meta, cwd: nil)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    func draftHarnessPersonaInstructions(template: GrokHarnessTemplate, personaIndex: Int) async -> String {
+        guard personaIndex >= 0, personaIndex < template.personas.count else { return "" }
+        let persona = template.personas[personaIndex]
+        let meta = """
+        Harness team "\(template.title)". Write persona instructions for "\(persona.name)": \
+        \(persona.description). Personas tune grok's bundled subagent behavior. \
+        Be concise and behavioral (what to emphasize, what to avoid). \
+        Keep under ~80 words. Output ONLY the instructions text.
+        """
+        let out = await Self.runGrokHeadless(command: Self.defaultGrokCommand, prompt: meta, cwd: nil)
         return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
