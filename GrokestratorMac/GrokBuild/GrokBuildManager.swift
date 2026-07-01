@@ -210,18 +210,23 @@ public actor GrokBuildManager {
     /// to the *caller's* children waits for per-orchestrator MCP identity).
     /// See `design/11-orchestration-platform.md`.
     public func delegate(callerID: UUID?, toChildNamed name: String, task: String, timeout: TimeInterval = 120) async -> String {
-        let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Scope to the caller's descendant tree (multi-level fleet, #136).
-        let candidates: [ManagedInstance]
+        let live = instanceStates.values.filter { !$0.archived }
+        let target: ManagedInstance?
         if let callerID {
-            candidates = Self.descendants(of: callerID, in: instanceStates.values.filter { !$0.archived })
+            target = OrchestrationTree.resolveDescendant(named: name, under: callerID, in: live)
         } else {
-            candidates = instanceStates.values.filter { !$0.archived }
+            let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            target = live.first(where: { $0.name.lowercased() == key })
         }
-        guard let target = candidates.first(where: { $0.name.lowercased() == key }) else {
+        let candidates: [ManagedInstance] = if let callerID {
+            OrchestrationTree.descendants(of: callerID, in: live)
+        } else {
+            Array(live)
+        }
+        guard let target else {
             let names = candidates.map(\.name).sorted().joined(separator: ", ")
-            let scope = callerID == nil ? "Available" : "Your child agents"
-            return "No child agent named \"\(name)\". \(scope): \(names.isEmpty ? "(none — add child agents to this orchestrator)" : names)."
+            let scope = callerID == nil ? "Available" : "Your descendants"
+            return "No descendant named \"\(name)\". \(scope): \(names.isEmpty ? "(none — add child agents under this orchestrator)" : names)."
         }
 
         let runID = UUID()
@@ -249,21 +254,6 @@ public actor GrokBuildManager {
                 status: Self.inferDelegationStatus(result: result),
                 resultPreview: String(result.prefix(200))
             ))
-        }
-        return result
-    }
-
-    /// All descendants of `parentID` in the orchestration tree (BFS).
-    private static func descendants(of parentID: UUID, in instances: [ManagedInstance]) -> [ManagedInstance] {
-        var result: [ManagedInstance] = []
-        var frontier: Set<UUID> = [parentID]
-        while !frontier.isEmpty {
-            let children = instances.filter { inst in
-                guard let p = inst.parentID else { return false }
-                return frontier.contains(p)
-            }
-            result.append(contentsOf: children)
-            frontier = Set(children.map(\.id))
         }
         return result
     }
@@ -352,9 +342,12 @@ public actor GrokBuildManager {
             let fleetOrch = cfg.role == .orchestrator
                 && OrchestrationSupport.mode(for: cfg.brain, catalog: catalog, tierMap: tierMap) == .orchestratedFleet
             if fleetOrch {
-                await api.setDelegateHandler { [weak self] child, task in
+                await api.setDelegateHandler { [weak self] child, task, timeout in
                     guard let self else { return "orchestrator unavailable" }
-                    return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+                    return await self.delegate(
+                        callerID: instanceID, toChildNamed: child, task: task,
+                        timeout: timeout ?? 120
+                    )
                 }
             }
         }

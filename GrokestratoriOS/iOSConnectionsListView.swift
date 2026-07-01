@@ -102,31 +102,47 @@ struct iOSConnectionsListView: View {
         }
     }
 
-    /// Renders a server's Connections as a one-level tree mirroring the host:
-    /// orchestrators with children become `DisclosureGroup`s. Read-only here —
-    /// the tree is designated on the host Mac and arrives over the wire.
+    /// Multi-level tree mirroring the host Mac sidebar (#136). Read-only — the tree
+    /// is designated on the host and arrives over the wire.
     @ViewBuilder
     private func connectionTree(_ connections: [InstanceItem]) -> some View {
-        let orchestratorIDs = Set(connections.filter { $0.role == .orchestrator }.map(\.id))
-        let childrenByParent = Dictionary(grouping: connections.filter {
-            guard let p = $0.parentID else { return false }
-            return orchestratorIDs.contains(p)
-        }, by: { $0.parentID! })
+        let ids = Set(connections.map(\.id))
         let roots = connections.filter { item in
             guard let p = item.parentID else { return true }
-            return !orchestratorIDs.contains(p)
+            return !ids.contains(p)
         }
-
         ForEach(roots) { root in
-            if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
-                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
-                    ForEach(kids) { kid in ConnectionRow(instance: kid).tag(kid.id) }
-                } label: {
-                    ConnectionRow(instance: root).tag(root.id)
+            iOSTreeNode(instance: root, connections: connections, depth: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func iOSTreeNode(instance: InstanceItem, connections: [InstanceItem], depth: Int) -> some View {
+        let children = connections.filter { $0.parentID == instance.id }
+        if instance.role == .orchestrator, !children.isEmpty {
+            DisclosureGroup(isExpanded: expansionBinding(instance.id)) {
+                ForEach(children) { child in
+                    iOSTreeNode(instance: child, connections: connections, depth: depth + 1)
                 }
-            } else {
-                ConnectionRow(instance: root).tag(root.id)
+            } label: {
+                ConnectionRow(instance: instance)
+                    .tag(instance.id)
+                    .padding(.leading, CGFloat(depth) * 10)
             }
+        } else if !children.isEmpty {
+            DisclosureGroup(isExpanded: expansionBinding(instance.id)) {
+                ForEach(children) { child in
+                    iOSTreeNode(instance: child, connections: connections, depth: depth + 1)
+                }
+            } label: {
+                ConnectionRow(instance: instance)
+                    .tag(instance.id)
+                    .padding(.leading, CGFloat(depth) * 10)
+            }
+        } else {
+            ConnectionRow(instance: instance)
+                .tag(instance.id)
+                .padding(.leading, CGFloat(depth) * 10)
         }
     }
 

@@ -454,20 +454,19 @@ public actor OrchestrationMCPServer {
         [
             "name": "delegate",
             "description": """
-                Delegate a task to one of your named child agents and return its result. \
-                Each child is a separate, observable Connection with its own tools — \
-                a leaf worker, not a nested orchestrator.
+                Delegate a task to one of your named descendant Connections and return its result. \
+                Each descendant is a separate, observable Connection — a leaf worker or a \
+                sub-orchestrator that may further delegate.
 
                 WHEN TO USE: You are a fleet orchestrator (API/local brain). Do NOT perform \
                 substantial work yourself (writing code, running commands, deep \
                 analysis). Instead, decompose the work into cohesive units and \
-                delegate each to the appropriate child agent by name. Synthesize \
-                their results into a final deliverable.
+                delegate each to the appropriate descendant by name. Synthesize \
+                all results into a final deliverable.
 
-                PARALLEL DELEGATION: You may call this tool multiple times \
-                concurrently for independent subtasks. Each call blocks until \
-                that child finishes (or times out), but concurrent calls run in \
-                parallel.
+                PARALLEL DELEGATION: Call this tool multiple times in one turn for \
+                independent subtasks — concurrent calls run in parallel. Each call blocks \
+                until that descendant finishes (or times out).
 
                 TASK SIZING: Each delegation should be a self-contained task large \
                 enough to warrant its own reasoning — not a single-line edit. The \
@@ -488,7 +487,7 @@ public actor OrchestrationMCPServer {
                 "properties": [
                     "child": [
                         "type": "string",
-                        "description": "Name of the child agent to delegate to.",
+                        "description": "Name of the descendant to delegate to (direct child or deeper in your subtree).",
                     ],
                     "task": [
                         "type": "string",

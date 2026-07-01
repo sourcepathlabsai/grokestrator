@@ -228,8 +228,8 @@ struct SidebarView: View {
             } else if model.supportsFleetOrchestration(for: instance) {
                 Button("Make Orchestrator") { model.setRole(.orchestrator, for: instance) }
             }
-            if instance.role == .agent, model.supportsFleetOrchestration(for: instance) {
-                let parents = model.localFleetOrchestrators.filter { $0.id != instance.id }
+            if model.supportsFleetOrchestration(for: instance) {
+                let parents = model.validParentCandidates(for: instance)
                 Menu("Parent") {
                     Button(instance.parentID == nil ? "✓ None" : "None") {
                         model.setParent(nil, for: instance)

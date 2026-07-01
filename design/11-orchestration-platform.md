@@ -269,7 +269,7 @@ design is shaped by reality and the oracle core stays small.
   make them safe; **DB-row triggers** unlock here because they need Phase 3's DB
   (`db.insert` on a watched table = the next agent's wake). This is the "run
   periodically or on an event" capability — gated on guardrails being in place.
-- Multi-level trees; **parallel** delegation + result aggregation.
+- Multi-level trees; **parallel** delegation + result aggregation. ✅ (#136)
 - **Homeostasis**: re-verification cadence, drift detection, retry/escalation policy,
   quarantine management.
 - **Aggregate observability** (health of N nodes/cells, not N chats) — the

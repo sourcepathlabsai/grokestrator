@@ -29,7 +29,7 @@ public actor OpenAICompatSession: AgentSession {
     /// When set, this Node can orchestrate: the `delegate` tool routes here (the
     /// manager installs a handler scoped to this Node's own children). nil ⇒ no
     /// `delegate` tool is offered.
-    private var delegateHandler: (@Sendable (_ child: String, _ task: String) async -> String)?
+    private var delegateHandler: (@Sendable (_ child: String, _ task: String, _ timeout: TimeInterval?) async -> String)?
     private var sessionId: String?
     private var usage = SessionUsage.empty
     private var cancelled = false
@@ -70,7 +70,9 @@ public actor OpenAICompatSession: AgentSession {
 
     /// Install the orchestration handler (manager-provided, scoped to this Node's
     /// children). Enables the `delegate` tool.
-    public func setDelegateHandler(_ handler: @escaping @Sendable (_ child: String, _ task: String) async -> String) {
+    public func setDelegateHandler(
+        _ handler: @escaping @Sendable (_ child: String, _ task: String, _ timeout: TimeInterval?) async -> String
+    ) {
         self.delegateHandler = handler
     }
 
@@ -209,6 +211,13 @@ public actor OpenAICompatSession: AgentSession {
                 return
             }
 
+            struct PendingCall {
+                let id: String
+                let name: String
+                let argsJSON: String
+                var withheld: String?
+            }
+            var pending: [PendingCall] = []
             for call in toolCalls {
                 if cancelled { break }
                 let id = call["id"] as? String ?? UUID().uuidString
@@ -217,25 +226,45 @@ public actor OpenAICompatSession: AgentSession {
                 let argsJSON = fn["arguments"] as? String ?? "{}"
                 emit(.toolCall(ToolCallEvent(sessionId: session, toolCallId: id, toolName: name,
                                              arguments: argsPreview(argsJSON))))
-                // Design-oracle (design/13): evaluate the proposed tool call. In shadow
-                // mode, log only. In active mode, WITHHOLD on any non-allow verdict — the
-                // API loop has NO human-approval channel, so `.escalate` ("needs review")
-                // cannot be surfaced to a human; proceeding unreviewed would defeat
-                // enforcement. So both `.block` and `.escalate` fail safe to a withhold here.
-                // (The dangerous cases — destructive shell, unknown tools — are `.escalate`,
-                // not `.block`, so blocking only `.block` would let them through.)
                 let verdict = shadowVerdict(name: name, argsJSON: argsJSON)
                 NSLog("%@", "[oracle] \(oracleEnforcement == .active ? "enforce" : "shadow") (api): \(verdict.summary)")
+                var withheld: String?
                 if oracleEnforcement == .active && verdict.outcome != .allow {
                     let verb = verdict.outcome == .block ? "blocked" : "withheld (needs human review — unavailable for this brain)"
-                    let reason = "Oracle \(verb): \(verdict.rationale)"
-                    emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: reason, isError: true)))
-                    messages.append(["role": "tool", "tool_call_id": id, "content": reason])
-                    continue
+                    withheld = "Oracle \(verb): \(verdict.rationale)"
                 }
-                let (result, isError) = await executeTool(name: name, argumentsJSON: argsJSON)
-                emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: id, result: result, isError: isError)))
-                messages.append(["role": "tool", "tool_call_id": id, "content": result])
+                pending.append(PendingCall(id: id, name: name, argsJSON: argsJSON, withheld: withheld))
+            }
+
+            // Parallel fan-out: independent `delegate` calls in one tool round (#136).
+            var outcomes: [Int: (String, Bool)] = [:]
+            await withTaskGroup(of: (Int, String, Bool).self) { group in
+                for (idx, call) in pending.enumerated() where call.withheld == nil && call.name == "delegate" {
+                    group.addTask { [argsJSON = call.argsJSON] in
+                        let (result, isError) = await self.executeDelegate(argumentsJSON: argsJSON)
+                        return (idx, result, isError)
+                    }
+                }
+                for await item in group { outcomes[item.0] = (item.1, item.2) }
+            }
+
+            for (idx, call) in pending.enumerated() {
+                if cancelled { break }
+                let result: String
+                let isError: Bool
+                if let withheld = call.withheld {
+                    result = withheld
+                    isError = true
+                } else if let cached = outcomes[idx] {
+                    result = cached.0
+                    isError = cached.1
+                } else {
+                    let executed = await executeTool(name: call.name, argumentsJSON: call.argsJSON)
+                    result = executed.0
+                    isError = executed.1
+                }
+                emit(.toolResult(ToolResultEvent(sessionId: session, toolCallId: call.id, result: result, isError: isError)))
+                messages.append(["role": "tool", "tool_call_id": call.id, "content": result])
             }
             // loop again with the tool results in context
         }
@@ -312,11 +341,14 @@ public actor OpenAICompatSession: AgentSession {
                    ["path": ["type": "string"], "content": ["type": "string"]], ["path", "content"]),
         toolSchema("run_command", "Run a shell command in the working directory and return combined stdout/stderr.",
                    ["command": ["type": "string"]], ["command"]),
-        toolSchema("delegate", "Delegate a sub-task to a named child Connection and return its result. "
-                   + "You are a fleet orchestrator — do not do the work yourself. "
-                   + "Children should return a JSON finding envelope (envelope_version, status, summary, findings, gaps). "
-                   + "`child` is the child's name; `task` is the full prompt.",
-                   ["child": ["type": "string"], "task": ["type": "string"]], ["child", "task"]),
+        toolSchema("delegate", "Delegate a sub-task to a named descendant Connection and return its result. "
+                   + "You are a fleet orchestrator — decompose work and delegate; children may be leaf workers "
+                   + "or sub-orchestrators that further delegate. "
+                   + "Call this tool multiple times in one turn for independent subtasks — they run in parallel. "
+                   + "Synthesize all results into your final deliverable. "
+                   + "Children should return a JSON finding envelope (envelope_version, status, summary, findings, gaps).",
+                   ["child": ["type": "string"], "task": ["type": "string"], "timeout": ["type": "integer"]],
+                   ["child", "task"]),
     ] }
 
     private static func toolSchema(_ name: String, _ desc: String,
@@ -334,6 +366,15 @@ public actor OpenAICompatSession: AgentSession {
         let url = p.hasPrefix("/") ? URL(fileURLWithPath: p) : base.appendingPathComponent(p)
         let std = url.standardizedFileURL.path
         return std == base.path || std.hasPrefix(base.path + "/") ? std : nil
+    }
+
+    private func executeDelegate(argumentsJSON: String) async -> (String, Bool) {
+        guard let handler = delegateHandler else { return ("delegation not available for this node", true) }
+        let args = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)) as? [String: Any]) ?? [:]
+        let child = args["child"] as? String ?? ""
+        let task = args["task"] as? String ?? ""
+        let timeout = (args["timeout"] as? Int).map { TimeInterval($0) }
+        return (cap(await handler(child, task, timeout)), false)
     }
 
     private func executeTool(name: String, argumentsJSON: String) async -> (String, Bool) {
@@ -361,10 +402,7 @@ public actor OpenAICompatSession: AgentSession {
             guard let command = args["command"] as? String else { return ("error: missing command", true) }
             return await Self.runCommand(command, cwd: cwd, cap: outputCap)
         case "delegate":
-            guard let handler = delegateHandler else { return ("delegation not available for this node", true) }
-            let child = args["child"] as? String ?? ""
-            let task = args["task"] as? String ?? ""
-            return (cap(await handler(child, task)), false)
+            return await executeDelegate(argumentsJSON: argumentsJSON)
         default:
             return ("error: unknown tool \(name)", true)
         }

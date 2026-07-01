@@ -33,6 +33,15 @@ extension GrokestratorModel {
         instances.filter { $0.serverID == nil && showsFleetTree(for: $0) }
     }
 
+    /// Fleet orchestrators that may parent `item` without creating a cycle (#136).
+    func validParentCandidates(for item: InstanceItem) -> [InstanceItem] {
+        guard item.serverID == nil, supportsFleetOrchestration(for: item) else { return [] }
+        return localFleetOrchestrators.filter { cand in
+            cand.id != item.id
+                && !OrchestrationTree.wouldCreateCycle(child: item.id, candidateParent: cand.id, in: connections)
+        }
+    }
+
     // MARK: - Legacy ACP fleet anti-pattern (#166)
 
     private static let dismissedLegacyKey = "grokestrator.dismissedLegacyACPOrch"
@@ -201,17 +210,6 @@ extension GrokestratorModel {
     }
 
     private func resolveDescendant(named name: String, under parentID: UUID) -> ManagedConnection? {
-        let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        var frontier: Set<UUID> = [parentID]
-        let active = connections.filter { !$0.archived }
-        while !frontier.isEmpty {
-            let children = active.filter { conn in
-                guard let p = conn.parentID else { return false }
-                return frontier.contains(p)
-            }
-            if let hit = children.first(where: { $0.name.lowercased() == key }) { return hit }
-            frontier = Set(children.map(\.id))
-        }
-        return nil
+        OrchestrationTree.resolveDescendant(named: name, under: parentID, in: connections)
     }
 }
