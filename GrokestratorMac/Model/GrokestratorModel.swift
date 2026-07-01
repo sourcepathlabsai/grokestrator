@@ -169,6 +169,11 @@ final class GrokestratorModel {
                 await orchestrationMCP.setTriggerFireHandler { caller, event, payload in
                     await self.handleTriggerFire(callerID: caller, event: event, payload: payload)
                 }
+                await orchestrationMCP.setOracleProposeHandler { caller, target, markdown, rationale in
+                    await MainActor.run {
+                        self.handleOraclePropose(callerID: caller, target: target, markdown: markdown, rationale: rationale)
+                    }
+                }
                 OrchestrationMCPServer.isActive = true
                 NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
             } catch {

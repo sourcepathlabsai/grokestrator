@@ -154,6 +154,25 @@ extension GrokestratorModel {
         }
     }
 
+    func handleOraclePropose(callerID: UUID?, target: String, markdown: String, rationale: String) -> String {
+        guard let callerID,
+              let conn = connections.first(where: { $0.id == callerID }),
+              let wd = conn.workingDirectory, !wd.isEmpty else {
+            return "oracle.propose requires a Connection with a working directory."
+        }
+        guard let proposal = CorpusProposalStore.append(
+            target: target,
+            markdown: markdown,
+            rationale: rationale,
+            nodeID: callerID,
+            nodeName: conn.name,
+            projectDirectory: wd
+        ) else {
+            return "Rejected proposal — target must be a design/*.md path (e.g. design/oracle/invariants/INV-example.md)."
+        }
+        return "Queued corpus proposal \(proposal.id.uuidString.prefix(8)) for \(proposal.targetPath). Review in Settings → Oracle."
+    }
+
     func handleTriggerFire(callerID: UUID?, event: String, payload: String) async -> String {
         let matches = orchestrationTriggers.matchingEventTriggers(event: event, parentID: callerID)
         guard !matches.isEmpty else { return "No triggers matched event \"\(event)\"." }

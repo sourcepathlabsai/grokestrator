@@ -1,5 +1,22 @@
 # Grokestrator — Release Notes
 
+## v0.3.6-alpha — 2026-07-01
+
+### Verify-against-intent (#141)
+
+- **`IntentOracle`** — shadow-checks each turn's final output against active design-oracle
+  invariants (heuristic alignment, not enforcement).
+- **`IntentLedger`** — verdicts persist to `intent-verdicts.jsonl`; Instance Inspector
+  shows recent intent-oracle events per node.
+
+### Corpus maintenance (#142)
+
+- **`[[CORPUS_PROPOSAL]]` blocks** — agents can propose oracle edits inline; parsed from
+  assistant text on all nodes.
+- **`oracle.propose` MCP** — orchestrator nodes submit proposals via orchestration MCP.
+- **Review queue** — Settings → Oracle tab lists pending proposals; approve stages files
+  under `<project>/design/oracle/proposed/` for human merge.
+
 ## v0.3.5-alpha — 2026-07-01
 
 ### Role restart + clear history (#185)

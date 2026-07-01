@@ -15,6 +15,7 @@ struct InstanceInspectorView: View {
     /// Recent design-oracle verdicts for the selected node (read from the ledger; not
     /// reactive, so we reload on selection + via the section's refresh).
     @State private var oracleEvents: [GovernanceEvent] = []
+    @State private var intentEvents: [IntentVerificationEvent] = []
     @State private var orchestrationTables: [String] = []
     @State private var orchestrationDBText: String = ""
 
@@ -27,6 +28,7 @@ struct InstanceInspectorView: View {
                         instance.conversation.loadCapabilities()
                         instance.conversation.refreshUsage()
                         oracleEvents = OracleLedger.shared.recent(nodeID: instance.id, limit: 30)
+                        intentEvents = IntentLedger.shared.recent(nodeID: instance.id, limit: 20)
                         if model.showsFleetTree(for: instance) {
                             orchestrationTables = await model.orchestrationTables()
                             orchestrationDBText = await model.orchestrationDBSummary()
@@ -56,6 +58,7 @@ struct InstanceInspectorView: View {
                     if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps)
                     oracleSection(instance)
+                    intentSection(instance)
                     if model.showsFleetTree(for: instance) {
                         orchestrationDBSection(instance)
                     }
@@ -227,6 +230,51 @@ struct InstanceInspectorView: View {
                 }
             }
         }
+    }
+
+    private func intentSection(_ instance: InstanceItem) -> some View {
+        section("Intent Oracle", systemImage: "scope", count: intentEvents.isEmpty ? nil : intentEvents.count) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 14) {
+                    oracleStat("aligned", intentEvents.filter(\.aligned).count, .green)
+                    oracleStat("flagged", intentEvents.filter { !$0.aligned }.count, .orange)
+                    Spacer()
+                    Button { intentEvents = IntentLedger.shared.recent(nodeID: instance.id, limit: 20) } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderless).help("Refresh intent checks")
+                }
+                Text("Shadow verify-against-intent — checks each completed turn against design invariants.")
+                    .font(Theme.body(10)).foregroundStyle(Theme.textFaint)
+                if intentEvents.isEmpty {
+                    Text("No intent checks yet — recorded after each completed turn.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textMuted).padding(.top, 2)
+                } else {
+                    Divider().overlay(Theme.border)
+                    ForEach(intentEvents.prefix(8)) { event in
+                        intentRow(event)
+                    }
+                }
+            }
+        }
+    }
+
+    private func intentRow(_ event: IntentVerificationEvent) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(event.aligned ? "ALIGNED" : "FLAGGED")
+                    .font(Theme.mono(10))
+                    .bold()
+                    .foregroundStyle(event.aligned ? .green : .orange)
+                Spacer()
+                Text(event.at, style: .time).font(Theme.body(9)).foregroundStyle(Theme.textFaint)
+            }
+            Text(event.rationale)
+                .font(Theme.body(10))
+                .foregroundStyle(Theme.textMuted)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 2)
     }
 
     private func oracleStat(_ label: String, _ value: Int, _ tint: Color) -> some View {

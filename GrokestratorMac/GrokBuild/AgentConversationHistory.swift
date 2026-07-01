@@ -56,6 +56,11 @@ public actor AgentConversationHistory {
         turns.append(AgentTurn(userPrompt: userPrompt, messages: messages))
     }
 
+    /// The user prompt for the in-flight turn, if any.
+    public func currentTurnPrompt() -> String? {
+        currentPrompt
+    }
+
     /// Call when the user sends a new prompt.
     public func startNewTurn(prompt: String) {
         if !currentTurnMessages.isEmpty || currentPrompt != nil {

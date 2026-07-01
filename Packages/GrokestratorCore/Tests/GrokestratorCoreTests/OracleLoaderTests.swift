@@ -128,7 +128,8 @@ struct OracleLoaderTests {
         #expect(preamble.contains("INV-cwd-confinement"))
         #expect(preamble.contains("INV-external-comms-reviewed"))
         #expect(preamble.hasPrefix("[Project Design Oracle"))
-        #expect(preamble.hasSuffix("Honor these constraints in every action you take."))
+        #expect(preamble.contains("Honor these constraints in every action you take."))
+        #expect(preamble.contains("CORPUS_PROPOSAL"))
     }
 
     @Test("the SHIPPED design/oracle parses + governs (dogfood)")

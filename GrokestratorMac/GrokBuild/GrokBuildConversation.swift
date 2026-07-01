@@ -43,6 +43,9 @@ public actor GrokBuildConversation {
     /// after orientation, before choicesInstruction. Consumed on first priming only.
     private var sessionGistPreamble: String?
 
+    /// Project working directory for verify-against-intent and corpus proposals (#141/#142).
+    private let projectDirectory: String?
+
     /// Active broadcast subscribers (local Mac UI + every remote GKSC subscribed
     /// to this Connection). Each receives a `.snapshot` on join, then `.update`
     /// for every `ConversationUpdate` the conversation produces — regardless of
@@ -60,7 +63,16 @@ public actor GrokBuildConversation {
     discrete choices to pick.
     """
 
-    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil, orientationPreamble: String? = nil, sessionGistPreamble: String? = nil) {
+    public init(
+        instanceID: UUID,
+        sessionID: String,
+        client: any AgentSession,
+        persistenceURL: URL? = nil,
+        rolePrompt: String? = nil,
+        orientationPreamble: String? = nil,
+        sessionGistPreamble: String? = nil,
+        projectDirectory: String? = nil
+    ) {
         self.instanceID = instanceID
         self.sessionID = sessionID
         self.client = client
@@ -68,6 +80,7 @@ public actor GrokBuildConversation {
         self.rolePrompt = rolePrompt
         self.orientationPreamble = orientationPreamble
         self.sessionGistPreamble = sessionGistPreamble
+        self.projectDirectory = projectDirectory
     }
 
     /// Update the role/system prompt. Resets `primed` so the next turn re-injects
@@ -266,10 +279,12 @@ public actor GrokBuildConversation {
 
     /// Finalizes the current turn on the actor and returns the captured final answer.
     private func finalizeTurn() async -> String? {
+        let turnPrompt = await history.currentTurnPrompt()
         await history.finishCurrentTurn()
         try? await history.save()
 
         let final = lastFinalAnswer
+        await runOrientationOracle(userPrompt: turnPrompt, finalAnswer: final)
 
         // Clear any tool/permission/question expectations for this turn.
         pendingToolCalls.removeAll()
@@ -277,6 +292,45 @@ public actor GrokBuildConversation {
         pendingQuestions.removeAll()
 
         return final
+    }
+
+    /// Shadow verify-against-intent (#141) + capture corpus proposals (#142).
+    private func runOrientationOracle(userPrompt: String?, finalAnswer: String?) async {
+        guard let projectDirectory, !projectDirectory.isEmpty else { return }
+        let change = finalAnswer ?? ""
+        guard !change.isEmpty else { return }
+
+        let corpus = GovernanceEngine.forProject(directory: projectDirectory).corpus
+        let verdict = IntentOracle.evaluate(
+            changeText: change,
+            userPrompt: userPrompt ?? "",
+            corpus: corpus,
+            workingDirectory: projectDirectory
+        )
+        IntentLedger.shared.record(
+            IntentVerificationEvent(
+                verdict: verdict,
+                nodeID: instanceID,
+                userPrompt: userPrompt,
+                changeText: change
+            )
+        )
+        if !verdict.aligned {
+            NSLog("%@", "[intent-oracle] shadow: \(verdict.summary)")
+        }
+
+        for draft in CorpusProposalParser.parse(change) {
+            if let saved = CorpusProposalStore.append(
+                draft: draft,
+                nodeID: instanceID,
+                nodeName: nil,
+                projectDirectory: projectDirectory
+            ) {
+                broadcast(.sessionStatus(
+                    "Corpus proposal queued for review: \(saved.targetPath) (Settings → Oracle)"
+                ))
+            }
+        }
     }
 
     // `sendPromptAndCollect` was removed when the per-prompt stream went away
