@@ -1,5 +1,46 @@
 # Grokestrator — Release Notes
 
+## v0.3.1-alpha — 2026-07-01
+
+Incremental alpha on v0.3.0. **Dual-path orchestration is now enforced in the app** —
+ACP brains supervise harness subagents; API/local brains use the orchestrated fleet —
+plus first-class editors for both team-template paths.
+
+### Dual-path orchestration (ACP + fleet)
+
+- **Two coordination paths, gated in UI.** grok and Claude Code Connections use the
+  **supervised ACP path** (harness `task` / native subagents). API and local brains use
+  **Create Fleet Team** — child Connections coordinated via `delegate` MCP. The app
+  picks the path from the brain binding; legacy mixed trees get a migration hint.
+- **Harness subagent lineage in the transcript.** When grok delegates via `task`, tool
+  groups show `▸ subagent …` rows enriched from on-disk lineage — type, description, and
+  status — so parallel subagent work is visible without opening grok's files.
+- **Grok Config editor.** Sidebar → **Grok Config…** on an ACP Connection opens a
+  tabbed `.grok/` writer (Connection, Agent, Team, Advanced). Pick a harness template,
+  preview the file diff, and apply to project or user scope — agents, roles, personas,
+  and TOML land where grok expects them.
+
+### Team template editors
+
+- **Fleet team templates (Settings → Teams).** Create and edit custom orchestrated-fleet
+  blueprints — title, summary, members, role prompts, auto-approval. **Draft with grok**
+  and **Draft all prompts** turn plain member descriptions into role prompts in place.
+- **Harness templates (Settings → Teams → Harness).** Built-in presets (Plain, Feature
+  Team, Research Team) plus custom ACP harness templates for **Add Connection** and
+  **Grok Config**. Edit agent, roles, and personas; grok-assisted drafting for each
+  section. Custom templates write `.grok/` files when you apply them.
+
+### Platform / hardening (from dual-path slice)
+
+- **Run view** — sidebar delegation DAG lists active and finished `delegate` runs with
+  status and quick jump to child Connections.
+- **Orchestration SQLite** — per-Mac workflow DB; orchestrators register schemas and
+  read/write via `db.*` MCP tools (inspector shows registered tables).
+- **Verb normalization** — API tool loops and ACP permission adapters map into one
+  canonical governance vocabulary before oracle enforcement.
+
+---
+
 ## v0.3.0-alpha — 2026-06-30
 
 Third alpha. Grokestrator is no longer a grok-only Mac client — it is a **multi-brain
