@@ -48,6 +48,7 @@ public enum OracleLoader {
     static let detectorRegistry: [String: any Detector] = [
         PathEscapeDetector.detectorID: PathEscapeDetector(),
         DestructiveShellDetector.detectorID: DestructiveShellDetector(),
+        ExternalCommsDetector.detectorID: ExternalCommsDetector(),
     ]
 
     /// Render a compact orientation preamble from the project's active invariants, suitable

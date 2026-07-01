@@ -1,5 +1,15 @@
 # Grokestrator — Release Notes
 
+## v0.3.7-alpha — 2026-07-01
+
+### External-comms detector (#140)
+
+- **`ExternalCommsDetector`** — recall-checks outbound email, Slack/Discord webhooks,
+  `curl` POSTs, and similar external communication shapes; suspect findings escalate
+  to human review.
+- **Portable rules** — `INV-external-comms-reviewed.md` gains inline `## Detect` patterns
+  so any runtime can enforce from the repo without app-specific hooks.
+
 ## v0.3.6-alpha — 2026-07-01
 
 ### Verify-against-intent (#141)

@@ -89,3 +89,62 @@ public struct DestructiveShellDetector: Detector {
         return findings
     }
 }
+
+/// High-recall / **suspect**. Flags actions that emit to parties outside the local
+/// system — email, chat posts, webhooks, public API posts. Recall by nature (a `curl -d`
+/// may be an internal health check), so it flags and defers to human review. Needs only
+/// payload / semi-structured args ⇒ works at the ACP boundary too.
+public struct ExternalCommsDetector: Detector {
+    public static let detectorID = "DET-external-comms"
+    public let id = ExternalCommsDetector.detectorID
+    public let invariantID = "INV-external-comms-reviewed"
+    public let minimumFidelity: ProposedAction.Fidelity = .semiStructured
+    public init() {}
+
+    /// Patterns for outbound communication shapes. Deliberately high-recall.
+    private static let patterns: [(name: String, regex: String)] = [
+        ("send email",          #"(?i)\bsend\s+email\b"#),
+        ("smtp",                #"(?i)\bsmtp\b"#),
+        ("sendmail",            #"(?i)\b(sendmail|mail\s+-s)\b"#),
+        ("mailto",              #"(?i)mailto:"#),
+        ("slack webhook",       #"(?i)hooks\.slack\.com"#),
+        ("slack message",       #"(?i)\bslack\b.*\b(post|send|message)\b"#),
+        ("discord webhook",     #"(?i)discord\.com/api/webhooks"#),
+        ("curl POST",           #"(?i)\bcurl\b[^\n]*(-X\s+POST|--request\s+POST)\b"#),
+        ("tweet",               #"(?i)\b(tweet|twurl)\b"#),
+        ("gh comment",            #"(?i)\bgh\s+(issue|pr)\s+comment\b"#),
+        ("post to channel",     #"(?i)\bpost\s+(to|message)\b"#),
+        ("webhook",             #"(?i)\bwebhook\b"#),
+        ("notify user",           #"(?i)\bnotify\s+user\b"#),
+    ]
+
+    private static let mcpToolPattern = #"(?i)(send|post|email|notify|tweet|slack|mail|message)"#
+
+    public func examine(_ action: ProposedAction) -> [Finding] {
+        let haystack = Self.haystack(for: action)
+        guard !haystack.isEmpty else { return [] }
+        var findings: [Finding] = []
+        for p in Self.patterns where haystack.range(of: p.regex, options: .regularExpression) != nil {
+            findings.append(Finding(detector: id, invariantID: invariantID, confidence: .suspect,
+                                    severity: .high, trips: true,
+                                    note: "matched '\(p.name)' in: \(haystack.prefix(120))"))
+        }
+        if let tool = action.provenance.mcpTool,
+           tool.range(of: Self.mcpToolPattern, options: .regularExpression) != nil {
+            findings.append(Finding(detector: id, invariantID: invariantID, confidence: .suspect,
+                                    severity: .high, trips: true,
+                                    note: "MCP tool '\(tool)' looks like external communication"))
+        }
+        return findings
+    }
+
+    private static func haystack(for action: ProposedAction) -> String {
+        var parts: [String] = [action.rawVerb]
+        if let payload = action.payloadText { parts.append(payload) }
+        if let args = action.arguments {
+            for value in args.values where !value.isEmpty { parts.append(value) }
+        }
+        if let tool = action.provenance.mcpTool { parts.append(tool) }
+        return parts.joined(separator: " ")
+    }
+}
