@@ -152,7 +152,8 @@ public actor GrokBuildConversation {
         pendingPermissions.removeAll()
         pendingQuestions.removeAll()
         primed = false
-        sessionGistPreamble = nil
+        // Keep `sessionGistPreamble` — clearing the display transcript must not drop a
+        // pending role-transition gist before the first reprimed turn (#185).
         for (_, cont) in subscribers { cont.yield(.snapshot([])) }
     }
 

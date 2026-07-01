@@ -38,7 +38,10 @@ public actor GrokBuildManager {
     /// Restart a Node against a (possibly changed) config — e.g. after switching its
     /// brain. Drops the cached conversation so the next `conversation(for:)` rebinds
     /// to the **new** backend session; the transcript reloads from persisted history.
-    public func restartInstance(_ config: ManagedInstance) async throws -> ManagedInstance {
+    public func restartInstance(_ config: ManagedInstance, trackTransition: Bool = true) async throws -> ManagedInstance {
+        if trackTransition { beginTransition(config.id) }
+        defer { if trackTransition { endTransition(config.id) } }
+
         // End the old conversation's broadcast streams first: resilient subscribers
         // (LiveConversationDriver) re-subscribe and re-bind to the rebuilt
         // conversation, so the live UI follows the brain swap without a reopen.
@@ -46,9 +49,11 @@ public actor GrokBuildManager {
         await server.stopInstance(id: config.id)
         activeConversations.removeValue(forKey: config.id)
         let updated = try await startInstance(config)
-        // Eagerly rebuild the conversation so it's live before any subscriber races
-        // back in (and so a fresh `.snapshot` of reloaded history is ready to replay).
-        _ = try? await conversation(for: config.id)
+        // Rebuild the conversation and finish ACP `initialize` + `session/new` (and MCP
+        // startup) before callers can prompt — absorbs init latency here instead of on
+        // the user's first message after a role restart (#185).
+        let convo = try await conversation(for: config.id)
+        _ = try await convo.capabilities()
         return updated
     }
 
@@ -109,6 +114,11 @@ public actor GrokBuildManager {
             await setRolePrompt(for: id, value)
             return nil
         case .restartWithGist, .restartFresh:
+            // Hold prompts and clear-history until gist compaction + restart + handshake
+            // finish — prevents racing the old client or a half-ready new one (#185).
+            beginTransition(id)
+            defer { endTransition(id) }
+
             var gistWire: String?
             if mode == .restartWithGist {
                 gistWire = await sessionGistWire(for: id)
@@ -148,7 +158,7 @@ public actor GrokBuildManager {
 
             let isLive = await server.getClient(for: id) != nil
             if isLive {
-                return try await restartInstance(updated)
+                return try await restartInstance(updated, trackTransition: false)
             }
             await setRolePrompt(for: id, value)
             return updated
@@ -309,6 +319,31 @@ public actor GrokBuildManager {
     private var activeConversations: [UUID: GrokBuildConversation] = [:]
     /// Gist preambles waiting to be injected on the next conversation handshake.
     private var pendingSessionGists: [UUID: String] = [:]
+    /// Instances mid role-restart / brain swap — `clearHistory` and `sendPrompt` wait here.
+    private var transitionDepth: [UUID: Int] = [:]
+
+    /// True while a role transition or `restartInstance` is in flight for this Connection.
+    public func isInstanceTransitioning(_ id: UUID) -> Bool {
+        (transitionDepth[id] ?? 0) > 0
+    }
+
+    private func beginTransition(_ id: UUID) {
+        transitionDepth[id, default: 0] += 1
+    }
+
+    private func endTransition(_ id: UUID) {
+        guard let depth = transitionDepth[id] else { return }
+        if depth <= 1 { transitionDepth.removeValue(forKey: id) }
+        else { transitionDepth[id] = depth - 1 }
+    }
+
+    /// Blocks until no restart/role transition is running for this instance.
+    private func waitUntilReady(for id: UUID) async {
+        while isInstanceTransitioning(id) {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+    }
 
     /// How a role-prompt edit should take effect. See issue #177 / `design/12`.
     public enum RoleTransitionMode: Sendable {
@@ -421,6 +456,7 @@ public actor GrokBuildManager {
     /// Returns the prompt's stable UUID so the caller can cancel later if needed.
     @discardableResult
     public func sendPrompt(to instanceID: UUID, prompt: String) async throws -> UUID {
+        await waitUntilReady(for: instanceID)
         let convo = try await conversation(for: instanceID)
         return try await convo.sendPrompt(prompt)
     }
@@ -449,6 +485,7 @@ public actor GrokBuildManager {
     /// snapshot to every subscriber, so all connected devices reset together.
     /// No-op if no conversation exists yet for the instance.
     public func clearHistory(for instanceID: UUID) async {
+        await waitUntilReady(for: instanceID)
         guard let convo = activeConversations[instanceID] else { return }
         await convo.clearHistory()
     }

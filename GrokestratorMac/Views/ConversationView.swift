@@ -26,6 +26,21 @@ struct ConversationView: View {
 
     private var conversation: ConversationViewModel { instance.conversation }
 
+    private var canClearHistory: Bool {
+        !conversation.entries.isEmpty && instance.status != .starting
+    }
+
+    private var clearHistoryHelp: String {
+        if instance.status == .starting {
+            return "Wait until the Connection finishes restarting before clearing history"
+        }
+        return "Clear this conversation's chat history"
+    }
+
+    private var clearHistoryDialogMessage: String {
+        "This permanently erases the transcript for “\(instance.name)” on every connected device. The agent process keeps running."
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ConnectingBanner(conversation: conversation)
@@ -74,8 +89,8 @@ struct ConversationView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .help("Clear this conversation's chat history")
-                .disabled(conversation.entries.isEmpty)
+                .help(clearHistoryHelp)
+                .disabled(!canClearHistory)
             }
         }
         .confirmationDialog(
@@ -86,7 +101,7 @@ struct ConversationView: View {
             Button("Clear History", role: .destructive) { conversation.clearHistory() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently erases the transcript for “\(instance.name)” on every connected device. The grok process keeps running.")
+            Text(clearHistoryDialogMessage)
         }
         .task {
             conversation.loadCapabilities()
