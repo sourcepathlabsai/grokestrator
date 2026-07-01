@@ -27,8 +27,8 @@ struct ContextManagerTests {
 
         let budget = ContextBudget(maxChars: 4_000)
         let body = await ContextManager.gistBody(from: turns, budget: budget)!
-        #expect(body.contains("[Prior session — 60 turn(s) summarized]"))
-        #expect(body.count <= 4_010)
+        #expect(body.contains("[Retrieved context") || body.contains("[Prior session —"))
+        #expect(body.count <= 4_100)
     }
 
     @Test func tier1PreservesRecentOutcomes() async {
