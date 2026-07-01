@@ -38,6 +38,12 @@ public actor OrchestrationMCPServer {
     private var nodeConfigureHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ policyJSON: String) async -> String)?
     private var triggerScheduleHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ when: String, _ task: String) async -> String)?
     private var triggerFireHandler: (@Sendable (_ callerID: UUID?, _ event: String, _ payload: String) async -> String)?
+    private var oracleProposeHandler: (@Sendable (
+        _ callerID: UUID?,
+        _ target: String,
+        _ markdown: String,
+        _ rationale: String
+    ) async -> String)?
 
     /// Header grok forwards on every MCP request, carrying the calling Node's id.
     public static let nodeHeader = "X-Grokestrator-Node"
@@ -63,6 +69,15 @@ public actor OrchestrationMCPServer {
 
     public func setTriggerFireHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ event: String, _ payload: String) async -> String) {
         self.triggerFireHandler = handler
+    }
+
+    public func setOracleProposeHandler(_ handler: @escaping @Sendable (
+        _ callerID: UUID?,
+        _ target: String,
+        _ markdown: String,
+        _ rationale: String
+    ) async -> String) {
+        self.oracleProposeHandler = handler
     }
 
     /// Wire the embedded orchestration DB (Phase 3). Safe to call before/after start.
@@ -155,6 +170,14 @@ public actor OrchestrationMCPServer {
             let text = await Self.runOffActor { await handler?(callerID, event, payload) }
                 ?? "trigger.fire is not wired yet."
             return (text, false)
+        case "oracle.propose":
+            let target = args["target"] as? String ?? ""
+            let markdown = args["markdown"] as? String ?? ""
+            let rationale = args["rationale"] as? String ?? ""
+            let handler = oracleProposeHandler
+            let text = await Self.runOffActor { await handler?(callerID, target, markdown, rationale) }
+                ?? "oracle.propose is not wired yet."
+            return (text, false)
         case "db.createSchema", "db.insert", "db.query", "db.update", "db.listTables":
             return await runDBTool(name: name!, args: args, callerID: callerID)
         default:
@@ -246,10 +269,33 @@ public actor OrchestrationMCPServer {
         return .text(String(describing: value))
     }
 
+    private static var oracleProposeTool: [String: Any] {
+        [
+            "name": "oracle.propose",
+            "description": """
+                Propose an update to the project's design oracle or design docs. \
+                The proposal is queued for human review in Grokestrator Settings → Oracle; \
+                nothing is merged until approved.
+                """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "target": [
+                        "type": "string",
+                        "description": "Repo-relative path under design/, e.g. design/oracle/invariants/INV-example.md",
+                    ],
+                    "markdown": ["type": "string", "description": "Full proposed markdown file body."],
+                    "rationale": ["type": "string", "description": "One-line why this change belongs in the corpus."],
+                ],
+                "required": ["target", "markdown"],
+            ],
+        ]
+    }
+
     private static var allToolSchemas: [[String: Any]] {
         [
             delegateToolSchema, taskReportTool, nodeConfigureTool,
-            triggerScheduleTool, triggerFireTool,
+            triggerScheduleTool, triggerFireTool, oracleProposeTool,
             dbCreateSchemaTool, dbInsertTool, dbQueryTool, dbUpdateTool, dbListTablesTool,
         ]
     }

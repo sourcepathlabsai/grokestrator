@@ -409,7 +409,8 @@ public actor GrokBuildManager {
             persistenceURL: historyURL,
             rolePrompt: instanceStates[instanceID]?.rolePrompt ?? config?.rolePrompt,
             orientationPreamble: orientation,
-            sessionGistPreamble: consumePendingSessionGist(for: instanceID)
+            sessionGistPreamble: consumePendingSessionGist(for: instanceID),
+            projectDirectory: cwd
         )
 
         try await convo.loadHistoryIfAvailable()

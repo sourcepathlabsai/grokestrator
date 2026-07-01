@@ -39,6 +39,9 @@ struct SettingsView: View {
             teamsTab
                 .tabItem { Label("Teams", systemImage: "person.3") }
                 .frame(minWidth: 560, minHeight: 420)
+            oracleTab
+                .tabItem { Label("Oracle", systemImage: "lock.shield") }
+                .frame(minWidth: 560, minHeight: 420)
         }
         .onAppear {
             guard !tierMapLoaded else { return }
@@ -53,6 +56,12 @@ struct SettingsView: View {
         .sheet(item: $editingTeamTemplate) { t in TeamTemplateEditorView(model: model, existing: t) }
         .sheet(isPresented: $addingHarnessTemplate) { HarnessTemplateEditorView(model: model) }
         .sheet(item: $editingHarnessTemplate) { t in HarnessTemplateEditorView(model: model, existing: t) }
+    }
+
+    // MARK: Design oracle
+
+    private var oracleTab: some View {
+        CorpusProposalsView(model: model)
     }
 
     // MARK: Team templates

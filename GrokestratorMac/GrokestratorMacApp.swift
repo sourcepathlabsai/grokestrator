@@ -11,6 +11,7 @@ struct GrokestratorMacApp: App {
         // Point the design-oracle ledger at host-local storage so shadow verdicts
         // accumulate across sessions (the evidence the oracle is working).
         OracleLedger.shared.configure(fileURL: ConnectionStore.supportDir.appendingPathComponent("oracle-verdicts.jsonl"))
+        IntentLedger.shared.configure(fileURL: ConnectionStore.supportDir.appendingPathComponent("intent-verdicts.jsonl"))
         // Register the model with the AppDelegate so applicationWillTerminate
         // can terminate child grok processes on quit.
         AppDelegate.model = model

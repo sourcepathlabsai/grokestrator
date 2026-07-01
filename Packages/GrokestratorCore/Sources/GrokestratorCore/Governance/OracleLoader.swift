@@ -71,6 +71,17 @@ public enum OracleLoader {
             lines.append("- [\(sev)] \(inv.id): \(inv.statement)")
         }
         lines.append("Honor these constraints in every action you take.")
+        lines.append("")
+        lines.append(
+            "To propose oracle/design updates (human-curated before merge), append a block:"
+        )
+        lines.append("[[CORPUS_PROPOSAL")
+        lines.append("target: design/oracle/invariants/INV-example.md")
+        lines.append("rationale: one-line why")
+        lines.append("---")
+        lines.append("(markdown body)")
+        lines.append("]]")
+        lines.append("Orchestrator Nodes may also call the `oracle.propose` MCP tool.")
         return lines.joined(separator: "\n")
     }
 
