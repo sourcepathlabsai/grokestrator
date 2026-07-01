@@ -279,7 +279,15 @@ public actor GrokBuildSessionClient {
         // files. Shape verified against grok 0.2.22: name + type:"http" + url +
         // headers (array, required). See design/11-orchestration-platform.md.
         var mcpServers: [JSONValue] = []
-        if OrchestrationMCPServer.isActive {
+        let connConfig = ConnectionStore.load().first { $0.id == handle.id }
+        let tierMap = ConnectionStore.loadTierMap()
+        let catalog = ConnectionStore.loadBrainCatalog()
+        let injectOrchestrationMCP = connConfig.map { cfg in
+            OrchestrationMCPServer.isActive
+                && cfg.role == .orchestrator
+                && OrchestrationSupport.mode(for: cfg.brain, catalog: catalog, tierMap: tierMap) == .orchestratedFleet
+        } ?? false
+        if injectOrchestrationMCP {
             // Tag the session with this Node's id (grok forwards the header on
             // every MCP request) so the server can scope `delegate` to *this*
             // orchestrator's own children. Header shape {name,value} verified.

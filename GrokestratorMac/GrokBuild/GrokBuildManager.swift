@@ -134,11 +134,10 @@ public actor GrokBuildManager {
     /// See `design/11-orchestration-platform.md`.
     public func delegate(callerID: UUID?, toChildNamed name: String, task: String, timeout: TimeInterval = 120) async -> String {
         let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Scope to the *caller's own children* — an orchestrator can only delegate
-        // to the agents parented under it. (One level; deeper trees later.)
+        // Scope to the caller's descendant tree (multi-level fleet, #136).
         let candidates: [ManagedInstance]
         if let callerID {
-            candidates = instanceStates.values.filter { !$0.archived && $0.parentID == callerID }
+            candidates = Self.descendants(of: callerID, in: instanceStates.values.filter { !$0.archived })
         } else {
             candidates = instanceStates.values.filter { !$0.archived }
         }
@@ -161,7 +160,8 @@ public actor GrokBuildManager {
             // Subscribe before prompting so we don't miss the turn's events.
             let stream = try await subscribe(to: target.id)
             _ = try await sendPrompt(to: target.id, prompt: task)
-            result = await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+            let raw = await Self.awaitFinalAnswer(stream, timeout: timeout, child: target.name)
+            result = ChildFindingEnvelope.formatDelegateResult(raw, childName: target.name)
         } catch {
             result = "Delegation to \"\(target.name)\" failed: \(error.localizedDescription)"
         }
@@ -170,8 +170,23 @@ public actor GrokBuildManager {
             delegationRunCallback?(.finished(
                 id: runID,
                 status: Self.inferDelegationStatus(result: result),
-                resultPreview: result
+                resultPreview: String(result.prefix(200))
             ))
+        }
+        return result
+    }
+
+    /// All descendants of `parentID` in the orchestration tree (BFS).
+    private static func descendants(of parentID: UUID, in instances: [ManagedInstance]) -> [ManagedInstance] {
+        var result: [ManagedInstance] = []
+        var frontier: Set<UUID> = [parentID]
+        while !frontier.isEmpty {
+            let children = instances.filter { inst in
+                guard let p = inst.parentID else { return false }
+                return frontier.contains(p)
+            }
+            result.append(contentsOf: children)
+            frontier = Set(children.map(\.id))
         }
         return result
     }
@@ -241,10 +256,17 @@ public actor GrokBuildManager {
         // Let a model-agnostic (API) brain orchestrate too: install the `delegate`
         // handler, scoped to *this* Node's own children (grok Nodes get `delegate`
         // via the Orchestration MCP server instead). Same router as everything else.
-        if let api = client as? OpenAICompatSession {
-            await api.setDelegateHandler { [weak self] child, task in
-                guard let self else { return "orchestrator unavailable" }
-                return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+        let cfg = instanceStates[instanceID] ?? config
+        if let api = client as? OpenAICompatSession, let cfg {
+            let catalog = ConnectionStore.loadBrainCatalog()
+            let tierMap = ConnectionStore.loadTierMap()
+            let fleetOrch = cfg.role == .orchestrator
+                && OrchestrationSupport.mode(for: cfg.brain, catalog: catalog, tierMap: tierMap) == .orchestratedFleet
+            if fleetOrch {
+                await api.setDelegateHandler { [weak self] child, task in
+                    guard let self else { return "orchestrator unavailable" }
+                    return await self.delegate(callerID: instanceID, toChildNamed: child, task: task)
+                }
             }
         }
 
@@ -362,6 +384,11 @@ public actor GrokBuildManager {
     /// This is the primary observation point for the rest of the Mac app.
     public func state(for instanceID: UUID) async -> ConversationState? {
         await activeConversations[instanceID]?.currentState()
+    }
+
+    /// Grok ACP session id — used to read harness subagent lineage on disk.
+    public func sessionID(for instanceID: UUID) async -> String? {
+        await activeConversations[instanceID]?.sessionID
     }
 
     /// Returns the tool calls the agent is currently waiting on for the given instance.

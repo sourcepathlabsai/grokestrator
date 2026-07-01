@@ -2,14 +2,12 @@ import SwiftUI
 import GrokestratorCore
 
 /// Sheet for stamping out an orchestrator + child agents from a `TeamTemplate`
-/// in one step. The user picks a template, names the team, and configures the
-/// shared runtime (command, working directory, brain). All members launch
-/// immediately.
+/// in one step. Fleet templates require API/local brains (`design/10`).
 struct CreateTeamView: View {
     @Bindable var model: GrokestratorModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedTemplate: TeamTemplate = TeamTemplate.builtins[0]
+    @State private var selectedTemplate: TeamTemplate = TeamTemplate.fleetTemplates[0]
     @State private var teamName = ""
     @State private var brain: BrainBinding = .grok
     @State private var command = Self.defaultGrokPath
@@ -18,23 +16,27 @@ struct CreateTeamView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Create Team")
+            Text("Create Fleet Team")
                 .font(.headline)
                 .padding()
             Divider()
 
             Form {
-                // Template picker
+                Section {
+                    Text("Orchestrated fleet — Grokestrator coordinates child Connections via `delegate`. Requires an API or local brain (not grok/ACP).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section {
                     Picker("Template", selection: $selectedTemplate) {
-                        ForEach(TeamTemplate.builtins) { t in
+                        ForEach(TeamTemplate.fleetTemplates) { t in
                             Text(t.title).tag(t)
                         }
                     }
                     Text(selectedTemplate.summary)
                         .font(.caption).foregroundStyle(.secondary)
 
-                    // Preview members
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Members:").font(.caption2).foregroundStyle(.tertiary)
                         ForEach(Array(selectedTemplate.members.enumerated()), id: \.offset) { idx, member in
@@ -59,7 +61,6 @@ struct CreateTeamView: View {
                     Text("Template").font(.caption).foregroundStyle(.secondary)
                 }
 
-                // Team name
                 Section {
                     TextField("Team Name", text: $teamName, prompt: Text("review"))
                     if let collision = nameCollision {
@@ -75,34 +76,32 @@ struct CreateTeamView: View {
                     Text("Name").font(.caption).foregroundStyle(.secondary)
                 }
 
-                // Brain picker (same as AddConnectionView)
                 Section {
-                    Picker("Brain", selection: brainSelection) {
-                        Text("ACP Agent").tag(BrainSelection.grok)
-                        ForEach(model.brainCatalog.profiles) { p in
-                            Text(p.name).tag(BrainSelection.profile(p.id))
+                    if model.brainCatalog.profiles.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text("Add an API brain in Settings before creating a fleet team.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
+                    } else {
+                        Picker("Brain", selection: brainSelection) {
+                            ForEach(model.brainCatalog.profiles) { p in
+                                Text(p.name).tag(BrainSelection.profile(p.id))
+                            }
+                        }
+                        Text("Shared by all team members. ACP agents use harness subagents instead — use Add Connection for those.")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
                 } header: {
-                    Text("Brain (shared by all members)").font(.caption).foregroundStyle(.secondary)
+                    Text("Brain (API / local)").font(.caption).foregroundStyle(.secondary)
                 }
 
-                if isGrok {
-                    TextField("Command", text: $command)
-                        .font(.system(.body, design: .monospaced))
-                    TextField("Arguments", text: $argumentsText)
-                        .font(.system(.body, design: .monospaced))
-                }
-
-                // Working directory
                 LabeledContent("Working directory (optional)") {
                     HStack(spacing: 4) {
                         TextField("", text: $workingDirectory, prompt: Text("optional"))
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(workingDirectoryIsValid ? Color.primary : Color.red)
-                        Button {
-                            selectWorkingDirectory()
-                        } label: {
+                        Button { selectWorkingDirectory() } label: {
                             Image(systemName: "folder").font(.system(size: 13))
                         }
                         .buttonStyle(.borderless)
@@ -132,6 +131,14 @@ struct CreateTeamView: View {
         }
         .frame(width: 520)
         .frame(minHeight: 400)
+        .onAppear { bootstrapBrain() }
+    }
+
+    private func bootstrapBrain() {
+        if case .profile = brain { return }
+        if let first = model.brainCatalog.profiles.first {
+            brain = .profile(first.id)
+        }
     }
 
     // MARK: - Validation
@@ -145,7 +152,6 @@ struct CreateTeamView: View {
         finalBaseName + member.nameSuffix
     }
 
-    /// Check if any of the generated names collide with existing active connections.
     private var nameCollision: String? {
         for member in selectedTemplate.members {
             let name = finalBaseName + member.nameSuffix
@@ -154,17 +160,16 @@ struct CreateTeamView: View {
         return nil
     }
 
-    private var isGrok: Bool { if case .grok = brain { return true }; return false }
-
-    private enum BrainSelection: Hashable { case grok, profile(UUID) }
+    private enum BrainSelection: Hashable { case profile(UUID) }
     private var brainSelection: Binding<BrainSelection> {
         Binding(
-            get: { if case .profile(let id) = brain { return .profile(id) }; return .grok },
+            get: {
+                if case .profile(let id) = brain { return .profile(id) }
+                if let first = model.brainCatalog.profiles.first { return .profile(first.id) }
+                return .profile(UUID())
+            },
             set: { sel in
-                switch sel {
-                case .grok: brain = .grok
-                case .profile(let id): brain = .profile(id)
-                }
+                if case .profile(let id) = sel { brain = .profile(id) }
             }
         )
     }
@@ -181,9 +186,13 @@ struct CreateTeamView: View {
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
     }
 
+    private var fleetBrainOK: Bool {
+        model.supportsFleetOrchestration(brain: brain) && model.brainCatalog.profile(brain.profileID ?? UUID()) != nil
+    }
+
     private var isCreateDisabled: Bool {
-        if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
-        if case .profile(let id) = brain, model.brainCatalog.profile(id) == nil { return true }
+        if model.brainCatalog.profiles.isEmpty { return true }
+        if !fleetBrainOK { return true }
         if nameCollision != nil { return true }
         if !workingDirectoryIsValid { return true }
         return false
@@ -192,9 +201,14 @@ struct CreateTeamView: View {
     // MARK: - Actions
 
     private func createTapped() {
-        let args = argumentsText.split(separator: " ").map(String.init)
+        guard fleetBrainOK, case .profile(let id) = brain,
+              let profile = model.brainCatalog.profile(id) else { return }
+        switch profile.backend {
+        case .grokACP, .acpStdio: return
+        default: break
+        }
         model.createTeam(from: selectedTemplate, baseName: finalBaseName,
-                         command: command, arguments: args,
+                         command: Self.defaultGrokPath, arguments: [],
                          workingDirectory: resolvedWorkingDirectory, brain: brain)
         dismiss()
     }
@@ -227,7 +241,6 @@ struct CreateTeamView: View {
     }
 }
 
-// TeamTemplate needs Equatable + Hashable for SwiftUI Picker.
 extension TeamTemplate: Equatable, Hashable {
     public static func == (lhs: TeamTemplate, rhs: TeamTemplate) -> Bool { lhs.id == rhs.id }
     public nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }

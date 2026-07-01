@@ -27,7 +27,7 @@ struct InstanceInspectorView: View {
                         instance.conversation.loadCapabilities()
                         instance.conversation.refreshUsage()
                         oracleEvents = OracleLedger.shared.recent(nodeID: instance.id, limit: 30)
-                        if instance.role == .orchestrator {
+                        if model.showsFleetTree(for: instance) {
                             orchestrationTables = await model.orchestrationTables()
                             orchestrationDBText = await model.orchestrationDBSummary()
                         } else {
@@ -56,7 +56,7 @@ struct InstanceInspectorView: View {
                     if let usage, usage.hasData { usageSection(usage) }
                     mcpSection(caps)
                     oracleSection(instance)
-                    if instance.role == .orchestrator {
+                    if model.showsFleetTree(for: instance) {
                         orchestrationDBSection(instance)
                     }
                     commandsSection(caps.commands, instance: instance)
@@ -87,9 +87,14 @@ struct InstanceInspectorView: View {
             }
             HStack(spacing: 6) {
                 Text(instance.status.rawValue).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                Text("· \(model.orchestrationModeLabel(for: instance))")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textFaint)
                 if let v = caps?.agentVersion {
                     Text("· grok \(v)").font(Theme.body(11)).foregroundStyle(Theme.textFaint)
                 }
+            }
+            if model.shouldShowLegacyOrchestrationWarning(for: instance) {
+                legacyOrchestrationBanner(instance)
             }
             if let cwd = caps?.workingDirectory {
                 Text(cwd)
@@ -407,5 +412,27 @@ struct InstanceInspectorView: View {
         if n < 1000 { return "\(n)" }
         let k = Double(n) / 1000
         return n >= 100_000 ? String(format: "%.0fK", k) : String(format: "%.1fK", k)
+    }
+
+    @ViewBuilder
+    private func legacyOrchestrationBanner(_ instance: InstanceItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Legacy ACP fleet team", systemImage: "exclamationmark.triangle.fill")
+                .font(Theme.body(12, .semibold))
+                .foregroundStyle(.orange)
+            Text("This grok/ACP orchestrator tree predates dual-path orchestration. Harness subagents should coordinate on ACP; fleet teams need API brains. Flatten to a supervised agent or recreate with an API brain.")
+                .font(Theme.body(11))
+                .foregroundStyle(Theme.textMuted)
+            HStack(spacing: 8) {
+                Button("Flatten tree") { model.flattenLegacyFleetTree(orchestratorID: instance.id) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Button("Dismiss") { model.dismissLegacyOrchestrationWarning(for: instance) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.radiusSm))
     }
 }

@@ -885,10 +885,16 @@ final class ConversationViewModel {
     private func toolActivityLine(_ update: ConversationUpdate) -> String? {
         switch update {
         case .toolCallRequested(let info):
+            if isHarnessTaskTool(info.toolName) {
+                return "▸ \(SubagentLineageReader.formatTaskDelegation(arguments: info.arguments))"
+            }
             let args = (info.arguments ?? [:]).map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")
             return "🔧 \(info.toolName)(\(args))"
         case .toolResultRecorded(let id, let isError):
-            return "↳ tool \(id) \(isError ? "failed" : "ok")"
+            let suffix = isError ? "failed" : "ok"
+            let line = "↳ tool \(id) \(suffix)"
+            Task { await self.enrichSubagentLineageAfterToolResult() }
+            return line
         case .progressNote(let text, let phase, _):
             return "\(phase.map { "[\($0)] " } ?? "")\(text)"
         case .activityNote(let text, let kind, _):
@@ -900,6 +906,27 @@ final class ConversationViewModel {
         default:
             return nil
         }
+    }
+
+    private func isHarnessTaskTool(_ name: String) -> Bool {
+        let n = name.lowercased()
+        return n == "task" || n == "spawn_subagent" || n.contains("subagent")
+    }
+
+    /// After a tool result, read grok's on-disk `subagents/` lineage and append
+    /// labeled rows for any new children (`design/10` rung 1).
+    private func enrichSubagentLineageAfterToolResult() async {
+        guard let cwd = capabilities?.workingDirectory,
+              let session = await driver.sessionID() else { return }
+        let entries = SubagentLineageReader.readEntries(workingDirectory: cwd, sessionID: session)
+        guard !entries.isEmpty else { return }
+        let formatted = entries.map(SubagentLineageReader.formatLineageEntry)
+        let existing = Set(activityLines)
+        let novel = formatted.filter { !existing.contains($0) }
+        guard !novel.isEmpty else { return }
+        activityLines.append(contentsOf: novel)
+        upsertActivitySummary()
+        streamTick += 1
     }
 
     /// Safety net: in the accumulator model, all tool activity routes directly

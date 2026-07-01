@@ -485,8 +485,15 @@ private struct ToolActivityView: View {
     @State private var expanded = false
 
     private var toolCount: Int { lines.lazy.filter { $0.hasPrefix("🔧") }.count }
+    private var subagentCount: Int { lines.lazy.filter { $0.hasPrefix("▸") || $0.hasPrefix("  ") }.count }
     private var title: String {
-        toolCount > 0 ? "\(toolCount) tool call\(toolCount == 1 ? "" : "s")" : "Activity"
+        if subagentCount > 0 && toolCount == 0 {
+            return "\(subagentCount) subagent\(subagentCount == 1 ? "" : "s")"
+        }
+        if subagentCount > 0 {
+            return "\(toolCount) tool\(toolCount == 1 ? "" : "s"), \(subagentCount) subagent\(subagentCount == 1 ? "" : "s")"
+        }
+        return toolCount > 0 ? "\(toolCount) tool call\(toolCount == 1 ? "" : "s")" : "Activity"
     }
 
     var body: some View {
@@ -509,8 +516,8 @@ private struct ToolActivityView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         Text(line)
-                            .font(Theme.mono(11))
-                            .foregroundStyle(Theme.textMuted)
+                            .font(line.hasPrefix("▸") || line.hasPrefix("  ") ? Theme.body(11, .medium) : Theme.mono(11))
+                            .foregroundStyle(line.hasPrefix("▸") ? Theme.accent.opacity(0.9) : Theme.textMuted)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

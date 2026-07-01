@@ -312,8 +312,10 @@ public actor OpenAICompatSession: AgentSession {
                    ["path": ["type": "string"], "content": ["type": "string"]], ["path", "content"]),
         toolSchema("run_command", "Run a shell command in the working directory and return combined stdout/stderr.",
                    ["command": ["type": "string"]], ["command"]),
-        toolSchema("delegate", "Delegate a sub-task to one of your child agents and return its result. "
-                   + "`child` is the child agent's name; `task` is what to ask it.",
+        toolSchema("delegate", "Delegate a sub-task to a named child Connection and return its result. "
+                   + "You are a fleet orchestrator — do not do the work yourself. "
+                   + "Children should return a JSON finding envelope (envelope_version, status, summary, findings, gaps). "
+                   + "`child` is the child's name; `task` is the full prompt.",
                    ["child": ["type": "string"], "task": ["type": "string"]], ["child", "task"]),
     ] }
 

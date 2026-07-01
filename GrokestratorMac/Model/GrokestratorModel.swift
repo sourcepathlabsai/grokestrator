@@ -57,6 +57,9 @@ final class GrokestratorModel {
     /// Active + recent delegation runs for the sidebar Run view (#134).
     let delegationRuns = DelegationRunStore()
 
+    /// Scheduled triggers + task.report ledger (#135).
+    let orchestrationTriggers = OrchestrationTriggerStore()
+
     /// Embedded workflow DB for schema-validated task exchange (#133).
     let orchestrationDB = OrchestrationDatabaseImpl(
         fileURL: ConnectionStore.supportDir.appendingPathComponent("orchestration.db")
@@ -128,6 +131,22 @@ final class GrokestratorModel {
                 await orchestrationMCP.setDelegateHandler { caller, child, task, timeout in
                     await manager.delegate(callerID: caller, toChildNamed: child, task: task,
                                            timeout: timeout ?? 120)
+                }
+                await orchestrationMCP.setTaskReportHandler { caller, status, result in
+                    await MainActor.run {
+                        self.handleTaskReport(callerID: caller, status: status, result: result)
+                    }
+                }
+                await orchestrationMCP.setNodeConfigureHandler { caller, child, policyJSON in
+                    await self.handleNodeConfigure(callerID: caller, childName: child, policyJSON: policyJSON)
+                }
+                await orchestrationMCP.setTriggerScheduleHandler { caller, child, when, task in
+                    await MainActor.run {
+                        self.handleTriggerSchedule(callerID: caller, childName: child, when: when, task: task)
+                    }
+                }
+                await orchestrationMCP.setTriggerFireHandler { caller, event, payload in
+                    await self.handleTriggerFire(callerID: caller, event: event, payload: payload)
                 }
                 OrchestrationMCPServer.isActive = true
                 NSLog("[orchestration] MCP server listening on :\(OrchestrationMCPServer.defaultPort)")
@@ -242,6 +261,8 @@ final class GrokestratorModel {
                            autoRestart: Bool = true, shared: Bool = true,
                            role: NodeRole = .agent, parentID: UUID? = nil, rolePrompt: String? = nil,
                            brain: BrainBinding = .grok) {
+        if let parentID, let parent = instances.first(where: { $0.id == parentID }),
+           !supportsFleetOrchestration(for: parent) { return }
         let config = ManagedConnection(
             name: name,
             command: command,
@@ -270,9 +291,9 @@ final class GrokestratorModel {
         // so a turn driven from a remote device streams onto the host too.
         item.conversation.startSubscription()
 
-        // Creating a child agent promotes its parent to orchestrator, so the tree
-        // forms in one step (see `setParent`).
+        // Fleet only: creating a child promotes its parent to orchestrator.
         if let parentID, let parent = instances.first(where: { $0.id == parentID }) {
+            guard supportsFleetOrchestration(for: parent) else { return }
             setRole(.orchestrator, for: parent)
         }
 
@@ -290,15 +311,22 @@ final class GrokestratorModel {
                     command: String, arguments: [String], workingDirectory: String?,
                     brain: BrainBinding = .grok) {
         guard !template.members.isEmpty else { return }
+        guard !template.requiresOrchestratedFleet || supportsFleetOrchestration(brain: brain) else {
+            NSLog("[orchestration] refused team %@ — brain is not orchestrated-fleet", template.id)
+            return
+        }
         // Create the orchestrator (member[0]).
         let orch = template.members[0]
         let orchName = baseName + orch.nameSuffix
+        let orchPolicy: ToolPolicy = template.requiresOrchestratedFleet
+            ? .fleetOrchestratorDefault : .unrestricted
         let orchConfig = ManagedConnection(
             name: orchName, command: command, arguments: arguments,
             workingDirectory: workingDirectory,
             autoRestart: true, shared: true,
             role: .orchestrator, parentID: nil,
             rolePrompt: orch.rolePrompt, brain: brain,
+            toolPolicy: orchPolicy,
             autoApproval: orch.autoApproval
         )
         connections.append(orchConfig)
@@ -313,12 +341,15 @@ final class GrokestratorModel {
         // Create each child (members[1…]).
         for member in template.members.dropFirst() {
             let childName = baseName + member.nameSuffix
+            let childPrompt = template.requiresOrchestratedFleet
+                ? member.rolePrompt + TeamTemplate.childEnvelopeSuffix
+                : member.rolePrompt
             let childConfig = ManagedConnection(
                 name: childName, command: command, arguments: arguments,
                 workingDirectory: workingDirectory,
                 autoRestart: true, shared: true,
                 role: .agent, parentID: orchConfig.id,
-                rolePrompt: member.rolePrompt, brain: brain,
+                rolePrompt: childPrompt, brain: brain,
                 autoApproval: member.autoApproval
             )
             connections.append(childConfig)
@@ -365,6 +396,7 @@ final class GrokestratorModel {
     /// leaves any children pointing at it; the sidebar renders an orphaned child
     /// at the top level, so nothing is hidden.
     func setRole(_ role: NodeRole, for item: InstanceItem) {
+        if role == .orchestrator && !supportsFleetOrchestration(for: item) { return }
         guard item.serverID == nil,
               let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
         connections[idx].role = role
@@ -378,6 +410,11 @@ final class GrokestratorModel {
     func setParent(_ parentID: UUID?, for item: InstanceItem) {
         guard item.serverID == nil, parentID != item.id,
               let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
+        if let parentID {
+            guard supportsFleetOrchestration(for: item) else { return }
+            if let parent = instances.first(where: { $0.id == parentID }),
+               !supportsFleetOrchestration(for: parent) { return }
+        }
         connections[idx].parentID = parentID
         ConnectionStore.save(connections)
         item.parentID = parentID
@@ -390,7 +427,7 @@ final class GrokestratorModel {
         }
     }
 
-    private func syncTreeMetadataToRemotes(id: UUID, role: NodeRole, parentID: UUID?) {
+    func syncTreeMetadataToRemotes(id: UUID, role: NodeRole, parentID: UUID?) {
         let server = self.server
         let manager = self.manager
         Task {

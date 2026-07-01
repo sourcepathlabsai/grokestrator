@@ -33,6 +33,12 @@ public actor OrchestrationMCPServer {
     /// Phase 3 workflow DB — schema-validated task exchange (`design/11`).
     private var database: OrchestrationDatabaseImpl?
 
+    /// Progress reporting, child policy, and triggers (`#135`).
+    private var taskReportHandler: (@Sendable (_ callerID: UUID?, _ status: String, _ result: String) async -> String)?
+    private var nodeConfigureHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ policyJSON: String) async -> String)?
+    private var triggerScheduleHandler: (@Sendable (_ callerID: UUID?, _ child: String, _ when: String, _ task: String) async -> String)?
+    private var triggerFireHandler: (@Sendable (_ callerID: UUID?, _ event: String, _ payload: String) async -> String)?
+
     /// Header grok forwards on every MCP request, carrying the calling Node's id.
     public static let nodeHeader = "X-Grokestrator-Node"
 
@@ -41,6 +47,22 @@ public actor OrchestrationMCPServer {
     /// Install the real delegation router (Phase 1c). Safe to call before/after start.
     public func setDelegateHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ task: String, _ timeout: TimeInterval?) async -> String) {
         self.delegateHandler = handler
+    }
+
+    public func setTaskReportHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ status: String, _ result: String) async -> String) {
+        self.taskReportHandler = handler
+    }
+
+    public func setNodeConfigureHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ policyJSON: String) async -> String) {
+        self.nodeConfigureHandler = handler
+    }
+
+    public func setTriggerScheduleHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ child: String, _ when: String, _ task: String) async -> String) {
+        self.triggerScheduleHandler = handler
+    }
+
+    public func setTriggerFireHandler(_ handler: @escaping @Sendable (_ callerID: UUID?, _ event: String, _ payload: String) async -> String) {
+        self.triggerFireHandler = handler
     }
 
     /// Wire the embedded orchestration DB (Phase 3). Safe to call before/after start.
@@ -97,13 +119,52 @@ public actor OrchestrationMCPServer {
             let child = args["child"] as? String ?? ""
             let task = args["task"] as? String ?? ""
             let timeout = (args["timeout"] as? Int).map { TimeInterval($0) }
-            let text = await runDelegate(callerID: callerID, child: child, task: task, timeout: timeout)
+            let handler = delegateHandler
+            let text = await Self.runOffActor { await handler?(callerID, child, task, timeout) }
+                ?? "Delegation is not wired yet."
+            return (text, false)
+        case "task.report":
+            let status = args["status"] as? String ?? "unknown"
+            let result = args["result"] as? String ?? ""
+            let handler = taskReportHandler
+            let text = await Self.runOffActor { await handler?(callerID, status, result) }
+                ?? "task.report is not wired yet."
+            return (text, false)
+        case "node.configure":
+            let child = args["child"] as? String ?? ""
+            let policyObj = args["policy"] ?? [:]
+            let policyJSON = (try? JSONSerialization.data(withJSONObject: policyObj))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let handler = nodeConfigureHandler
+            let text = await Self.runOffActor { await handler?(callerID, child, policyJSON) }
+                ?? "node.configure is not wired yet."
+            return (text, false)
+        case "trigger.schedule":
+            let child = args["child"] as? String ?? ""
+            let when = args["when"] as? String ?? args["cron"] as? String ?? ""
+            let task = args["task"] as? String ?? ""
+            let handler = triggerScheduleHandler
+            let text = await Self.runOffActor { await handler?(callerID, child, when, task) }
+                ?? "trigger.schedule is not wired yet."
+            return (text, false)
+        case "trigger.fire":
+            let event = args["event"] as? String ?? ""
+            let payload: String = if let s = args["payload"] as? String { s }
+                else if let obj = args["payload"] { String(describing: obj) } else { "" }
+            let handler = triggerFireHandler
+            let text = await Self.runOffActor { await handler?(callerID, event, payload) }
+                ?? "trigger.fire is not wired yet."
             return (text, false)
         case "db.createSchema", "db.insert", "db.query", "db.update", "db.listTables":
             return await runDBTool(name: name!, args: args, callerID: callerID)
         default:
             return ("Unknown tool: \(name ?? "nil")", true)
         }
+    }
+
+    /// Run long-running orchestration handlers without pinning the MCP actor (#136).
+    private static func runOffActor(_ work: @escaping @Sendable () async -> String?) async -> String? {
+        await Task.detached(priority: .userInitiated) { await work() }.value
     }
 
     fileprivate func runDBTool(name: String, args: [String: Any], callerID: UUID?) async -> (String, Bool) {
@@ -186,7 +247,11 @@ public actor OrchestrationMCPServer {
     }
 
     private static var allToolSchemas: [[String: Any]] {
-        [delegateToolSchema, dbCreateSchemaTool, dbInsertTool, dbQueryTool, dbUpdateTool, dbListTablesTool]
+        [
+            delegateToolSchema, taskReportTool, nodeConfigureTool,
+            triggerScheduleTool, triggerFireTool,
+            dbCreateSchemaTool, dbInsertTool, dbQueryTool, dbUpdateTool, dbListTablesTool,
+        ]
     }
 
     // MARK: - Connection loop (keep-alive: many requests per connection)
@@ -324,15 +389,76 @@ public actor OrchestrationMCPServer {
         ]
     }
 
+    private static var taskReportTool: [String: Any] {
+        [
+            "name": "task.report",
+            "description": "Report progress or a final result up to the orchestrator run store.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "status": ["type": "string", "description": "running | completed | failed | blocked"],
+                    "result": ["type": "string", "description": "Human-readable progress or result text."],
+                ],
+                "required": ["status", "result"],
+            ],
+        ]
+    }
+
+    private static var nodeConfigureTool: [String: Any] {
+        [
+            "name": "node.configure",
+            "description": "Grant or scope a child agent's tool policy (allowlist, capability mode).",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "child": ["type": "string"],
+                    "policy": ["type": "object", "description": "ToolPolicy fields: allowedTools, deniedTools, capability."],
+                ],
+                "required": ["child", "policy"],
+            ],
+        ]
+    }
+
+    private static var triggerScheduleTool: [String: Any] {
+        [
+            "name": "trigger.schedule",
+            "description": "Schedule a standing child agent to wake on a cron/interval spec.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "child": ["type": "string"],
+                    "when": ["type": "string", "description": "Cron or interval spec, e.g. 'every 1h' or '0 9 * * *'."],
+                    "task": ["type": "string", "description": "Prompt template fired on each wake."],
+                ],
+                "required": ["child", "when", "task"],
+            ],
+        ]
+    }
+
+    private static var triggerFireTool: [String: Any] {
+        [
+            "name": "trigger.fire",
+            "description": "Emit an event that may wake subscribed standing agents.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "event": ["type": "string"],
+                    "payload": ["type": "string"],
+                ],
+                "required": ["event"],
+            ],
+        ]
+    }
+
     private static var delegateToolSchema: [String: Any] {
         [
             "name": "delegate",
             "description": """
-                Delegate a task to one of your child agents and return its result. \
-                Each child is a separate, observable session with its own tools and \
-                role orientation — it can reason deeply and spawn its own subagents.
+                Delegate a task to one of your named child agents and return its result. \
+                Each child is a separate, observable Connection with its own tools — \
+                a leaf worker, not a nested orchestrator.
 
-                WHEN TO USE: You are a coordination orchestrator. Do NOT perform \
+                WHEN TO USE: You are a fleet orchestrator (API/local brain). Do NOT perform \
                 substantial work yourself (writing code, running commands, deep \
                 analysis). Instead, decompose the work into cohesive units and \
                 delegate each to the appropriate child agent by name. Synthesize \
@@ -351,6 +477,9 @@ public actor OrchestrationMCPServer {
                 TIMEOUT: Default 120 seconds. If a child times out, it keeps \
                 running — you'll get a timeout notice but no result. Set a longer \
                 timeout for complex tasks.
+
+                Children should return a JSON finding envelope (`envelope_version`, `status`, \
+                `summary`, `findings[]`, `gaps[]`). Prose-only returns are wrapped with a warning.
 
                 The human can watch each child's live transcript in a separate pane.
                 """,

@@ -39,6 +39,11 @@ struct AddConnectionView: View {
     @State private var resolvingClaude = false
     /// Shown when Claude Code isn't installed yet — the detect/install flow.
     @State private var showingClaudeSetup = false
+    /// Harness team template for grok ACP path (#132).
+    @State private var harnessTemplateID: String = GrokHarnessTemplate.plain.id
+    private var harnessTemplate: GrokHarnessTemplate {
+        GrokHarnessTemplate.all.first(where: { $0.id == harnessTemplateID }) ?? .plain
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -49,10 +54,18 @@ struct AddConnectionView: View {
 
             Form {
                 if let parent {
-                    HStack(spacing: 4) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.tint)
-                        Text("Child of \"\(parent.name)\" — it becomes an orchestrator.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    if model.supportsFleetOrchestration(for: parent) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(.tint)
+                            Text("Fleet child of \"\(parent.name)\" — parent is promoted to orchestrator.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text("\"\(parent.name)\" is a supervised ACP agent — fleet children require an API/local brain parent.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 TextField("Name", text: $name, prompt: Text("Local Grok"))
@@ -84,6 +97,16 @@ struct AddConnectionView: View {
                     .buttonStyle(.borderless).font(.caption)
                 } header: {
                     Text("Brain").font(.caption).foregroundStyle(.secondary)
+                }
+
+                if isGrok, parent == nil {
+                    Picker("Harness team", selection: $harnessTemplateID) {
+                        ForEach(GrokHarnessTemplate.all) { t in
+                            Text(t.title).tag(t.id)
+                        }
+                    }
+                    Text(harnessTemplate.summary)
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
 
                 if isGrok {
@@ -213,6 +236,8 @@ struct AddConnectionView: View {
     }
 
     private var isAddDisabled: Bool {
+        if let parent, !model.supportsFleetOrchestration(for: parent) { return true }
+        if parent != nil, isGrok { return true }
         if isGrok, command.trimmingCharacters(in: .whitespaces).isEmpty { return true }
         // A catalog brain must reference a profile that still exists.
         if case .profile(let id) = brain, model.brainCatalog.profile(id) == nil { return true }
@@ -302,6 +327,15 @@ struct AddConnectionView: View {
         model.addRealConnection(name: finalName, command: command, arguments: args,
                                 workingDirectory: resolvedWorkingDirectory, autoRestart: autoRestart, shared: shared,
                                 parentID: parent?.id, brain: brain)
+        if isGrok, parent == nil, harnessTemplate.id != "plain" {
+            let plan = GrokConfigWriter.plan(
+                template: harnessTemplate,
+                scope: .project,
+                projectCWD: resolvedWorkingDirectory,
+                agentNameOverride: finalName.lowercased().replacingOccurrences(of: " ", with: "-")
+            )
+            try? GrokConfigWriter.apply(plan, overwriteExisting: false)
+        }
     }
 
     /// Default to the per-user grok install location (resolved at runtime, not

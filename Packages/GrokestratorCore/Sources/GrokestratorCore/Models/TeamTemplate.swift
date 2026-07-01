@@ -8,6 +8,8 @@ public struct TeamTemplate: Identifiable, Sendable {
     public let id: String            // stable slug, e.g. "code-review"
     public let title: String         // human label for the picker
     public let summary: String       // one-liner shown under the title
+    /// Fleet templates require API/local brains — not ACP harness agents (`design/10`).
+    public let requiresOrchestratedFleet: Bool
     public let members: [Member]     // [0] = orchestrator, [1…] = children
 
     public struct Member: Sendable {
@@ -23,12 +25,27 @@ public struct TeamTemplate: Identifiable, Sendable {
         }
     }
 
-    public init(id: String, title: String, summary: String, members: [Member]) {
+    public init(id: String, title: String, summary: String, members: [Member],
+                requiresOrchestratedFleet: Bool = true) {
         self.id = id
         self.title = title
         self.summary = summary
+        self.requiresOrchestratedFleet = requiresOrchestratedFleet
         self.members = members
     }
+
+    /// Built-in fleet team templates (orchestrated-fleet path only).
+    public static var fleetTemplates: [TeamTemplate] {
+        builtins.filter(\.requiresOrchestratedFleet)
+    }
+
+    /// Appended to fleet child role prompts so `delegate` returns are machine-parseable.
+    public static let childEnvelopeSuffix = """
+
+    Return your final answer as one JSON object only (no markdown fence): \
+    envelope_version "1.0", status (success|partial|failed|needs_human), summary, \
+    findings (array of {id, kind, statement, confidence}), gaps (array), recommended_next (array).
+    """
 }
 
 // MARK: - Built-in templates
@@ -73,8 +90,7 @@ extension TeamTemplate {
 
                 Produce a structured findings list: severity (critical/high/medium/low), \
                 location (file:line), description, and recommended fix. If you find nothing, \
-                say so explicitly — do not invent issues. Be thorough; you may spawn subagents \
-                to deep-dive specific files.
+                say so explicitly — do not invent issues. Be thorough; read files directly.
                 """, autoApproval: .init(level: .reads)),
             // [2] architecture reviewer
             .init(nameSuffix: "-arch", rolePrompt: """

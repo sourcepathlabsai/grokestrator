@@ -29,6 +29,10 @@ struct SidebarView: View {
     @State private var editingToolsFor: InstanceItem?
     /// The Connection whose MCP-server access we're editing (nil ⇒ not editing).
     @State private var editingMCPFor: InstanceItem?
+    /// ACP harness `.grok/` config editor (#132).
+    @State private var editingGrokConfigFor: InstanceItem?
+    /// Fleet Run/DAG sheet (#134).
+    @State private var runDAGFor: InstanceItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,6 +69,14 @@ struct SidebarView: View {
         .sheet(item: $editingBrainFor) { item in EditBrainView(model: model, item: item) }
         .sheet(item: $editingToolsFor) { item in EditToolPolicyView(model: model, item: item) }
         .sheet(item: $editingMCPFor) { item in EditMCPAccessView(model: model, item: item) }
+        .sheet(item: $editingGrokConfigFor) { item in GrokConfigEditorView(model: model, item: item) }
+        .sheet(item: $runDAGFor) { orch in
+            DelegationRunDAGView(
+                orchestrator: orch,
+                runs: model.delegationRuns.runs(for: orch.id),
+                onSelectChild: { model.selectedInstanceID = $0 }
+            )
+        }
         .sheet(isPresented: $showingAddRemote) { AddRemoteServerView(model: model) }
         .sheet(item: $editingServer) { config in AddRemoteServerView(model: model, editing: config) }
         .sheet(isPresented: $showingArchived) { ArchivedConnectionsView(model: model) }
@@ -136,47 +148,23 @@ struct SidebarView: View {
         )
     }
 
-    // MARK: - Orchestration tree rendering (one level of nesting)
+    // MARK: - Orchestration tree rendering (multi-level, #136)
 
-    /// Renders a group's instances as a one-level tree: orchestrators that have
-    /// children become `DisclosureGroup`s; everything else (roots and orphans
-    /// whose parent isn't an orchestrator) renders flat. Selection + context menu
-    /// behave identically for parent and child rows.
     @ViewBuilder
     private func groupBody(_ group: SidebarServerGroup) -> some View {
-        let orchestratorIDs = Set(group.instances.filter { $0.role == .orchestrator }.map(\.id))
-        let childrenByParent = Dictionary(grouping: group.instances.filter {
-            guard let p = $0.parentID else { return false }
-            return orchestratorIDs.contains(p)
-        }, by: { $0.parentID! })
         let roots = group.instances.filter { item in
-            guard let p = item.parentID else { return true }   // no parent ⇒ root
-            return !orchestratorIDs.contains(p)                 // parent isn't a live orchestrator ⇒ surface as root
+            guard let p = item.parentID else { return true }
+            return !group.instances.contains(where: { $0.id == p })
         }
-
         ForEach(roots) { root in
-            if root.role == .orchestrator, let kids = childrenByParent[root.id], !kids.isEmpty {
-                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
-                    DelegationRunsSidebarSection(
-                        runs: model.delegationRuns.runs(for: root.id),
-                        onSelectChild: { model.selectedInstanceID = $0 }
-                    )
-                    ForEach(kids) { kid in instanceRow(kid, in: group) }
-                } label: {
-                    orchestratorLabel(root, in: group)
-                }
-            } else if root.role == .orchestrator {
-                DisclosureGroup(isExpanded: expansionBinding(root.id)) {
-                    DelegationRunsSidebarSection(
-                        runs: model.delegationRuns.runs(for: root.id),
-                        onSelectChild: { model.selectedInstanceID = $0 }
-                    )
-                } label: {
-                    orchestratorLabel(root, in: group)
-                }
-            } else {
-                instanceRow(root, in: group)
-            }
+            OrchestratorTreeNodeView(
+                instance: root, group: group, depth: 0,
+                hasParentInGroup: false, model: model,
+                collapsedNodes: $collapsedNodes,
+                instanceRow: { inst, grp in AnyView(instanceRow(inst, in: grp)) },
+                orchestratorLabel: { inst, grp in AnyView(orchestratorLabel(inst, in: grp)) },
+                rowMenu: { inst in AnyView(rowMenu(inst)) }
+            )
         }
     }
 
@@ -224,17 +212,24 @@ struct SidebarView: View {
             Button("Edit Brain…") { editingBrainFor = instance }
             Button("Edit Tools…") { editingToolsFor = instance }
             Button("MCP Access…") { editingMCPFor = instance }
+            if model.orchestrationMode(for: instance) == .supervisedAgent {
+                Button("Grok Config…") { editingGrokConfigFor = instance }
+            }
+            if model.showsFleetTree(for: instance) {
+                Button("Delegation Runs…") { runDAGFor = instance }
+            }
             // Create a child agent under this Connection — promotes it to
             // orchestrator automatically (see GrokestratorModel.addRealConnection).
-            Button("Add Child Agent…") { addingChildFor = instance }
-            if instance.role == .orchestrator {
+            if model.supportsFleetOrchestration(for: instance) {
+                Button("Add Child Agent…") { addingChildFor = instance }
+            }
+            if model.showsFleetTree(for: instance) {
                 Button("Make Agent") { model.setRole(.agent, for: instance) }
-            } else {
+            } else if model.supportsFleetOrchestration(for: instance) {
                 Button("Make Orchestrator") { model.setRole(.orchestrator, for: instance) }
             }
-            // An agent can be parented under an orchestrator (one level for now).
-            if instance.role == .agent {
-                let parents = model.localOrchestrators.filter { $0.id != instance.id }
+            if instance.role == .agent, model.supportsFleetOrchestration(for: instance) {
+                let parents = model.localFleetOrchestrators.filter { $0.id != instance.id }
                 Menu("Parent") {
                     Button(instance.parentID == nil ? "✓ None" : "None") {
                         model.setParent(nil, for: instance)
