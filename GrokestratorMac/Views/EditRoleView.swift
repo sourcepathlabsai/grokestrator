@@ -86,7 +86,7 @@ struct EditRoleView: View {
     private var helpText: String {
         switch saveMode {
         case .restartWithGist:
-            return "Restarts the agent and injects a compact summary of prior outcomes — tier-0 when history fits, tier-1 (fast-tier LLM or deterministic bullets) when it does not. The full transcript stays in the UI."
+            return "Restarts the agent with a certified compact gist — tier-0 when history fits; tier-1 + retrieval + gist-oracle repair when it does not. The full transcript stays in the UI."
         case .reprimeOnly:
             return "Prepends the new role on the next turn only. The live session may still remember the old role."
         case .restartFresh:
