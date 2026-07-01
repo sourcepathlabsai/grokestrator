@@ -19,6 +19,9 @@ struct SettingsView: View {
     @State private var addingMCPServer = false
     @State private var editingMCPServer: MCPServerConfig?
 
+    @State private var addingTeamTemplate = false
+    @State private var editingTeamTemplate: TeamTemplate?
+
     var body: some View {
         TabView {
             serverTab
@@ -30,6 +33,9 @@ struct SettingsView: View {
             mcpTab
                 .tabItem { Label("MCP", systemImage: "shippingbox") }
                 .frame(minWidth: 560, minHeight: 420)
+            teamsTab
+                .tabItem { Label("Teams", systemImage: "person.3") }
+                .frame(minWidth: 560, minHeight: 420)
         }
         .onAppear {
             guard !tierMapLoaded else { return }
@@ -40,6 +46,74 @@ struct SettingsView: View {
         .sheet(item: $editingProfile) { p in BrainProfileEditorView(model: model, existing: p) }
         .sheet(isPresented: $addingMCPServer) { MCPServerEditorView(model: model) }
         .sheet(item: $editingMCPServer) { s in MCPServerEditorView(model: model, existing: s) }
+        .sheet(isPresented: $addingTeamTemplate) { TeamTemplateEditorView(model: model) }
+        .sheet(item: $editingTeamTemplate) { t in TeamTemplateEditorView(model: model, existing: t) }
+    }
+
+    // MARK: Team templates
+
+    private var teamsTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Fleet Team Templates").font(Theme.display(12, .semibold))
+                    Spacer()
+                    Button { addingTeamTemplate = true } label: { Label("New Template", systemImage: "plus") }
+                }
+                Text("Blueprints for **Create Fleet Team** — orchestrator + specialists with default role prompts. Built-ins ship with the app; custom templates are stored locally.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("BUILT-IN").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)
+                ForEach(TeamTemplate.builtins) { template in
+                    teamTemplateRow(template, builtin: true)
+                }
+
+                if !model.customTeamTemplates.isEmpty {
+                    Text("CUSTOM").font(Theme.display(10, .semibold)).foregroundStyle(Theme.textFaint)
+                        .padding(.top, 4)
+                    ForEach(model.customTeamTemplates) { template in
+                        teamTemplateRow(template, builtin: false)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func teamTemplateRow(_ template: TeamTemplate, builtin: Bool) -> some View {
+        GroupBox {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(template.title).font(Theme.body(12, .semibold))
+                        if builtin {
+                            Text("built-in").font(Theme.mono(9)).foregroundStyle(Theme.textFaint)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Theme.surfaceSoft, in: Capsule())
+                        }
+                    }
+                    Text(template.summary).font(Theme.body(11)).foregroundStyle(Theme.textMuted)
+                        .lineLimit(2)
+                    Text("\(template.members.count) members · \(template.members.map(\.displayName).joined(separator: ", "))")
+                        .font(Theme.mono(10)).foregroundStyle(Theme.textFaint).lineLimit(1)
+                }
+                Spacer()
+                if builtin {
+                    Button("Duplicate") {
+                        let copy = model.duplicateTeamTemplate(template)
+                        model.saveCustomTeamTemplate(copy)
+                        editingTeamTemplate = copy
+                    }
+                } else {
+                    Button("Edit") { editingTeamTemplate = template }
+                    Button(role: .destructive) { model.deleteCustomTeamTemplate(id: template.id) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Delete template")
+                }
+            }
+        }
     }
 
     // MARK: MCP registry

@@ -7,12 +7,18 @@ struct CreateTeamView: View {
     @Bindable var model: GrokestratorModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedTemplate: TeamTemplate = TeamTemplate.fleetTemplates[0]
+    @State private var selectedTemplateID: String = ""
     @State private var teamName = ""
     @State private var brain: BrainBinding = .grok
     @State private var command = Self.defaultGrokPath
     @State private var argumentsText = "agent stdio"
     @State private var workingDirectory = ""
+
+    private var templates: [TeamTemplate] { model.fleetTeamTemplates }
+
+    private var selectedTemplate: TeamTemplate {
+        templates.first(where: { $0.id == selectedTemplateID }) ?? templates.first ?? TeamTemplate.codeReview
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,9 +35,9 @@ struct CreateTeamView: View {
                 }
 
                 Section {
-                    Picker("Template", selection: $selectedTemplate) {
-                        ForEach(TeamTemplate.fleetTemplates) { t in
-                            Text(t.title).tag(t)
+                    Picker("Template", selection: $selectedTemplateID) {
+                        ForEach(templates) { t in
+                            Text(t.title).tag(t.id)
                         }
                     }
                     Text(selectedTemplate.summary)
@@ -47,12 +53,11 @@ struct CreateTeamView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(idx == 0 ? .cyan : .secondary)
                                     .frame(width: 14)
+                                Text(member.displayName)
+                                    .font(.caption)
                                 Text(resolvedName(for: member, index: idx))
-                                    .font(.system(.caption, design: .monospaced))
-                                if idx == 0 {
-                                    Text("(orchestrator)")
-                                        .font(.caption2).foregroundStyle(.tertiary)
-                                }
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
                             }
                         }
                     }
@@ -131,7 +136,12 @@ struct CreateTeamView: View {
         }
         .frame(width: 520)
         .frame(minHeight: 400)
-        .onAppear { bootstrapBrain() }
+        .onAppear {
+            bootstrapBrain()
+            if selectedTemplateID.isEmpty, let first = templates.first {
+                selectedTemplateID = first.id
+            }
+        }
     }
 
     private func bootstrapBrain() {
@@ -241,7 +251,3 @@ struct CreateTeamView: View {
     }
 }
 
-extension TeamTemplate: Equatable, Hashable {
-    public static func == (lhs: TeamTemplate, rhs: TeamTemplate) -> Bool { lhs.id == rhs.id }
-    public nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }
-}

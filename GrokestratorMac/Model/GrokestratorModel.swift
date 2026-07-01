@@ -82,6 +82,14 @@ final class GrokestratorModel {
     /// client. Curated in Settings ▸ MCP. See `design/12` Phase C (MCP bridge).
     var mcpRegistry: MCPRegistry = ConnectionStore.loadMCPRegistry()
 
+    /// User-authored fleet team templates (built-ins live in code).
+    var customTeamTemplates: [TeamTemplate] = ConnectionStore.loadTeamTemplates().custom
+
+    /// Built-in + custom fleet templates for Create Team and Settings.
+    var fleetTeamTemplates: [TeamTemplate] {
+        TeamTemplate.builtins + customTeamTemplates.filter(\.requiresOrchestratedFleet)
+    }
+
     // MARK: - Server settings (mirrored to UserDefaults)
 
     private static let serverEnabledKey = "grokestrator.server.enabled.v1"
@@ -739,6 +747,78 @@ final class GrokestratorModel {
                   item.status == .running || item.status == .starting else { continue }
             restartLive(config: conn, item: item)
         }
+    }
+
+    // MARK: - Team template registry
+
+    func saveCustomTeamTemplate(_ template: TeamTemplate) {
+        guard !template.isBuiltin else { return }
+        var list = customTeamTemplates
+        if let idx = list.firstIndex(where: { $0.id == template.id }) {
+            list[idx] = template
+        } else {
+            list.append(template)
+        }
+        customTeamTemplates = list
+        ConnectionStore.saveTeamTemplates(TeamTemplateRegistry(custom: list))
+    }
+
+    func deleteCustomTeamTemplate(id: String) {
+        guard !TeamTemplate.builtinIDs.contains(id) else { return }
+        customTeamTemplates.removeAll { $0.id == id }
+        ConnectionStore.saveTeamTemplates(TeamTemplateRegistry(custom: customTeamTemplates))
+    }
+
+    /// Copy a built-in (or custom) template into an editable custom draft.
+    func duplicateTeamTemplate(_ source: TeamTemplate) -> TeamTemplate {
+        var copy = source
+        let base = source.isBuiltin ? source.id : "\(source.id)-copy"
+        var candidate = TeamTemplate.slug(from: base)
+        var n = 2
+        while fleetTeamTemplates.contains(where: { $0.id == candidate }) {
+            candidate = "\(base)-\(n)"
+            n += 1
+        }
+        copy = TeamTemplate(
+            id: candidate,
+            title: source.isBuiltin ? "\(source.title) (copy)" : "\(source.title) copy",
+            summary: source.summary,
+            members: source.members,
+            requiresOrchestratedFleet: source.requiresOrchestratedFleet
+        )
+        return copy
+    }
+
+    /// Ask grok to draft a role prompt for a template member from its plain
+    /// name/description and the rest of the team shape.
+    func draftTemplateMemberPrompt(template: TeamTemplate, memberIndex: Int) async -> String {
+        guard memberIndex >= 0, memberIndex < template.members.count else { return "" }
+        let member = template.members[memberIndex]
+        let roleWord = member.isOrchestrator
+            ? "the orchestrator that coordinates the team and delegates via `delegate`"
+            : "a specialist worker that performs one focused part of the job"
+        let teammates = template.members.enumerated()
+            .filter { $0.offset != memberIndex }
+            .map { "\($0.element.displayName) — \($0.element.memberDescription)" }
+        let teamLine = teammates.isEmpty
+            ? ""
+            : "Other team members: \(teammates.joined(separator: "; "))."
+        let meta = """
+        You are authoring a fleet team template called "\(template.title)" (\(template.summary)).
+        Write a concise role/system prompt (second person, imperative) for "\(member.displayName)": \
+        \(member.memberDescription). This agent is \(roleWord). \(teamLine)
+        Orchestrator never executes work itself; workers return structured findings for synthesis.
+        Keep under ~200 words. Output ONLY the role prompt text — no preamble, headings, or quotes.
+        """
+        let command = Self.defaultGrokCommand
+        let out = await Self.runGrokHeadless(command: command, prompt: meta, cwd: nil)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static var defaultGrokCommand: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".grok/bin/grok")
+            .path
     }
 
     /// Ask grok (headless, one-shot) to draft a role prompt for `item` from its name
