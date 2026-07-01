@@ -2,6 +2,13 @@
 
 ## v0.3.5-alpha — 2026-07-01
 
+### Role restart + clear history (#185)
+
+- **Transition barrier** — role-save restarts and `clearHistory` / `sendPrompt` no longer race;
+  ACP `initialize` + `session/new` complete during restart before the Connection accepts prompts.
+- **Gist preserved** — clearing the display transcript no longer drops a pending session gist
+  before the first reprimed turn.
+
 ### Signed distribution pipeline (#143)
 
 - **Paid Apple Developer enrollment live** — team `GS8DPK5RPN` wired in `project.yml`.

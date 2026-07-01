@@ -23,6 +23,10 @@ struct iOSConversationView: View {
 
     private var conversation: ConversationViewModel { instance.conversation }
 
+    private var canClearHistory: Bool {
+        !conversation.entries.isEmpty && instance.status != .starting
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             iOSConnectingBanner(conversation: conversation)
@@ -64,7 +68,7 @@ struct iOSConversationView: View {
                 Button(role: .destructive) { confirmingClear = true } label: {
                     Label("Clear History", systemImage: "trash")
                 }
-                .disabled(conversation.entries.isEmpty)
+                .disabled(!canClearHistory)
             }
         }
         .confirmationDialog(
