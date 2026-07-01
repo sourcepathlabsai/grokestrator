@@ -1,5 +1,19 @@
 # Grokestrator — Release Notes
 
+## v0.3.2-alpha — 2026-07-01
+
+### Role transition with compact context (#177)
+
+- **Edit Role → Restart with compact context (default).** Changing a Connection's role
+  restarts the agent with a fresh session so the old role cannot linger in multi-turn
+  memory. Prior work is carried forward as a **tier-0 session gist** — user prompt and
+  final outcome per turn, not the full transcript — injected once in the hidden preamble.
+- **Alternatives:** re-prime only (legacy behavior) or fresh restart with no carry-forward.
+- **Transcript marker** when context is carried or restarted, so the UI shows where the
+  role change happened.
+
+---
+
 ## v0.3.1-alpha — 2026-07-01
 
 Incremental alpha on v0.3.0. **Dual-path orchestration is now enforced in the app** —

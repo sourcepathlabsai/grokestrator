@@ -248,6 +248,13 @@ plan); compaction prompts that must preserve decisions, facts, state changes, op
 questions, and user "remember this" notes; an **oracle check** that the summary still
 names the key entities/decisions (redo if it dropped one); pin-on-demand.
 
+**Role transition (shipped tier 0, issue #177):** when a Connection's `rolePrompt`
+changes, the display transcript stays intact but the working context resets. Default
+save **restarts** the Node (fresh ACP `session/new`) and injects a one-time
+`SessionGist.tier0` preamble — user prompt + final outcome per turn, tool noise
+collapsed, ~12k char budget — instead of replaying the full history. Follow-on:
+fast-tier summarization when tier 0 exceeds budget (#137).
+
 ### When does this rise to the top of the list?
 
 It is **deliberately low while everything is grok** — grok self-manages context, which

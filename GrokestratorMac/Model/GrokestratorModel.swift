@@ -452,10 +452,17 @@ final class GrokestratorModel {
         }
     }
 
-    /// Set (or clear) a local Connection's role/system prompt. Persists it, updates
-    /// the live conversation (which re-injects the new role on the next turn — no
-    /// restart needed), and broadcasts.
-    func setRolePrompt(_ prompt: String?, for item: InstanceItem) {
+    /// How saving a role prompt should take effect (issue #177).
+    enum RoleSaveMode: Sendable {
+        case reprimeOnly
+        case restartWithGist
+        case restartFresh
+    }
+
+    /// Set (or clear) a local Connection's role/system prompt. Persists and applies
+    /// per `mode` — default restart-with-gist clears role bleed without replaying the
+    /// full transcript.
+    func setRolePrompt(_ prompt: String?, for item: InstanceItem, mode: RoleSaveMode = .restartWithGist) {
         guard item.serverID == nil,
               let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
         let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -466,8 +473,31 @@ final class GrokestratorModel {
         let manager = self.manager
         let server = self.server
         let id = item.id
+        let config = connections[idx]
+        let transitionMode: GrokBuildManager.RoleTransitionMode = switch mode {
+        case .reprimeOnly: .reprimeOnly
+        case .restartWithGist: .restartWithGist
+        case .restartFresh: .restartFresh
+        }
         Task {
-            await manager.setRolePrompt(for: id, value)
+            if transitionMode == .reprimeOnly {
+                await manager.setRolePrompt(for: id, value)
+            } else if item.status == .running || item.status == .starting {
+                item.status = .starting
+                do {
+                    if let updated = try await manager.applyRoleTransition(
+                        for: id, prompt: value, config: config, mode: transitionMode
+                    ) {
+                        item.status = updated.status
+                    }
+                } catch {
+                    item.status = .errored
+                }
+            } else {
+                _ = try? await manager.applyRoleTransition(
+                    for: id, prompt: value, config: config, mode: transitionMode
+                )
+            }
             await server.broadcastInstancesIfChanged()
         }
     }

@@ -40,6 +40,52 @@ public enum ConnectionStore {
         return url
     }
 
+    /// Load persisted transcript turns for a Connection (empty when absent).
+    public static func loadHistoryTurns(for id: UUID) -> [AgentTurn] {
+        let url = historyURL(for: id)
+        guard let data = try? Data(contentsOf: url),
+              let turns = try? JSONDecoder().decode([AgentTurn].self, from: data) else {
+            return []
+        }
+        return turns
+    }
+
+    /// Append a marker turn to on-disk history (e.g. role transition on a stopped Node).
+    public static func appendMarkerToHistory(for id: UUID, prompt: String) {
+        var turns = loadHistoryTurns(for: id)
+        turns.append(AgentTurn(userPrompt: prompt, messages: []))
+        let url = historyURL(for: id)
+        guard let data = try? JSONEncoder().encode(turns) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func pendingSessionGistURL(for id: UUID) -> URL {
+        connectionDir(for: id).appendingPathComponent("pending-session-gist.txt")
+    }
+
+    /// Persist a gist preamble to inject on the next conversation handshake.
+    public static func savePendingSessionGist(_ gist: String, for id: UUID) {
+        let trimmed = gist.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            clearPendingSessionGist(for: id)
+            return
+        }
+        try? trimmed.write(to: pendingSessionGistURL(for: id), atomically: true, encoding: .utf8)
+    }
+
+    public static func clearPendingSessionGist(for id: UUID) {
+        try? FileManager.default.removeItem(at: pendingSessionGistURL(for: id))
+    }
+
+    /// Load and delete the pending gist (one-time consumption).
+    public static func consumePendingSessionGist(for id: UUID) -> String? {
+        let url = pendingSessionGistURL(for: id)
+        guard let gist = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        try? FileManager.default.removeItem(at: url)
+        let trimmed = gist.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// One-shot migration of any file at the legacy `conversations/<id>.json`
     /// path to the new `connections/<id>/history.json` location. Skips if the
     /// new location already has a file.

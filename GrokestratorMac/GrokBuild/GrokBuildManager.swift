@@ -93,6 +93,83 @@ public actor GrokBuildManager {
         }
     }
 
+    /// Apply a role-prompt change with an explicit transition mode (issue #177).
+    /// Returns an updated `ManagedInstance` when a restart ran; `nil` for re-prime only.
+    public func applyRoleTransition(
+        for id: UUID,
+        prompt: String?,
+        config: ManagedInstance,
+        mode: RoleTransitionMode
+    ) async throws -> ManagedInstance? {
+        let trimmed = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
+
+        switch mode {
+        case .reprimeOnly:
+            await setRolePrompt(for: id, value)
+            return nil
+        case .restartWithGist, .restartFresh:
+            var gistWire: String?
+            if mode == .restartWithGist {
+                gistWire = await sessionGistWire(for: id)
+            } else {
+                pendingSessionGists.removeValue(forKey: id)
+                ConnectionStore.clearPendingSessionGist(for: id)
+            }
+
+            if let gistWire {
+                pendingSessionGists[id] = gistWire
+                ConnectionStore.savePendingSessionGist(gistWire, for: id)
+                if let convo = activeConversations[id] {
+                    await convo.appendMarkerTurn(
+                        "── Role updated; agent restarted with compact prior context ──"
+                    )
+                } else {
+                    ConnectionStore.appendMarkerToHistory(
+                        for: id,
+                        prompt: "── Role updated; agent restarted with compact prior context ──"
+                    )
+                }
+            } else if mode == .restartFresh {
+                let marker = "── Role updated; agent restarted (fresh context) ──"
+                if let convo = activeConversations[id] {
+                    await convo.appendMarkerTurn(marker)
+                } else {
+                    ConnectionStore.appendMarkerToHistory(for: id, prompt: marker)
+                }
+            }
+
+            var updated = config
+            updated.rolePrompt = value
+            if var state = instanceStates[id] {
+                state.rolePrompt = value
+                instanceStates[id] = state
+            }
+
+            let isLive = await server.getClient(for: id) != nil
+            if isLive {
+                return try await restartInstance(updated)
+            }
+            await setRolePrompt(for: id, value)
+            return updated
+        }
+    }
+
+    private func sessionGistWire(for id: UUID) async -> String? {
+        let turns: [AgentTurn]
+        if let convo = activeConversations[id] {
+            turns = await convo.getHistory()
+        } else {
+            turns = ConnectionStore.loadHistoryTurns(for: id)
+        }
+        return SessionGist.wirePreambleForTransition(from: turns)
+    }
+
+    private func consumePendingSessionGist(for id: UUID) -> String? {
+        if let inMemory = pendingSessionGists.removeValue(forKey: id) { return inMemory }
+        return ConnectionStore.consumePendingSessionGist(for: id)
+    }
+
     /// Advanced escape hatch. Most Mac app code should never call this.
     internal func _client(for id: UUID) async -> (any AgentSession)? {
         await server.getClient(for: id)
@@ -236,6 +313,18 @@ public actor GrokBuildManager {
     // MARK: - Black Box Conversation API
 
     private var activeConversations: [UUID: GrokBuildConversation] = [:]
+    /// Gist preambles waiting to be injected on the next conversation handshake.
+    private var pendingSessionGists: [UUID: String] = [:]
+
+    /// How a role-prompt edit should take effect. See issue #177 / `design/12`.
+    public enum RoleTransitionMode: Sendable {
+        /// Reset `primed` and re-inject on the next turn; keeps the live ACP session.
+        case reprimeOnly
+        /// Restart the Node and inject a tier-0 session gist on the first primed turn.
+        case restartWithGist
+        /// Restart the Node with no prior-context carry-forward.
+        case restartFresh
+    }
 
     /// Primary black-box API for the Mac app.
     /// Returns (or creates) a high-level conversation handle for an instance.
@@ -287,7 +376,8 @@ public actor GrokBuildManager {
             client: client,
             persistenceURL: historyURL,
             rolePrompt: instanceStates[instanceID]?.rolePrompt ?? config?.rolePrompt,
-            orientationPreamble: orientation
+            orientationPreamble: orientation,
+            sessionGistPreamble: consumePendingSessionGist(for: instanceID)
         )
 
         try await convo.loadHistoryIfAvailable()

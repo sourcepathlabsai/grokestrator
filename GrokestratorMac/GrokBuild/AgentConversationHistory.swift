@@ -47,6 +47,15 @@ public actor AgentConversationHistory {
         currentPrompt = nil
     }
 
+    /// Append a completed turn directly (e.g. a role-transition marker). Finalizes
+    /// any in-progress turn first.
+    public func appendCompletedTurn(userPrompt: String, messages: [AgentMessage] = []) {
+        if !currentTurnMessages.isEmpty || currentPrompt != nil {
+            finishCurrentTurn()
+        }
+        turns.append(AgentTurn(userPrompt: userPrompt, messages: messages))
+    }
+
     /// Call when the user sends a new prompt.
     public func startNewTurn(prompt: String) {
         if !currentTurnMessages.isEmpty || currentPrompt != nil {
