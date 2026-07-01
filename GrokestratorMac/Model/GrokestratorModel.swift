@@ -427,12 +427,15 @@ final class GrokestratorModel {
     }
 
     /// Set (or clear, with `nil`) a local Connection's parent orchestrator. Guards
-    /// against self-parenting; deeper cycle checks wait for multi-level trees.
+    /// against self-parenting and cycles in the soft tree (#136).
     func setParent(_ parentID: UUID?, for item: InstanceItem) {
         guard item.serverID == nil, parentID != item.id,
               let idx = connections.firstIndex(where: { $0.id == item.id }) else { return }
         if let parentID {
             guard supportsFleetOrchestration(for: item) else { return }
+            guard !OrchestrationTree.wouldCreateCycle(child: item.id, candidateParent: parentID, in: connections) else {
+                return
+            }
             if let parent = instances.first(where: { $0.id == parentID }),
                !supportsFleetOrchestration(for: parent) { return }
         }

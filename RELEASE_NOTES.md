@@ -1,5 +1,17 @@
 # Grokestrator — Release Notes
 
+## v0.3.3-alpha — 2026-07-01
+
+### Multi-level tree + parallel delegate (#136)
+
+- **Recursive fleet sidebar** — arbitrary-depth nesting on Mac; iOS mirrors the host tree.
+- **Nested orchestrators** — sub-orchestrators under top-level orchestrators; cycle-safe
+  parent assignment.
+- **Parallel `delegate`** — orchestrators may fan out to multiple descendants concurrently;
+  each delegation is tracked as its own run in the sidebar.
+- **API fleet brains** — parallel `delegate` tool calls in one model turn execute concurrently
+  (not sequentially).
+
 ## v0.3.2-alpha — 2026-07-01
 
 ### Orchestration MCP extensions (#135)

@@ -20,8 +20,8 @@ across devices over Tailscale.
 | **GrokestratoriOS** | Client-only remote companion |
 | **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
-**Release:** v0.3.1-alpha (2026-07-01). Prior: v0.3.0-alpha (2026-06-30).  
-**Engineering:** 175+ merged PRs; Core tests: 71/71 passing.
+**Release:** v0.3.3-alpha (2026-07-01). Prior: v0.3.2-alpha (2026-07-01).  
+**Engineering:** 175+ merged PRs; Core tests: 77/77 passing.
 
 **Founder full-time** since 2026-06-05. Binding constraints: **sequencing, validation**, and
 doc/corpus accuracy (OODA Orient axis) — not capacity.
@@ -90,6 +90,14 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
   `HarnessTemplateEditorView` — Settings → Teams Harness section; grok-assisted
   agent/role/persona drafting (#175)
 
+### Multi-level tree + parallel delegate (#136)
+
+- **Recursive sidebar** — arbitrary-depth fleet trees (`OrchestratorTreeNodeView`); iOS parity
+- **Nested orchestrators** — sub-orchestrators as descendants; cycle-safe parenting
+- **`OrchestrationTree`** — shared descendant resolution, cycle detection (Core)
+- **Parallel `delegate`** — concurrent MCP/API tool calls fan out; each run tracked separately
+- **API brains** — `OpenAICompatSession` executes parallel `delegate` calls in one tool round
+
 ### Orchestration MCP extensions (#135)
 
 - **`task.report`** — child agents report progress; updates active delegation runs + ledger
@@ -120,7 +128,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | Area | Status | Reference |
 |------|--------|-----------|
 | Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Shipped (#135) | `design/11` |
-| Multi-level tree + parallel delegate fan-out | Open (#136) | `design/11` |
+| Multi-level tree + parallel delegate fan-out | Shipped (#136) | `design/11` |
 | ContextManager (fast-tier summarization, retrieval, gist oracle) | Partial (#177 tier 0; #137) | `design/12` Phase E |
 | Oracle depth (verify-against-intent, corpus maintenance, INV detectors) | Open (#140–#142) | `design/13` |
 | Signed/notarized Mac + TestFlight | Roadmap (#143) | README |
@@ -148,11 +156,10 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 | Priority | Issue | Topic |
 |----------|-------|-------|
-| 1 | [#136](https://github.com/sourcepathlabsai/grokestrator/issues/136) | Multi-level tree + parallel delegate fan-out |
-| 2 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
-| 3 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
-| 4 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
-| 5 | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager tier 1 (gist summarization) |
+| 1 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
+| 2 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
+| 3 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
+| 4 | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager tier 1 (gist summarization) |
 | — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140), [#137–#139](https://github.com/sourcepathlabsai/grokestrator/issues/137), [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Oracle detectors, runtime depth, infra |
 | — | [#135–#146](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 
@@ -181,4 +188,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — through PRs #170, #173, #175. Supersedes 2026-06-30 snapshot.*
+*Last updated: 2026-07-01 — through PR #179 (#135) and #136 slice. Supersedes 2026-06-30 snapshot.*
