@@ -674,7 +674,9 @@ public actor GrokBuildSessionClient {
         }
 
         if let env = try? JSONDecoder().decode(RPCEnvelope.self, from: line), let err = env.error {
-            throw GrokBuildError.protocolError("\(method) failed: \(err.message) (\(err.code))")
+            // Surface grok's nested `error.data.message` (billing/auth/upstream status)
+            // — a bare "internal error (-32603)" otherwise hides the real cause.
+            throw GrokBuildError.protocolError("\(method) failed: \(err.actionableSummary) (\(err.code))")
         }
         return try JSONDecoder().decode(RPCResult<T>.self, from: line).result
     }
