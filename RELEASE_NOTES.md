@@ -1,5 +1,19 @@
 # Grokestrator — Release Notes
 
+## v0.3.4-alpha — 2026-07-01
+
+### ContextManager (#137)
+
+- **Budget ladder** — `ContextManager` escalates from tier-0 lossless extraction to tier-1
+  compaction when history exceeds the ~12k working-context budget.
+- **Fast-tier LLM summarization** — `FastTierSummarizer` via `/chat/completions` when the
+  host `fast` tier is OpenAI-compatible.
+- **Local-embedding retrieval** — `EmbeddingRetriever` pulls relevant middle-history
+  snippets via `/embeddings` (`nomic-embed-text`); `KeywordRetriever` when offline.
+- **Gist oracle** — `GistOracle` verifies compacted gists still name key files, decisions,
+  and "remember" notes; pins missing anchors before injection.
+- **Deterministic fallback** — `SessionGist.tier1` bullet summary when LLM paths fail.
+
 ## v0.3.3-alpha — 2026-07-01
 
 ### Multi-level tree + parallel delegate (#136)

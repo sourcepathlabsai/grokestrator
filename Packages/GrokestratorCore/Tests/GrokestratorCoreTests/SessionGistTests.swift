@@ -40,4 +40,17 @@ struct SessionGistTests {
         #expect(wrapped.contains("[Prior session context — role transition]"))
         #expect(wrapped.contains("Turn 1:\nUser: hi"))
     }
+
+    @Test func tier1CollapsesManyTurns() {
+        var turns: [AgentTurn] = []
+        for i in 0..<30 {
+            turns.append(AgentTurn(
+                userPrompt: "request \(i)",
+                messages: [AgentMessage(role: .assistant, content: "result \(i)")]
+            ))
+        }
+        let summary = SessionGist.tier1(from: turns, budget: ContextBudget(maxChars: 1_500))!
+        #expect(summary.contains("[Prior session — 30 turn(s) summarized]"))
+        #expect(summary.count <= 1_510)
+    }
 }

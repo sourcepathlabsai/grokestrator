@@ -248,12 +248,26 @@ plan); compaction prompts that must preserve decisions, facts, state changes, op
 questions, and user "remember this" notes; an **oracle check** that the summary still
 names the key entities/decisions (redo if it dropped one); pin-on-demand.
 
-**Role transition (shipped tier 0, issue #177):** when a Connection's `rolePrompt`
-changes, the display transcript stays intact but the working context resets. Default
-save **restarts** the Node (fresh ACP `session/new`) and injects a one-time
-`SessionGist.tier0` preamble — user prompt + final outcome per turn, tool noise
-collapsed, ~12k char budget — instead of replaying the full history. Follow-on:
-fast-tier summarization when tier 0 exceeds budget (#137).
+**Role transition (tier 0 + tier 1, issues #177 / #137):** when a Connection's
+`rolePrompt` changes, the display transcript stays intact but the working context
+resets. Default save **restarts** the Node (fresh ACP `session/new`) and injects a
+one-time gist preamble instead of replaying the full history:
+
+- **Tier 0** (`SessionGist.tier0`) — lossless per-turn extract: user prompt + final
+  outcome, tool noise collapsed, ~12k char budget. Used when history fits.
+- **Tier 1** (`ContextManager` + `SessionGist.tier1`) — when tier 0 would exceed
+  budget, escalate: try the host's configured **`fast` tier** via
+  `FastTierSummarizer` (OpenAI-compatible `/chat/completions`); on failure or when
+  fast tier is grok, fall back to deterministic bullet summarization (requests,
+  outcomes, tool activity).
+- **Retrieval** (`EmbeddingRetriever` + `KeywordRetriever`) — for sessions ≥
+  25 turns, embed the recent-task query against middle history via OpenAI-compatible
+  `/embeddings` (default model `nomic-embed-text`, e.g. LM Studio); keyword overlap
+  when embeddings are unavailable. Retrieved snippets + summary + recent tail.
+- **Gist oracle** (`GistOracle`) — extract file/decision/remember anchors from the
+  full transcript; verify the compacted gist still names them; repair with a pinned
+  section when dropped.
+- Wired from `GrokBuildManager.applyRoleTransition` via `ContextCompactionServices`.
 
 ### When does this rise to the top of the list?
 
