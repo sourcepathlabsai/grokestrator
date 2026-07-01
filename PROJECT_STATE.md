@@ -21,7 +21,7 @@ across devices over Tailscale.
 | **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
 **Release:** v0.3.1-alpha (2026-07-01). Prior: v0.3.0-alpha (2026-06-30).  
-**Engineering:** 175+ merged PRs; Core tests: 66/66 passing.
+**Engineering:** 175+ merged PRs; Core tests: 71/71 passing.
 
 **Founder full-time** since 2026-06-05. Binding constraints: **sequencing, validation**, and
 doc/corpus accuracy (OODA Orient axis) — not capacity.
@@ -90,6 +90,14 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
   `HarnessTemplateEditorView` — Settings → Teams Harness section; grok-assisted
   agent/role/persona drafting (#175)
 
+### Orchestration MCP extensions (#135)
+
+- **`task.report`** — child agents report progress; updates active delegation runs + ledger
+- **`node.configure`** — orchestrator sets child `ToolPolicy` (capability + allowlist)
+- **`trigger.schedule`** — interval (`every 1h`) or event subscription (`event:name`); persisted
+- **`trigger.fire`** — wakes subscribed children via `delegate`; skips overlap when child is busy
+- Host interval scheduler (60s tick) for standing agents
+
 ### Role transition gist (tier 0, #177)
 
 - **`SessionGist.tier0`** — lossless per-turn extract (user prompt + final outcome;
@@ -111,7 +119,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 | Area | Status | Reference |
 |------|--------|-----------|
-| Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Open (#135) | `design/11` |
+| Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Shipped (#135) | `design/11` |
 | Multi-level tree + parallel delegate fan-out | Open (#136) | `design/11` |
 | ContextManager (fast-tier summarization, retrieval, gist oracle) | Partial (#177 tier 0; #137) | `design/12` Phase E |
 | Oracle depth (verify-against-intent, corpus maintenance, INV detectors) | Open (#140–#142) | `design/13` |
@@ -140,11 +148,11 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 | Priority | Issue | Topic |
 |----------|-------|-------|
-| 1 | [#135](https://github.com/sourcepathlabsai/grokestrator/issues/135) | Orchestration MCP: `task.report`, `node.configure`, `trigger.*` |
-| 2 | [#136](https://github.com/sourcepathlabsai/grokestrator/issues/136) | Multi-level tree + parallel delegate fan-out |
-| 3 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
-| 4 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
-| 5 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
+| 1 | [#136](https://github.com/sourcepathlabsai/grokestrator/issues/136) | Multi-level tree + parallel delegate fan-out |
+| 2 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
+| 3 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
+| 4 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
+| 5 | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager tier 1 (gist summarization) |
 | — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140), [#137–#139](https://github.com/sourcepathlabsai/grokestrator/issues/137), [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Oracle detectors, runtime depth, infra |
 | — | [#135–#146](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 

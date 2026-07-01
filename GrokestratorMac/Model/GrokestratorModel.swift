@@ -60,6 +60,9 @@ final class GrokestratorModel {
     /// Scheduled triggers + task.report ledger (#135).
     let orchestrationTriggers = OrchestrationTriggerStore()
 
+    /// Background tick for interval-based `trigger.schedule` specs.
+    var triggerSchedulerTask: Task<Void, Never>?
+
     /// Embedded workflow DB for schema-validated task exchange (#133).
     let orchestrationDB = OrchestrationDatabaseImpl(
         fileURL: ConnectionStore.supportDir.appendingPathComponent("orchestration.db")
@@ -129,6 +132,8 @@ final class GrokestratorModel {
         // First-run: scaffold the host-local secrets file so it exists (with a
         // commented template) and the in-app brain editors can write keys into it.
         Secrets.ensureTemplateExists()
+        loadOrchestrationTriggersFromDisk()
+        startOrchestrationTriggerScheduler()
         // Start the host-local Orchestration MCP server (loopback). Runs
         // regardless of the remote-serving toggle so launched Nodes can delegate.
         let orchestrationMCP = self.orchestrationMCP

@@ -27,6 +27,26 @@ public final class DelegationRunStore {
         }
     }
 
+    /// Apply a child agent's `task.report` to its active delegation run, if any.
+    public func applyTaskReport(childID: UUID, status: String, result: String) {
+        guard let idx = runs.firstIndex(where: { $0.childID == childID && $0.isActive }) else { return }
+        let preview = String(result.prefix(200))
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "completed", "done", "success":
+            runs[idx].status = .completed
+            runs[idx].finishedAt = Date()
+            runs[idx].resultPreview = preview
+        case "failed", "error", "blocked":
+            runs[idx].status = .failed
+            runs[idx].finishedAt = Date()
+            runs[idx].resultPreview = preview
+        default:
+            runs[idx].resultPreview = preview
+        }
+        refreshOracleCounts(for: runs[idx].id)
+    }
+
     /// Runs parented under one orchestrator, newest first.
     public func runs(for parentID: UUID, includeFinished: Bool = true) -> [DelegationRun] {
         runs.filter { run in

@@ -407,12 +407,12 @@ public actor OrchestrationMCPServer {
     private static var nodeConfigureTool: [String: Any] {
         [
             "name": "node.configure",
-            "description": "Grant or scope a child agent's tool policy (allowlist, capability mode).",
+            "description": "Grant or scope a child agent's ToolPolicy (capability mode + optional tool-name allowlist).",
             "inputSchema": [
                 "type": "object",
                 "properties": [
                     "child": ["type": "string"],
-                    "policy": ["type": "object", "description": "ToolPolicy fields: allowedTools, deniedTools, capability."],
+                    "policy": ["type": "object", "description": "ToolPolicy JSON: { capability: readOnly|readWrite|execute, allowed?: [tool names] }."],
                 ],
                 "required": ["child", "policy"],
             ],
@@ -422,12 +422,12 @@ public actor OrchestrationMCPServer {
     private static var triggerScheduleTool: [String: Any] {
         [
             "name": "trigger.schedule",
-            "description": "Schedule a standing child agent to wake on a cron/interval spec.",
+            "description": "Schedule a standing child agent: interval (`every 30m`, `every 1h`) or event subscription (`event:pr-merged`).",
             "inputSchema": [
                 "type": "object",
                 "properties": [
                     "child": ["type": "string"],
-                    "when": ["type": "string", "description": "Cron or interval spec, e.g. 'every 1h' or '0 9 * * *'."],
+                    "when": ["type": "string", "description": "Interval: every Nm/Nh/Nd. Event: event:<name> (fired via trigger.fire)."],
                     "task": ["type": "string", "description": "Prompt template fired on each wake."],
                 ],
                 "required": ["child", "when", "task"],
