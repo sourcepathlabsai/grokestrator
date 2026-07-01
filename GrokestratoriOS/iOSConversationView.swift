@@ -86,6 +86,10 @@ struct iOSConversationView: View {
             // Live session subscription. `.task(id:)` auto-cancels on switch.
             conversation.startSubscription()
         }
+        .task(id: instance.id) {
+            conversation.loadCapabilities()
+            conversation.refreshUsage()
+        }
         .onChange(of: conversation.focusToken) { composerFocused = true }
         // Switching Connections should land on the newest content, not inherit
         // wherever the previous transcript was scrolled.
@@ -155,6 +159,8 @@ struct iOSConversationView: View {
             if !conversation.attachedFiles.isEmpty {
                 iOSAttachmentStrip(conversation: conversation)
             }
+
+            ComposerContextMeter(usage: conversation.usage, isStreaming: conversation.isStreaming)
 
             HStack(alignment: .bottom, spacing: 8) {
                 Button { showFilePicker = true } label: {

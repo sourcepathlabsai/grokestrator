@@ -137,6 +137,8 @@ struct ConversationView: View {
                 attachmentStrip
             }
 
+            ComposerContextMeter(usage: conversation.usage, isStreaming: conversation.isStreaming)
+
             HStack(alignment: .bottom, spacing: 8) {
                 // Backed by a real NSTextView so the prompt reflows at the
                 // composer's current width — both when the panel resizes it and for
