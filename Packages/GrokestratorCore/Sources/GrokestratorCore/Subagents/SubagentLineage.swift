@@ -36,10 +36,17 @@ public enum SubagentLineageReader {
     }
 
     public static func subagentsDirectory(workingDirectory: String, sessionID: String) -> URL {
+#if os(macOS)
         let home = FileManager.default.homeDirectoryForCurrentUser
         let cwdKey = encodedCWD(workingDirectory)
         return home
             .appendingPathComponent(".grok/sessions/\(cwdKey)/\(sessionID)/subagents", isDirectory: true)
+#else
+        // iOS (client-only) has no access to the Mac host's ~/.grok subagent lineage.
+        // Return a path that will cause contentsOfDirectory to fail → readEntries returns [].
+        return URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("grokestrator-no-subagent-lineage", isDirectory: true)
+#endif
     }
 
     /// Lists subagent entries for a parent session, newest directories first.

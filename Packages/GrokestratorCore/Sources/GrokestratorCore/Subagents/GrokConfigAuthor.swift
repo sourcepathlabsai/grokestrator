@@ -21,7 +21,13 @@ public enum GrokConfigScope: String, Sendable, CaseIterable, Identifiable {
             let cwd = (raw as NSString).expandingTildeInPath
             return URL(fileURLWithPath: cwd, isDirectory: true).appendingPathComponent(".grok", isDirectory: true)
         case .userDefaults:
+#if os(macOS)
             return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
+#else
+            // iOS client has no user home ~/.grok for harness config authoring.
+            // GrokConfig UI and writer are only exercised on macOS targets.
+            return FileManager.default.temporaryDirectory.appendingPathComponent(".grok", isDirectory: true)
+#endif
         }
     }
 }
