@@ -170,12 +170,13 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | Priority | Issue | Topic |
 |----------|-------|-------|
 | — | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight — **shipped** |
-| 1 | [#138](https://github.com/sourcepathlabsai/grokestrator/issues/138) | Evidence-driven tier escalation (Phase D) |
+| 1 | [#139](https://github.com/sourcepathlabsai/grokestrator/issues/139) | Onboard runtime: MLX / llama.cpp in-process |
+| — | [#138](https://github.com/sourcepathlabsai/grokestrator/issues/138) | Evidence-driven tier escalation — **won't implement** (closed) |
 | — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140) | External-comms detector — **shipped** |
 | — | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Verify-against-intent — **shipped** |
 | — | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Corpus maintenance — **shipped** |
 | — | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager — **shipped** |
-| — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140), [#137–#139](https://github.com/sourcepathlabsai/grokestrator/issues/137), [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Oracle detectors, runtime depth, infra |
+| — | [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Infra (headless GKSS, per-Connection MCP) |
 | — | [#135–#146](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 
 ---
@@ -203,4 +204,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — external-comms detector (#140). Supersedes prior 2026-07-01 snapshot.*
+*Last updated: 2026-07-01 — #138 closed (Phase D won't implement). Supersedes prior 2026-07-01 snapshot.*
