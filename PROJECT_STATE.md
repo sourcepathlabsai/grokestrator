@@ -21,7 +21,7 @@ across devices over Tailscale.
 | **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
 **Release:** v0.3.1-alpha (2026-07-01). Prior: v0.3.0-alpha (2026-06-30).  
-**Engineering:** 175+ merged PRs; Core tests: 62/62 passing.
+**Engineering:** 175+ merged PRs; Core tests: 66/66 passing.
 
 **Founder full-time** since 2026-06-05. Binding constraints: **sequencing, validation**, and
 doc/corpus accuracy (OODA Orient axis) — not capacity.
@@ -90,6 +90,14 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
   `HarnessTemplateEditorView` — Settings → Teams Harness section; grok-assisted
   agent/role/persona drafting (#175)
 
+### Role transition gist (tier 0, #177)
+
+- **`SessionGist.tier0`** — lossless per-turn extract (user prompt + final outcome;
+  tool noise collapsed; char budget) for working-context seeding
+- **Edit Role** default: restart Node + inject compact gist (not full transcript replay);
+  alternatives: re-prime only, fresh restart
+- Display transcript preserved; marker turn recorded on role change
+
 ### Design oracle (`design/13` runtime slices 1–3)
 
 - `design/oracle/invariants/` — three active invariants
@@ -105,7 +113,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 |------|--------|-----------|
 | Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Open (#135) | `design/11` |
 | Multi-level tree + parallel delegate fan-out | Open (#136) | `design/11` |
-| ContextManager (summarization, retrieval, gist oracle) | Open (#137) | `design/12` Phase E |
+| ContextManager (fast-tier summarization, retrieval, gist oracle) | Partial (#177 tier 0; #137) | `design/12` Phase E |
 | Oracle depth (verify-against-intent, corpus maintenance, INV detectors) | Open (#140–#142) | `design/13` |
 | Signed/notarized Mac + TestFlight | Roadmap (#143) | README |
 | Headless Linux GKSS server | Open (#144) | — |

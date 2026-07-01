@@ -3,9 +3,8 @@ import GrokestratorCore
 
 /// Sheet for editing a Node's role/system prompt — what makes it behave as
 /// Observe / Orient / Decide / Act, etc. The prompt is injected into the agent's
-/// prompt stream (grok `agent stdio` ignores `--system-prompt-override`), so it
-/// takes effect on the next turn. "Draft with grok" asks grok to write a first
-/// pass from the agent's name and its team.
+/// prompt stream (grok `agent stdio` ignores `--system-prompt-override`).
+/// Default save restarts the Node with a compact prior-context gist (issue #177).
 struct EditRoleView: View {
     @Bindable var model: GrokestratorModel
     let item: InstanceItem
@@ -14,6 +13,7 @@ struct EditRoleView: View {
     @State private var text: String = ""
     @State private var isDrafting = false
     @State private var loaded = false
+    @State private var saveMode: GrokestratorModel.RoleSaveMode = .restartWithGist
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,7 +43,14 @@ struct EditRoleView: View {
                         }
                     }
 
-                Text("Injected as a preamble on the agent's next turn. Leave empty for no role.")
+                Picker("Apply as", selection: $saveMode) {
+                    Text("Restart with compact context").tag(GrokestratorModel.RoleSaveMode.restartWithGist)
+                    Text("Re-prime only (no restart)").tag(GrokestratorModel.RoleSaveMode.reprimeOnly)
+                    Text("Fresh restart (no carry-forward)").tag(GrokestratorModel.RoleSaveMode.restartFresh)
+                }
+                .pickerStyle(.radioGroup)
+
+                Text(helpText)
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             .padding()
@@ -59,7 +66,7 @@ struct EditRoleView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    model.setRolePrompt(text, for: item)
+                    model.setRolePrompt(text, for: item, mode: saveMode)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -73,6 +80,17 @@ struct EditRoleView: View {
             guard !loaded else { return }
             loaded = true
             text = item.rolePrompt ?? ""
+        }
+    }
+
+    private var helpText: String {
+        switch saveMode {
+        case .restartWithGist:
+            return "Restarts the agent and injects a compact summary of prior outcomes — not the full transcript. Recommended when changing roles."
+        case .reprimeOnly:
+            return "Prepends the new role on the next turn only. The live session may still remember the old role."
+        case .restartFresh:
+            return "Restarts with an empty agent session. The UI transcript is kept; the agent starts with no prior context."
         }
     }
 

@@ -39,6 +39,10 @@ public actor GrokBuildConversation {
     /// (Slice 2: Orient-on-read — design/13, design/14). `nil` ⇒ no oracle block.
     private let orientationPreamble: String?
 
+    /// One-time compact prior-context block after a role transition restart. Injected
+    /// after orientation, before choicesInstruction. Consumed on first priming only.
+    private var sessionGistPreamble: String?
+
     /// Active broadcast subscribers (local Mac UI + every remote GKSC subscribed
     /// to this Connection). Each receives a `.snapshot` on join, then `.update`
     /// for every `ConversationUpdate` the conversation produces — regardless of
@@ -56,13 +60,14 @@ public actor GrokBuildConversation {
     discrete choices to pick.
     """
 
-    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil, orientationPreamble: String? = nil) {
+    public init(instanceID: UUID, sessionID: String, client: any AgentSession, persistenceURL: URL? = nil, rolePrompt: String? = nil, orientationPreamble: String? = nil, sessionGistPreamble: String? = nil) {
         self.instanceID = instanceID
         self.sessionID = sessionID
         self.client = client
         self.history = AgentConversationHistory(persistenceURL: persistenceURL)
         self.rolePrompt = rolePrompt
         self.orientationPreamble = orientationPreamble
+        self.sessionGistPreamble = sessionGistPreamble
     }
 
     /// Update the role/system prompt. Resets `primed` so the next turn re-injects
@@ -146,7 +151,18 @@ public actor GrokBuildConversation {
         pendingToolCalls.removeAll()
         pendingPermissions.removeAll()
         pendingQuestions.removeAll()
+        primed = false
+        sessionGistPreamble = nil
         for (_, cont) in subscribers { cont.yield(.snapshot([])) }
+    }
+
+    /// Record a visible transcript marker (e.g. role transition). Persists and
+    /// broadcasts a fresh snapshot to every subscriber.
+    public func appendMarkerTurn(_ prompt: String) async {
+        await history.appendCompletedTurn(userPrompt: prompt)
+        try? await history.save()
+        let turns = await history.turns
+        for (_, cont) in subscribers { cont.yield(.snapshot(turns)) }
     }
 
     /// Fans an update out to every broadcast subscriber. The `.turnComplete`
@@ -187,6 +203,10 @@ public actor GrokBuildConversation {
             var preamble = ""
             if let role = rolePrompt, !role.isEmpty { preamble += role + "\n\n" }
             if let orient = orientationPreamble, !orient.isEmpty { preamble += orient + "\n\n" }
+            if let gist = sessionGistPreamble, !gist.isEmpty {
+                preamble += gist + "\n\n"
+                sessionGistPreamble = nil
+            }
             preamble += Self.choicesInstruction
             wireText = "\(preamble)\n\n\(prompt)"
         }
