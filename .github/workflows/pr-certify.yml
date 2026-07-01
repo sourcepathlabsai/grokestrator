@@ -1,0 +1,28 @@
+name: PR Certification
+
+# Mandatory pre-merge gate: Core tests + Mac + iOS Simulator builds.
+# Mirrors scripts/certify-pr.sh so local and CI certification agree.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Install build tools
+        run: brew install xcodegen
+
+      - name: Certify PR
+        run: scripts/certify-pr.sh

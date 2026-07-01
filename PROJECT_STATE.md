@@ -21,7 +21,8 @@ across devices over Tailscale.
 | **GrokestratorCore** | Models, wire protocol, persistence, governance engine |
 
 **Release:** v0.3.3-alpha (2026-07-01). Prior: v0.3.2-alpha (2026-07-01).  
-**Engineering:** 175+ merged PRs; Core tests: 77/77 passing.
+**Engineering:** 175+ merged PRs; Core tests: 71/71 passing; PR certification
+(Core tests + Mac + iOS Simulator builds via `scripts/certify-pr.sh`).
 
 **Founder full-time** since 2026-06-05. Binding constraints: **sequencing, validation**, and
 doc/corpus accuracy (OODA Orient axis) — not capacity.
@@ -172,7 +173,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 - ACP + `ACPEvent` universal wire; coordination in app (`delegate` MCP)
 - Governance unit = `ProposedAction`; verb normalization at harness boundaries
 - File-based JSON persistence; per-Mac orchestration SQLite via `db.*` MCP (#133)
-- Every slice → PR → merge gate (`AGENTS.md` §4)
+- Every slice → certify (`scripts/certify-pr.sh`) → PR → merge gate (`AGENTS.md` §4)
 
 ---
 
@@ -188,4 +189,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — through PR #179 (#135) and #136 slice. Supersedes 2026-06-30 snapshot.*
+*Last updated: 2026-07-01 — iOS build fix + PR certification CI. Supersedes prior 2026-07-01 snapshot.*

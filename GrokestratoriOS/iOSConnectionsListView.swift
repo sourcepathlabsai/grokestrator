@@ -112,47 +112,13 @@ struct iOSConnectionsListView: View {
             return !ids.contains(p)
         }
         ForEach(roots) { root in
-            iOSTreeNode(instance: root, connections: connections, depth: 0)
+            iOSTreeNodeView(
+                instance: root,
+                connections: connections,
+                depth: 0,
+                collapsedNodes: $collapsedNodes
+            )
         }
-    }
-
-    @ViewBuilder
-    private func iOSTreeNode(instance: InstanceItem, connections: [InstanceItem], depth: Int) -> some View {
-        let children = connections.filter { $0.parentID == instance.id }
-        if instance.role == .orchestrator, !children.isEmpty {
-            DisclosureGroup(isExpanded: expansionBinding(instance.id)) {
-                ForEach(children) { child in
-                    iOSTreeNode(instance: child, connections: connections, depth: depth + 1)
-                }
-            } label: {
-                ConnectionRow(instance: instance)
-                    .tag(instance.id)
-                    .padding(.leading, CGFloat(depth) * 10)
-            }
-        } else if !children.isEmpty {
-            DisclosureGroup(isExpanded: expansionBinding(instance.id)) {
-                ForEach(children) { child in
-                    iOSTreeNode(instance: child, connections: connections, depth: depth + 1)
-                }
-            } label: {
-                ConnectionRow(instance: instance)
-                    .tag(instance.id)
-                    .padding(.leading, CGFloat(depth) * 10)
-            }
-        } else {
-            ConnectionRow(instance: instance)
-                .tag(instance.id)
-                .padding(.leading, CGFloat(depth) * 10)
-        }
-    }
-
-    private func expansionBinding(_ id: UUID) -> Binding<Bool> {
-        Binding(
-            get: { !collapsedNodes.contains(id) },
-            set: { open in
-                if open { collapsedNodes.remove(id) } else { collapsedNodes.insert(id) }
-            }
-        )
     }
 
     private func statusLabel(_ s: RemoteServerLink.LinkState) -> String {
@@ -185,7 +151,7 @@ struct iOSConnectionsListView: View {
     }
 }
 
-private struct ConnectionRow: View {
+struct ConnectionRow: View {
     let instance: InstanceItem
 
     var body: some View {

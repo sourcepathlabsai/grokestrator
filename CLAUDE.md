@@ -30,7 +30,8 @@ Standing duties (the Orient axis made operational):
 
 # Delivery (mandatory)
 
-See **AGENTS.md §4**. Every completed slice → **open a PR** → list fixed issues →
-**give the PR link** → **await merge** → do not start the next slice until merged.
+See **AGENTS.md §4**. Every completed slice → **`scripts/certify-pr.sh`** → **open a PR**
+→ list fixed issues → **give the PR link** → **await merge** → do not start the next
+slice until merged.
 When merge is reported → **comment on each fixed issue** (which PR, link) and **close**
 if still open. Warn the human if they ask for more work while a PR is still open.
