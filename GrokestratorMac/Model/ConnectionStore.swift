@@ -143,6 +143,26 @@ public enum ConnectionStore {
         try? data.write(to: tierMapURL, options: .atomic)
     }
 
+    // MARK: - Team template registry I/O
+
+    /// Host-local custom fleet team templates (machine config; gitignored).
+    public static var teamTemplatesURL: URL { supportDir.appendingPathComponent("team-templates.json") }
+
+    public static func loadTeamTemplates() -> TeamTemplateRegistry {
+        guard let data = try? Data(contentsOf: teamTemplatesURL),
+              let registry = try? JSONDecoder().decode(TeamTemplateRegistry.self, from: data) else {
+            return TeamTemplateRegistry()
+        }
+        return registry
+    }
+
+    public static func saveTeamTemplates(_ registry: TeamTemplateRegistry) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(registry) else { return }
+        try? data.write(to: teamTemplatesURL, options: .atomic)
+    }
+
     /// Permanently deletes a Connection's history directory. Caller is
     /// responsible for removing the registry entry separately.
     public static func deleteHistoryDirectory(for id: UUID) {
