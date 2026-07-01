@@ -107,13 +107,14 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 - **`trigger.fire`** — wakes subscribed children via `delegate`; skips overlap when child is busy
 - Host interval scheduler (60s tick) for standing agents
 
-### Role transition gist (tier 0, #177)
+### Context management — role transition (#177 tier 0, #137 tier 1)
 
-- **`SessionGist.tier0`** — lossless per-turn extract (user prompt + final outcome;
-  tool noise collapsed; char budget) for working-context seeding
-- **Edit Role** default: restart Node + inject compact gist (not full transcript replay);
-  alternatives: re-prime only, fresh restart
-- Display transcript preserved; marker turn recorded on role change
+- **`SessionGist.tier0`** — lossless per-turn extract when history fits (~12k budget)
+- **`ContextManager`** — budget ladder: tier 0 → tier 1 when over budget
+- **`SessionGist.tier1`** — deterministic bullet summary (requests, outcomes, tools)
+- **`FastTierSummarizer`** — optional fast-tier LLM compaction when host tier map
+  resolves `fast` to an OpenAI-compatible backend
+- **Edit Role** default: restart Node + inject compact gist; display transcript preserved
 
 ### Design oracle (`design/13` runtime slices 1–3)
 
@@ -130,7 +131,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 |------|--------|-----------|
 | Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Shipped (#135) | `design/11` |
 | Multi-level tree + parallel delegate fan-out | Shipped (#136) | `design/11` |
-| ContextManager (fast-tier summarization, retrieval, gist oracle) | Partial (#177 tier 0; #137) | `design/12` Phase E |
+| ContextManager (tier 1 summarization; retrieval + gist oracle remain) | Partial (#137 tier 1 ✅; retrieval open) | `design/12` Phase B′ |
 | Oracle depth (verify-against-intent, corpus maintenance, INV detectors) | Open (#140–#142) | `design/13` |
 | Signed/notarized Mac + TestFlight | Roadmap (#143) | README |
 | Headless Linux GKSS server | Open (#144) | — |
@@ -160,7 +161,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | 1 | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight |
 | 2 | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Oracle: verify-against-intent orientation |
 | 3 | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Oracle: agent-proposed corpus maintenance |
-| 4 | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager tier 1 (gist summarization) |
+| 4 | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager tier 1 — **shipped**; retrieval + gist oracle remain |
 | — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140), [#137–#139](https://github.com/sourcepathlabsai/grokestrator/issues/137), [#144](https://github.com/sourcepathlabsai/grokestrator/issues/144), [#146](https://github.com/sourcepathlabsai/grokestrator/issues/146) | Oracle detectors, runtime depth, infra |
 | — | [#135–#146](https://github.com/sourcepathlabsai/grokestrator/issues?q=is%3Aissue+milestone%3A%22Canonical+Backlog%22) | Full backlog |
 
@@ -189,4 +190,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — iOS build fix + PR certification CI. Supersedes prior 2026-07-01 snapshot.*
+*Last updated: 2026-07-01 — ContextManager tier 1 (#137). Supersedes prior 2026-07-01 snapshot.*

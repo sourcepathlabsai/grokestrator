@@ -162,7 +162,8 @@ public actor GrokBuildManager {
         } else {
             turns = ConnectionStore.loadHistoryTurns(for: id)
         }
-        return SessionGist.wirePreambleForTransition(from: turns)
+        let summarizer = FastTierSummarizer()
+        return await ContextManager.wirePreambleForTransition(from: turns, summarizer: summarizer)
     }
 
     private func consumePendingSessionGist(for id: UUID) -> String? {

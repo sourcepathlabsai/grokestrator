@@ -75,6 +75,68 @@ public enum SessionGist {
         return wirePreamble(from: body)
     }
 
+    /// Deterministic tier-1 compaction when tier-0 exceeds budget. Collapses turns
+    /// into a dense state summary (requests, outcomes, tool activity) without an LLM.
+    public static func tier1(from turns: [AgentTurn], budget: ContextBudget) -> String? {
+        guard !turns.isEmpty else { return nil }
+
+        struct TurnFacts {
+            var prompt: String
+            var outcome: String?
+            var toolCalls: Int
+        }
+
+        var facts: [TurnFacts] = []
+        var totalToolCalls = 0
+
+        for turn in turns {
+            let prompt = truncate(
+                turn.userPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
+                to: 220
+            )
+            let calls = turn.messages.filter { $0.role == .tool && $0.content.hasPrefix("Tool call:") }.count
+            totalToolCalls += calls
+            let outcome = outcome(for: turn).map { truncate($0, to: 320) }
+            guard !prompt.isEmpty || outcome != nil else { continue }
+            facts.append(TurnFacts(prompt: prompt, outcome: outcome, toolCalls: calls))
+        }
+
+        guard !facts.isEmpty else { return nil }
+
+        func render(_ slice: ArraySlice<TurnFacts>) -> String {
+            var lines: [String] = [
+                "[Prior session — \(turns.count) turn(s) summarized]",
+                "",
+            ]
+            let prompts = slice.map(\.prompt).filter { !$0.isEmpty }
+            if !prompts.isEmpty {
+                lines.append("Requests:")
+                lines.append(contentsOf: prompts.map { "• \($0)" })
+                lines.append("")
+            }
+            let outcomes = slice.compactMap(\.outcome)
+            if !outcomes.isEmpty {
+                lines.append("Outcomes:")
+                lines.append(contentsOf: outcomes.map { "• \($0)" })
+                lines.append("")
+            }
+            let toolTurns = slice.filter { $0.toolCalls > 0 }.count
+            if toolTurns > 0 {
+                let calls = slice.reduce(0) { $0 + $1.toolCalls }
+                lines.append("Tool activity: \(toolTurns) turn(s), \(calls) call(s)")
+            }
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var slice = facts[...]
+        var body = render(slice)
+        while body.count > budget.maxChars, slice.count > 1 {
+            slice = slice.dropFirst()
+            body = render(slice)
+        }
+        return truncate(body, to: budget.maxChars)
+    }
+
     /// Wrap a gist body for one-time injection into the agent preamble on role transition.
     public static func wirePreamble(from gistBody: String) -> String {
         """

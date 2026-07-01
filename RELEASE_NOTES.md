@@ -1,5 +1,18 @@
 # Grokestrator — Release Notes
 
+## v0.3.4-alpha — 2026-07-01
+
+### ContextManager tier 1 (#137)
+
+- **Budget ladder** — `ContextManager` escalates from tier-0 lossless extraction to tier-1
+  compaction when history exceeds the ~12k working-context budget.
+- **Fast-tier LLM summarization** — when the host tier map resolves `fast` to an
+  OpenAI-compatible backend, `FastTierSummarizer` compresses prior context via
+  `/chat/completions` before restart.
+- **Deterministic fallback** — `SessionGist.tier1` bullet summary (requests, outcomes,
+  tool activity) when no API fast tier is configured or the call fails.
+- **Edit Role** help text updated to describe the tier-0 / tier-1 behavior.
+
 ## v0.3.3-alpha — 2026-07-01
 
 ### Multi-level tree + parallel delegate (#136)
