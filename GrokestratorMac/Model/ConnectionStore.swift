@@ -163,6 +163,26 @@ public enum ConnectionStore {
         try? data.write(to: teamTemplatesURL, options: .atomic)
     }
 
+    // MARK: - Harness template registry I/O
+
+    /// Host-local custom ACP harness team templates (machine config; gitignored).
+    public static var harnessTemplatesURL: URL { supportDir.appendingPathComponent("harness-templates.json") }
+
+    public static func loadHarnessTemplates() -> HarnessTemplateRegistry {
+        guard let data = try? Data(contentsOf: harnessTemplatesURL),
+              let registry = try? JSONDecoder().decode(HarnessTemplateRegistry.self, from: data) else {
+            return HarnessTemplateRegistry()
+        }
+        return registry
+    }
+
+    public static func saveHarnessTemplates(_ registry: HarnessTemplateRegistry) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(registry) else { return }
+        try? data.write(to: harnessTemplatesURL, options: .atomic)
+    }
+
     /// Permanently deletes a Connection's history directory. Caller is
     /// responsible for removing the registry entry separately.
     public static func deleteHistoryDirectory(for id: UUID) {
