@@ -2,6 +2,17 @@
 
 ## v0.3.2-alpha — 2026-07-01
 
+### Orchestration MCP extensions (#135)
+
+- **`task.report`** — fleet child agents report progress or completion; active delegation
+  runs in the sidebar update live.
+- **`node.configure`** — orchestrators push `ToolPolicy` to a named child (capability +
+  optional tool allowlist).
+- **`trigger.schedule`** — standing agents on interval (`every 30m`, `every 1h`) or event
+  subscription (`event:pr-merged`); schedules persist across restarts.
+- **`trigger.fire`** — emit an event to wake subscribed children; skips when a child is
+  already mid-delegation.
+
 ### Role transition with compact context (#177)
 
 - **Edit Role → Restart with compact context (default).** Changing a Connection's role

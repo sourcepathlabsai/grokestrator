@@ -96,10 +96,10 @@ Tool surface (grown across phases):
 
 ```
 delegate(child, task, inputs)        → route task to a child Node; return its result
-task.report(status, result)          → an agent reports progress/result up
-node.configure(child, policy)        → grant/scope a child's tools + guardrails (allowlist, cwd, capability, budget)
-trigger.schedule(child, when, task)  → wake a child on a cron/event spec (standing agent)
-trigger.fire(event, payload)         → emit an event that may wake subscribed children
+task.report(status, result)          → an agent reports progress/result up ✅ (#135)
+node.configure(child, policy)        → grant/scope a child's tools + guardrails (allowlist, cwd, capability, budget) ✅ (#135)
+trigger.schedule(child, when, task)  → wake a child on interval (`every Nm/h/d`) or event (`event:name`) ✅ (#135)
+trigger.fire(event, payload)         → emit an event that may wake subscribed children ✅ (#135)
 db.createSchema(name, schema)        → orchestrator defines a task table (schema = data oracle)
 db.insert / db.query / db.update      → typed, schema-validated DB access
 oracle.register(target, check)        → attach an oracle (golden/invariant/shape/recon) to a cell/result

@@ -229,6 +229,30 @@ public enum ConnectionStore {
         try? data.write(to: harnessTemplatesURL, options: .atomic)
     }
 
+    // MARK: - Orchestration trigger registry I/O (#135)
+
+    public static var orchestrationTriggersURL: URL {
+        supportDir.appendingPathComponent("orchestration-triggers.json")
+    }
+
+    public static func loadOrchestrationTriggers() -> OrchestrationTriggerRegistry {
+        guard let data = try? Data(contentsOf: orchestrationTriggersURL) else {
+            return OrchestrationTriggerRegistry()
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(OrchestrationTriggerRegistry.self, from: data))
+            ?? OrchestrationTriggerRegistry()
+    }
+
+    public static func saveOrchestrationTriggers(_ registry: OrchestrationTriggerRegistry) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(registry) else { return }
+        try? data.write(to: orchestrationTriggersURL, options: .atomic)
+    }
+
     /// Permanently deletes a Connection's history directory. Caller is
     /// responsible for removing the registry entry separately.
     public static func deleteHistoryDirectory(for id: UUID) {
