@@ -115,6 +115,39 @@ struct GovernanceEngineTests {
         #expect(a.verb == "fs.list")
     }
 
+    @Test("external comms shell → escalate (recall/suspect)")
+    func externalCommsEscalates() {
+        let a = ProposedAction.fromAPITool(
+            name: "run_command",
+            arguments: ["command": "curl -X POST https://hooks.slack.com/services/T/B/X -d '{\"text\":\"hi\"}'"],
+            cwd: "/work", nodeName: nil, mcpServer: nil, mcpTool: nil)
+        let v = engine.evaluate(a)
+        #expect(v.outcome == .escalate)
+        #expect(v.findings.contains { $0.confidence == .suspect && $0.invariantID == "INV-external-comms-reviewed" })
+    }
+
+    @Test("ACP send-email permission (title only) → escalate")
+    func acpExternalCommsEscalates() {
+        let a = ProposedAction.fromACPPermission(
+            kind: nil, variant: nil, command: nil,
+            title: "Send email to team@example.com",
+            agentName: "Claude Code", cwd: "/work", nodeName: nil)
+        let v = engine.evaluate(a)
+        #expect(v.outcome == .escalate)
+        #expect(v.findings.contains { $0.invariantID == "INV-external-comms-reviewed" })
+    }
+
+    @Test("MCP comms tool → escalate")
+    func mcpCommsToolEscalates() {
+        let a = ProposedAction.fromAPITool(
+            name: "mcp__Email__send_message",
+            arguments: ["to": "user@example.com", "body": "Hello"],
+            cwd: "/work", nodeName: nil, mcpServer: "Email", mcpTool: "send_message")
+        let v = engine.evaluate(a)
+        #expect(v.outcome == .escalate)
+        #expect(v.findings.contains { $0.invariantID == "INV-external-comms-reviewed" })
+    }
+
     @Test("ACP path-escape goes UNDETECTED — the fidelity gap, pinned")
     func acpPathEscapeUndetected() {
         // grok's edit permission gives us a title, not a structured path. The precise

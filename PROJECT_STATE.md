@@ -118,7 +118,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 - **`GistOracle`** — anchor extraction, verification, pinned repair
 - **Edit Role** default: restart Node + inject certified compact gist
 
-### Design oracle (`design/13` runtime slices 1–5)
+### Design oracle (`design/13` runtime slices 1–6)
 
 - `design/oracle/invariants/` — three active invariants
 - Shadow → persist → orient-on-read → active enforcement
@@ -130,6 +130,9 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 - **Corpus maintenance** — agents propose oracle edits via `[[CORPUS_PROPOSAL]]`
   blocks or `oracle.propose` MCP; human review queue in Settings → Oracle; approve
   stages under `<project>/design/oracle/proposed/` (#142)
+- **External-comms detector** — `ExternalCommsDetector` recall-checks outbound email,
+  webhooks, and chat posts; portable `## Detect` rules in
+  `INV-external-comms-reviewed.md` (#140)
 
 ---
 
@@ -140,7 +143,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | Orchestration MCP extensions (`task.report`, `node.configure`, `trigger.*`) | Shipped (#135) | `design/11` |
 | Multi-level tree + parallel delegate fan-out | Shipped (#136) | `design/11` |
 | ContextManager (summarization, retrieval, gist oracle) | Shipped (#137) | `design/12` Phase B′ |
-| Oracle depth (external-comms detector, INV-specific detectors) | Open (#140) | `design/13` |
+| Oracle depth (INV-specific detectors beyond shipped set) | — | `design/13` |
 | Signed/notarized Mac + TestFlight | Shipped (#143) | `scripts/build-release.sh`, `.github/workflows/signed-release.yml` |
 | Headless Linux GKSS server | Open (#144) | — |
 | Per-Connection MCP server overrides | Open (#146) | — |
@@ -154,7 +157,7 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | `design/10` | "not implemented" | Rungs 0–2 ✅, rung 3 substantially ✅ |
 | `design/11` | "not started" | Phase 1–3 largely ✅ |
 | `design/12` | "not started" | Phases A–C, E, F ✅ |
-| `design/13` | "thesis only" | Runtime slices 1–5 ✅ |
+| `design/13` | "thesis only" | Runtime slices 1–6 ✅ |
 
 **This file** and `RELEASE_NOTES.md` are the operational truth for "where we are."
 
@@ -167,7 +170,8 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 | Priority | Issue | Topic |
 |----------|-------|-------|
 | — | [#143](https://github.com/sourcepathlabsai/grokestrator/issues/143) | Signed/notarized Mac + TestFlight — **shipped** |
-| 1 | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140) | Oracle: external-comms detector |
+| 1 | [#138](https://github.com/sourcepathlabsai/grokestrator/issues/138) | Evidence-driven tier escalation (Phase D) |
+| — | [#140](https://github.com/sourcepathlabsai/grokestrator/issues/140) | External-comms detector — **shipped** |
 | — | [#141](https://github.com/sourcepathlabsai/grokestrator/issues/141) | Verify-against-intent — **shipped** |
 | — | [#142](https://github.com/sourcepathlabsai/grokestrator/issues/142) | Corpus maintenance — **shipped** |
 | — | [#137](https://github.com/sourcepathlabsai/grokestrator/issues/137) | ContextManager — **shipped** |
@@ -199,4 +203,4 @@ Shipped architecture: **dual-path orchestration** (revised 2026-06-30, implement
 
 ---
 
-*Last updated: 2026-07-01 — verify-against-intent + corpus maintenance (#141, #142). Supersedes prior 2026-07-01 snapshot.*
+*Last updated: 2026-07-01 — external-comms detector (#140). Supersedes prior 2026-07-01 snapshot.*

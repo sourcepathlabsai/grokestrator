@@ -159,8 +159,7 @@ first shadow-mode slice landed (`GrokestratorCore/Governance/`, observe-only at 
 tool boundaries). Captures that the maintained low-level design oracle — model-portable
 orientation — is the project's core quality engine, possibly its core product. The
 immediate change it forces remains the tier-routing correction in `12`. Revised
-2026-06-30: slices 1–3 + ACP verb mapping (#153) shipped. 2026-07-01: slices 4–5
-landed — verify-against-intent shadow oracle (#141, `IntentOracle` +
-`intent-verdicts.jsonl`) and agent-proposed corpus maintenance (#142,
-`[[CORPUS_PROPOSAL]]` + `oracle.propose` MCP + human review queue). Open: #140
-external-comms detector. See `PROJECT_STATE.md`.*
+2026-06-30: slices 1–3 + ACP verb mapping (#153) shipped. 2026-07-01: slices 4–6
+landed — verify-against-intent (#141), corpus maintenance (#142), and
+`ExternalCommsDetector` recall checks for outbound email/chat/webhooks (#140).
+See `PROJECT_STATE.md`.*

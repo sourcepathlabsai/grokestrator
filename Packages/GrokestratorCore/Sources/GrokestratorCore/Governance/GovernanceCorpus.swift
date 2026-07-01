@@ -144,9 +144,9 @@ public extension Corpus {
             Invariant(id: "INV-external-comms-reviewed",
                       statement: "Actions that communicate externally (email, posting) must be human-reviewed before sending.",
                       rationale: "External communication is irreversible and speaks for the user — the canonical 'put it in front of a human' case.",
-                      detectorID: nil, severity: .high),   // grounding-only: no precise/recall detector yet; classification drives it
+                      detectorID: ExternalCommsDetector.detectorID, severity: .high),
         ]
-        let detectors: [any Detector] = [PathEscapeDetector(), DestructiveShellDetector()]
+        let detectors: [any Detector] = [PathEscapeDetector(), DestructiveShellDetector(), ExternalCommsDetector()]
         return Corpus(invariants: invariants, classifications: classifications, detectors: detectors)
     }
 }

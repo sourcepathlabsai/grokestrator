@@ -144,6 +144,12 @@ struct OracleLoaderTests {
         let rm = ProposedAction.fromAPITool(name: "run_command", arguments: ["command": "rm -rf /tmp/x"],
                                             cwd: root.path, nodeName: nil, mcpServer: nil, mcpTool: nil)
         #expect(engine.evaluate(rm).outcome == .escalate)   // caught by the in-repo oracle, not code
+        let email = ProposedAction.fromAPITool(
+            name: "run_command", arguments: ["command": "send email to team@example.com"],
+            cwd: root.path, nodeName: nil, mcpServer: nil, mcpTool: nil)
+        let emailVerdict = engine.evaluate(email)
+        #expect(emailVerdict.outcome == .escalate)
+        #expect(emailVerdict.findings.contains { $0.invariantID == "INV-external-comms-reviewed" })
     }
 
     // MARK: - Enforcement types (Slice 3)
