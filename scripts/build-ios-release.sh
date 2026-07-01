@@ -82,6 +82,9 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"
 }
 
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/apple-signing.sh"
+
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
@@ -91,11 +94,18 @@ cd "$REPO_ROOT"
 require_cmd xcodebuild
 require_cmd xcodegen
 
+# Materialize CI API key before upload.
+if [[ -n "${APP_STORE_CONNECT_API_KEY_BASE64:-}" ]]; then
+  export APP_STORE_CONNECT_API_KEY_PATH="$(apple_materialize_api_key)"
+fi
+apple_import_certificate_if_needed
+
 # Decide mode.
 SIGNED_MODE=0
 if [[ -n "${APPLE_TEAM_ID:-}"               \
    && -n "${APP_STORE_CONNECT_KEY_ID:-}"    \
-   && -n "${APP_STORE_CONNECT_ISSUER_ID:-}" ]]; then
+   && -n "${APP_STORE_CONNECT_ISSUER_ID:-}" ]] \
+   && apple_api_key_path >/dev/null 2>&1; then
   SIGNED_MODE=1
 fi
 
@@ -224,6 +234,15 @@ ok "Exported $IPA_PATH"
 # ---------------------------------------------------------------------------
 
 log "Uploading to App Store Connect (this may take several minutes)"
+
+API_KEY_PATH="$(apple_api_key_path)"
+# altool discovers keys only in ~/.appstoreconnect/private_keys (or similar).
+ASC_KEY_DIR="$HOME/.appstoreconnect/private_keys"
+mkdir -p "$ASC_KEY_DIR"
+if [[ "$API_KEY_PATH" != "$ASC_KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" ]]; then
+  cp "$API_KEY_PATH" "$ASC_KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+  chmod 600 "$ASC_KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+fi
 
 xcrun altool --upload-app \
   --type ios \

@@ -21,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"            # Swift 6 language mode, matching GrokestratorCore
-    MARKETING_VERSION: "0.2.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.3.5"
+    CURRENT_PROJECT_VERSION: "3"
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
 
 packages:
@@ -45,12 +45,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.sourcepathlabs.grokestrator.mac
         PRODUCT_NAME: Grokestrator
-        # Sign with a STABLE identity (Apple Development, paid team GS8DPK5RPN) instead
-        # of ad-hoc "Sign to Run Locally". macOS privacy (TCC) keys file-access grants to
-        # the code signature; an ad-hoc signature changes every build, so the OS re-prompts
-        # for the same folders on each relaunch. A stable cert makes the grant persist
-        # (allow file access once, and it sticks across rebuilds). For notarized DMG
-        # distribution later, switch this to "Developer ID Application".
+        # SourcePath Labs paid team (GS8DPK5RPN). Stable signing keeps macOS privacy
+        # (TCC) grants across rebuilds. Public DMGs use Developer ID via
+        # scripts/build-mac-release.sh; local Debug uses Apple Development.
         DEVELOPMENT_TEAM: GS8DPK5RPN
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "Apple Development"
@@ -82,10 +79,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.sourcepathlabs.grokestrator.ios
         PRODUCT_NAME: Grokestrator
-        # GS8DPK5RPN = Bob Stucky, now a PAID Apple Developer team — so this app
-        # can ship to TestFlight / the App Store (and install on device from Xcode ▶).
-        # Automatic signing has Xcode mint the Apple Distribution cert + App Store
-        # profile on first Archive → Distribute.
+        # SourcePath Labs team — TestFlight + App Store via scripts/build-ios-release.sh.
         DEVELOPMENT_TEAM: GS8DPK5RPN
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

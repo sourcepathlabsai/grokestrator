@@ -5,11 +5,10 @@
 #
 # Two modes, selected automatically by whether the signing env vars are set:
 #
-#   1. SIGNED (production): If APPLE_TEAM_ID + NOTARY_KEYCHAIN_PROFILE are
-#      set, the script signs with Developer ID Application, submits the
-#      DMG to Apple's notary service, waits for approval, and staples the
-#      ticket. The output DMG is fully Gatekeeper-acceptable and can be
-#      handed to end users.
+#   1. SIGNED (production): If APPLE_TEAM_ID + notarization credentials are
+#      set (NOTARY_KEYCHAIN_PROFILE locally, or App Store Connect API key for
+#      CI), the script signs with Developer ID Application, notarizes the DMG,
+#      staples the ticket, and produces a Gatekeeper-clean public release.
 #
 #   2. UNSIGNED (no cert yet): If the env vars are not set (or --unsigned is
 #      passed), the script ad-hoc-signs the .app and packages a real,
@@ -87,6 +86,9 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"
 }
 
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/apple-signing.sh"
+
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
@@ -99,10 +101,16 @@ require_cmd hdiutil
 require_cmd codesign
 require_cmd plutil
 
+# Materialize CI secrets before mode detection.
+if [[ -n "${APP_STORE_CONNECT_API_KEY_BASE64:-}" ]]; then
+  export APP_STORE_CONNECT_API_KEY_PATH="$(apple_materialize_api_key)"
+fi
+apple_import_certificate_if_needed
+
 # Decide mode. Signing creds trigger SIGNED; --unsigned forces UNSIGNED even
 # when creds are present (handy for a quick public build before notarization).
 SIGNED_MODE=0
-if [[ -n "${APPLE_TEAM_ID:-}" && -n "${NOTARY_KEYCHAIN_PROFILE:-}" && "$FORCE_UNSIGNED" -eq 0 ]]; then
+if [[ -n "${APPLE_TEAM_ID:-}" && "$FORCE_UNSIGNED" -eq 0 ]] && apple_notary_ready; then
   SIGNED_MODE=1
 fi
 
@@ -305,9 +313,7 @@ ok "DMG built: $DMG_PATH"
 
 if [[ "$SIGNED_MODE" -eq 1 ]]; then
   log "Submitting to Apple notary service (may take several minutes)"
-  xcrun notarytool submit "$DMG_PATH" \
-    --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" \
-    --wait
+  apple_notarize "$DMG_PATH"
   ok "Notarization accepted"
 
   log "Stapling notary ticket"
