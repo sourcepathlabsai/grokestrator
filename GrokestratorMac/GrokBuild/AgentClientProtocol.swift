@@ -37,6 +37,40 @@ public enum RPCID: Codable, Hashable, Sendable {
 public struct RPCErrorBody: Decodable, Sendable {
     public let code: Int
     public let message: String
+    /// grok wraps the actionable reason (billing/`spending-limit`, auth, upstream
+    /// HTTP status) in `error.data` while `message` stays a generic "Internal error"
+    /// and `code` a generic `-32603`. Verified against grok 0.2.72 wire logs.
+    public let data: RPCErrorData?
+
+    /// Best human-facing summary: prefer the nested detail when grok supplies one,
+    /// else fall back to the generic top-level message.
+    public var detail: String {
+        if let d = data?.message, !d.isEmpty { return d }
+        return message
+    }
+
+    /// A user-actionable one-liner for known grok failure classes — so a `-32603`
+    /// wrapping a billing/credits `403` reads as advice, not a cryptic code. Falls
+    /// back to the raw `detail` for everything else.
+    public var actionableSummary: String {
+        let d = detail.lowercased()
+        let isBilling = data?.httpStatus == 403
+            || d.contains("spending-limit")
+            || d.contains("out of credits")
+            || d.contains("grok subscription")
+        if isBilling {
+            return "Grok is out of credits or needs a subscription — add credits at "
+                 + "grok.com or upgrade to SuperGrok, then retry."
+        }
+        return detail
+    }
+}
+
+/// The `error.data` payload grok attaches to a wrapped `-32603` (verified 0.2.72).
+public struct RPCErrorData: Decodable, Sendable {
+    public let message: String?
+    public let httpStatus: Int?
+    enum CodingKeys: String, CodingKey { case message; case httpStatus = "http_status" }
 }
 
 /// Just enough of an incoming line to route it (response vs notification vs request).
